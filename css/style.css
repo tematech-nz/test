@@ -171,3 +171,17 @@ body.view-graph #canvas, body.view-graph #toolbar, body.view-graph #zoomctl, bod
 .hist-row.current { background: var(--accent); color: #fff; border-color: var(--accent); cursor: default; }
 .hist-row.current .hn { color: #fff; }
 .hist-row.future { opacity: .55; }
+
+.pk-side { margin: 8px 0; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; }
+.pk-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 4px; }
+.pk-head .sub { flex: 1; min-width: 8em; }
+.pk-tool { font-size: 11px; padding: 2px 8px; min-height: 0; }
+.pk-groups { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 4px; }
+.pk-group { font-size: 11px; padding: 1px 8px; border: 2px solid; border-radius: 10px; min-height: 0; }
+.pk-grid { display: flex; flex-wrap: wrap; gap: 3px; align-items: center; }
+.pk-gap { width: 10px; }
+.pk { position: relative; min-width: 34px; height: 28px; padding: 0 4px; font-size: 12px; background: #fff; border: 1.5px dashed #555; border-radius: 4px; min-height: 0; }
+.pk.on { background: #fff3c4; border: 2px solid #e65100; font-weight: 700; }
+.pk.busy, .pk:disabled { background: #e3e3e3; color: #999; border-color: #bbb; cursor: not-allowed; text-decoration: line-through; }
+.pk i { position: absolute; top: -7px; right: -5px; background: #e65100; color: #fff; font-size: 9px; font-style: normal; border-radius: 8px; min-width: 14px; line-height: 14px; text-align: center; }
+.pk-sum { margin: 8px 0; padding: 6px 8px; background: #eef6ff; border-radius: 6px; font-weight: 600; }

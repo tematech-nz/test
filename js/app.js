@@ -565,7 +565,7 @@
     eh.hidden = !none;
     if (none) {
       eh.innerHTML = '<div><strong>This map is empty.</strong></div><div>' + (isEdit() ? 'Use the toolbar to add groups, racks and equipment.' : 'Tap "Edit" to start documenting, or load the demo project.') + '</div>' +
-        (S.p.objects.length ? '' : '<button data-act="demo">Load demo project</button>');
+        (S.p.objects.length ? '' : '<button data-act="help">Quick start guide</button> <button data-act="demo">Load demo project</button>');
     }
     const th = $('toolHint');
     if (S.tool && S.tool.type === 'patch') { th.hidden = false; th.textContent = S.tool.pending ? 'Tap the destination port (Esc to cancel)' : 'Patch cable: tap the first port (W or Esc to stop)'; }
@@ -1210,20 +1210,90 @@
     commit('Delete ' + c.item.name, (p) => M.deleteContainerOrObject(p, sel.kind, sel.id, mode));
   }
 
+  /*
+   * New fixed link: pick the actual rear ports on both panels. Occupied ports are greyed out and cannot be picked, port groups are
+   * shown (click a group name to pick its free ports). Ports pair up in the order they were picked, so 1,3,5,7 on one panel can
+   * join 1-4 on the other. Without any pick it falls back to "N wires" (sequential or unmapped).
+   */
   async function newLink(prefA) {
     const panels = S.p.objects.filter((o) => M.isTermination(o));
     if (panels.length < 2) { toast('Create at least two patch panels (or a panel and a wall socket) first', true); return; }
     const po = panels.map((o) => [o.id, o.name + (o.type === 'socket' ? ' (wall socket)' : '')]);
-    const a = prefA || (S.sel && S.sel.kind === 'object' && panels.some((x) => x.id === S.sel.id) ? S.sel.id : panels[0].id);
-    const v = await formDlg('New fixed link', [
-      { k: 'a', label: 'Panel A', type: 'select', opts: po, v: a },
-      { k: 'b', label: 'Panel B', type: 'select', opts: po, v: (panels.find((x) => x.id !== a) || panels[1]).id },
-      { k: 'n', label: 'Wires', type: 'number', v: 24, min: 1, max: 288 },
-      { k: 'mapping', label: 'Mapping', type: 'select', opts: [['sequential', 'Sequential: next free rear port to next free rear port'], ['none', 'Leave unmapped (map each wire later)']], v: 'sequential', hint: 'Mappings are never assumed. Choose sequential only if the installation really is 1:1.' },
-      { k: 'cableType', label: 'Cable type', v: 'Cat6' }, { k: 'length', label: 'Length', v: '' }, { k: 'route', label: 'Route', v: '' }
-    ], 'Create link');
-    if (!v) return;
-    const r = commit('Create fixed link', (p) => M.addFixedLink(p, { aObjectId: v.a, bObjectId: v.b, wireCount: v.n, mapping: v.mapping, cableType: v.cableType, length: v.length, route: v.route }).id);
+    const a0 = prefA || (S.sel && S.sel.kind === 'object' && panels.some((x) => x.id === S.sel.id) ? S.sel.id : panels[0].id);
+    const st = { a: a0, b: (panels.find((x) => x.id !== a0) || panels[1]).id, sel: { a: [], b: [] }, last: { a: null, b: null }, n: 24, mapping: 'sequential', cableType: 'Cat6', length: '', route: '' };
+    const idx = M.buildIndex(S.p);
+    const objOf = (side) => idx.objects[st[side]];
+    const fmt = (o, ids) => ids.map((id) => idx.ports[id].label).join(', ');
+    function grid(side) {
+      const o = objOf(side), rear = M.rearPorts(o), size = M.effectiveSectionSize(o, rear.length) || rear.length;
+      let h = '', gl = '';
+      (o.portGroups || []).forEach((g) => {
+        const ids = g.portIds.filter((id) => idx.ports[id] && idx.ports[id].side === 'rear');
+        if (ids.length) gl += '<button class="pk-group" data-pickgroup="' + esc(g.id) + '" data-side="' + side + '" style="border-color:' + esc(g.color) + ';background:' + esc(g.color) + '33" title="Pick the free ports of this group">' + esc(g.name) + ' (' + ids.length + ')</button>';
+      });
+      rear.forEach((pt, i) => {
+        if (i && size && i % size === 0) h += '<span class="pk-gap"></span>';
+        const busy = !!idx.portUse[pt.id], pos = st.sel[side].indexOf(pt.id), g = M.portGroupOf(o, pt.id);
+        h += '<button class="pk' + (busy ? ' busy' : '') + (pos >= 0 ? ' on' : '') + '" data-pick="' + esc(pt.id) + '" data-side="' + side + '"' + (busy ? ' disabled title="Already has a fixed wire"' : '') +
+          (g ? ' style="border-bottom:4px solid ' + esc(g.color) + '" title="' + esc(g.name) + '"' : '') + '>' + esc(pt.label) + (pos >= 0 ? '<i>' + (pos + 1) + '</i>' : '') + '</button>';
+      });
+      const free = rear.filter((pt) => !idx.portUse[pt.id]).length;
+      return '<div class="pk-side"><div class="pk-head"><b>Panel ' + side.toUpperCase() + ': ' + esc(o.name) + '</b> <span class="sub">' + free + ' of ' + rear.length + ' rear ports free - ' + st.sel[side].length + ' picked</span> ' +
+        '<button class="pk-tool" data-pickall="' + side + '">All free</button><button class="pk-tool" data-pickclear="' + side + '">Clear</button></div>' +
+        (gl ? '<div class="pk-groups">' + gl + '</div>' : '') + '<div class="pk-grid">' + h + '</div></div>';
+    }
+    function problem() {
+      if (st.a === st.b) return 'Choose two different panels';
+      const na = st.sel.a.length, nb = st.sel.b.length;
+      if (na !== nb) return 'Pick the same number of ports on both panels (' + na + ' on A, ' + nb + ' on B)';
+      return null;
+    }
+    const v = await openDialog({
+      title: 'New fixed link',
+      render: () => {
+        const picked = st.sel.a.length || st.sel.b.length, pr = problem();
+        return {
+          body: fld('Panel A', '<select data-s="a">' + opts(po, st.a) + '</select>') + fld('Panel B', '<select data-s="b">' + opts(po, st.b) + '</select>') +
+            '<div class="sub" style="margin:6px 0">Click ports to pick them (Shift+click for a range, or click a group name). They are joined in the order picked: pick 1,3,5,7 on A and 1-4 on B to wire A1-B1, A3-B2, A5-B3, A7-B4. Greyed ports already have a wire.</div>' +
+            grid('a') + grid('b') +
+            (picked ? '<div class="pk-sum">' + (st.sel.a.length ? 'A: ' + esc(fmt(objOf('a'), st.sel.a)) : 'A: -') + ' &harr; ' + (st.sel.b.length ? 'B: ' + esc(fmt(objOf('b'), st.sel.b)) : 'B: -') + '</div>' + (pr ? '<div class="err-text">' + esc(pr) + '</div>' : '') :
+              fld('Wires', '<input type="number" data-s="n" value="' + st.n + '" min="1" max="288">') +
+              fld('Mapping', '<select data-s="mapping">' + opts([['sequential', 'Sequential: next free rear port to next free rear port'], ['none', 'Leave unmapped (map each wire later)']], st.mapping) + '</select><div class="sub">Nothing picked: create this many wires without choosing ports. Mappings are never assumed; choose sequential only if the installation really is 1:1.</div>')) +
+            fld('Cable type', '<input type="text" data-s="cableType" value="' + esc(st.cableType) + '">') + fld('Length', '<input type="text" data-s="length" value="' + esc(st.length) + '">') + fld('Route', '<input type="text" data-s="route" value="' + esc(st.route) + '">'),
+          buttons: [{ key: 'no', label: 'Cancel' }, { key: 'ok', label: picked ? 'Create link (' + st.sel.a.length + ' wire' + (st.sel.a.length === 1 ? '' : 's') + ')' : 'Create link', cls: 'primary', disabled: !!pr }]
+        };
+      },
+      onChange: (e, c) => {
+        const t = e.target, k = t.dataset.s; if (!k) return;
+        if (k === 'a' || k === 'b') { st[k] = t.value; st.sel[k] = []; st.last[k] = null; c.draw(); }
+        else st[k] = k === 'n' ? (parseInt(t.value, 10) || 1) : t.value;
+      },
+      onClick: (e, c) => {
+        const el = e.target.closest('[data-pick],[data-pickgroup],[data-pickall],[data-pickclear]');
+        if (!el) return;
+        const side = el.dataset.side || el.dataset.pickall || el.dataset.pickclear, rear = M.rearPorts(objOf(side)), free = (pt) => !idx.portUse[pt.id];
+        const sel = st.sel[side], add = (id) => { if (sel.indexOf(id) < 0) sel.push(id); };
+        if (el.dataset.pick) {
+          const id = el.dataset.pick, at = sel.indexOf(id);
+          if (e.shiftKey && st.last[side]) {
+            const i0 = rear.findIndex((x) => x.id === st.last[side]), i1 = rear.findIndex((x) => x.id === id);
+            rear.slice(Math.min(i0, i1), Math.max(i0, i1) + 1).filter(free).forEach((pt) => add(pt.id));
+          } else if (at >= 0) sel.splice(at, 1); else add(id);
+          st.last[side] = id;
+        } else if (el.dataset.pickgroup) {
+          const g = (objOf(side).portGroups || []).find((x) => x.id === el.dataset.pickgroup);
+          if (g) rear.filter((pt) => g.portIds.indexOf(pt.id) >= 0 && free(pt)).forEach((pt) => add(pt.id));
+        } else if (el.dataset.pickall) rear.filter(free).forEach((pt) => add(pt.id));
+        else if (el.dataset.pickclear) st.sel[side] = [];
+        c.draw();
+      },
+      onButton: (k, c) => c.close(k === 'ok' ? 'ok' : null)
+    });
+    if (v !== 'ok') return;
+    const picked = st.sel.a.length > 0;
+    const r = commit('Create fixed link', (p) => M.addFixedLink(p, picked
+      ? { aObjectId: st.a, bObjectId: st.b, pairs: st.sel.a.map((id, i) => [id, st.sel.b[i]]), cableType: st.cableType, length: st.length, route: st.route }
+      : { aObjectId: st.a, bObjectId: st.b, wireCount: st.n, mapping: st.mapping, cableType: st.cableType, length: st.length, route: st.route }).id);
     if (r && r !== true) select({ kind: 'link', id: r });
   }
 
@@ -1487,7 +1557,7 @@
     const choice = await openDialog({
       title: 'Project: ' + S.p.name, render: () => ({
         body: '<div class="btn-row" style="flex-direction:column;align-items:stretch">' +
-          [['rename', 'Rename project'], ['json', 'Export project as JSON (backup)'], ['import', 'Import JSON...'], ['svg', 'Export map as SVG'], ['png', 'Export map as PNG'], ['pdf', 'Export PDF (maps + connection table)'], ['table', 'Connection table...'], ['routes', 'Find shorter routes...'], ['grid', 'Align everything to the grid'], ['validate', 'Validate project'], ['demo', 'Load demo project...'], ['new', 'New empty project...'], ['help', 'Help']]
+          [['rename', 'Rename project'], ['json', 'Export project as JSON (backup)'], ['import', 'Import JSON...'], ['svg', 'Export map as SVG'], ['png', 'Export map as PNG'], ['pdf', 'Export PDF (maps + connection table)'], ['table', 'Connection table...'], ['routes', 'Find shorter routes...'], ['grid', 'Align everything to the grid'], ['validate', 'Validate project'], ['demo', 'Load demo project...'], ['new', 'New empty project...'], ['help', 'Quick start / help']]
             .map((b) => '<button data-btn="' + b[0] + '">' + b[1] + '</button>').join('') + '</div><p class="sub">Browser autosave is a convenience only. Export a JSON file to back up your work.</p>',
         buttons: [{ key: 'x', label: 'Close' }]
       }), onButton: (k, c) => c.close(k)
@@ -1510,17 +1580,41 @@
     const n = S.issues.filter((i) => i.severity !== 'info').length;
     toast(n ? n + ' problem(s) found' : 'No errors or warnings');
   }
+  /* Quick start guide: File > Quick start / Help, and once automatically on the first visit with an empty project */
+  const KEY_QS = 'netmap.quickstart.seen';
   function showHelp() {
-    openDialog({
-      title: 'How NetMap works', render: () => ({
-        body: '<p><b>View mode</b> is read-only: browse, search, inspect ports and trace connections. <b>Edit</b> unlocks editing; moving anything never changes cabling.</p>' +
-          '<p><b>Fixed links</b> are installed cable runs between patch panels. Each has numbered wires with explicit mappings; change them only with "Edit installed wiring".</p>' +
-          '<p><b>Patch cables</b> are removable leads between two ports. Press <b>W</b> (or use the "Patch cable tool") and click two ports; with a port selected, W draws a single cable from it and leaves the new cable selected so you can set its colour.</p>' +
-          '<p><b>Trace</b> follows only documented connections: patch cables, fixed wires and internal panel mappings. Proximity, groups and shared switches imply nothing.</p>' +
-          '<p>Autosave goes to this browser only. Use File -> Export JSON for real backups.</p>',
-        buttons: [{ key: 'x', label: 'Close', cls: 'primary' }]
-      }), onButton: (k, c) => c.close(null)
-    });
+    try { localStorage.setItem(KEY_QS, '1'); } catch (_) { /* ignore */ }
+    const li = (t) => '<li>' + t + '</li>';
+    const body =
+      '<p>NetMap documents <b>what is physically cabled to what</b>: racks, patch panels, switches, routers, wall sockets and the cables between them. Everything stays in your browser (no server); export JSON for real backups.</p>' +
+      '<h3>1. Look around (view mode)</h3><ul>' +
+      li('<b>Navigation</b> (top left) lists maps and equipment; the search box finds ports, cables and devices by number, label, IP or name.') +
+      li('Click a port, cable or device to see its details. <b>Trace</b> follows the complete path across patch panels, fixed links and even <b>across maps</b>.') +
+      li('<b>Graph</b> shows how devices interconnect and what can reach what (through switches, routers, port isolation).') + '</ul>' +
+      '<h3>2. Build it (press Edit)</h3><ul>' +
+      li('Use the toolbar to add a <b>Group</b> (room, building), <b>Rack</b>, <b>Patch panel</b>, <b>Switch</b>, <b>Router</b>, <b>Wall socket</b>, <b>Generic device</b> (PC, camera, AP...) or <b>Internet</b>. The new item sticks to the pointer: click to drop it, <b>Ctrl+click</b> for several. Drop equipment into a rack or group to put it inside.') +
+      li('<b>Ctrl+C / Ctrl+V</b> (or "Copy / duplicate") copies an item with its settings, named "... (Copy N)"; cables and IPs are not copied.') +
+      li('Panels, switches and routers have sections, uplinks, rows, "full width", folding (click the <b>^</b> on a strip). Change them in the details panel.') + '</ul>' +
+      '<h3>3. Connect it</h3><ul>' +
+      li('<b>Patch cable</b> (removable lead between two ports): press <b>W</b>, click two ports. With a port selected, W draws one cable from it.') +
+      li('<b>Fixed link</b> (installed wiring between two patch panels or wall sockets): toolbar "New fixed link" - pick the free rear ports on both panels, in any pattern (1,3,5,7 to 1-4). <b>The two panels can be on different maps</b>: a link joins the equipment, not the drawing, so a panel in the server room can be wired to a panel in an office on another map. Use <b>"Add existing here..."</b> (toolbar) to show the same panel on a second map.') +
+      li('Panels map front N to rear N by default ("Map front N <-> rear N"); otherwise add internal mappings per port.') +
+      li('Name sets of ports with <b>port groups</b> (Ctrl+click ports, press <b>G</b>), e.g. "to rack office"; mark ports as occupied by unmodelled equipment with a <b>Plugged-in device</b> (e.g. Cameras x16).') + '</ul>' +
+      '<h3>4. Check and share</h3><ul>' +
+      li('<b>Network colours and IP addresses</b> on routers and devices: NetMap warns when different subnets are joined by mistake.') +
+      li('File menu: <b>Validate project</b>, <b>Find shorter routes</b>, connection table, export SVG / PNG / PDF, import / export JSON, align to grid. <b>History</b> (edit mode) lets you step back or forward to any change.') +
+      li('The page warns before you leave with changes that were never exported, and tells you when a new version of NetMap is available.') + '</ul>' +
+      '<h3>Shortcuts</h3><table class="t"><tr><td><b>W</b></td><td>patch cable tool / cable from selected port</td><td><b>Ctrl+Z / Y</b></td><td>undo / redo</td></tr>' +
+      '<tr><td><b>Ctrl+C / V</b></td><td>copy / paste item</td><td><b>G</b></td><td>name the Ctrl+clicked ports as a group</td></tr>' +
+      '<tr><td><b>Ctrl+click</b></td><td>place several / pick several ports</td><td><b>Esc</b></td><td>cancel the current action</td></tr>' +
+      '<tr><td><b>Delete</b></td><td>delete selected item</td><td><b>Shift+click</b></td><td>port range in the fixed link picker</td></tr></table>' +
+      '<p class="sub">Trace follows only documented connections: patch cables, fixed wires and internal panel mappings. Proximity, groups and shared switches imply nothing. Reopen this guide any time: File &gt; Quick start / help.</p>';
+    return openDialog({
+      title: 'NetMap quick start', render: () => ({
+        body: body,
+        buttons: [{ key: 'demo', label: 'Load demo project' }, { key: 'x', label: 'Got it', cls: 'primary' }]
+      }), onButton: (k, c) => c.close(k)
+    }).then(async (k) => { if (k === 'demo' && (!S.p.objects.length || await confirmDlg('Load demo project', 'Replace the current project with the demo? Export a backup first if you need the current one.', 'Load demo', true))) loadProject(B.buildDemoProject()); });
   }
 
   /* ---------------------------------------------------------------- wiring up */
@@ -1683,6 +1777,8 @@
     renderAll();
     if (S.p.placements.some((q) => q.mapId === S.mapId)) { const v = vpState(); if (v.zoom === 1 && v.x === 0 && v.y === 0) fitMap(); }
     S.savedAt = new Date(); setStatus(); renderUpdate();
+    // first visit with an empty project: show the quick start once (not under automated browsers)
+    try { if (!navigator.webdriver && !localStorage.getItem(KEY_QS) && !S.p.objects.length) setTimeout(showHelp, 300); } catch (_) { /* ignore */ }
     setTimeout(checkVersion, 3000);
     NM.app.ready = true;
   }

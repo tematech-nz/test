@@ -38,7 +38,7 @@ const ok = (m) => console.log('  ok   ' + m);
   });
 
   await step('load demo, view mode shows groups, racks, cables', async () => {
-    await page.click('#emptyHint button');
+    await page.click('#emptyHint button[data-act="demo"]');
     await page.waitForSelector('#vp [data-kind="object"]');
     assert.ok((await page.locator('#vp [data-kind="port"]').count()) > 40);
     assert.ok(await page.locator('#vp path[stroke-dasharray="7 5"]').count() >= 1, 'fixed link drawn');
@@ -167,6 +167,16 @@ const ok = (m) => console.log('  ok   ' + m);
     const txt = await page.innerText('#dlg');
     assert.ok(/Shorter routes \(\d+\)/.test(txt), txt.slice(0, 120));
     await page.click('#dlg button[data-btn="x"]');
+  });
+
+  await step('quick start guide opens from the File menu and mentions fixed links across maps', async () => {
+    await page.click('#btnFile');
+    await page.click('#dlg button[data-btn="help"]');
+    await page.waitForSelector('#dlg .dh');
+    const txt = await page.innerText('#dlg');
+    assert.ok(/quick start/i.test(txt) && /different maps/i.test(txt) && /Shortcuts/i.test(txt), txt.slice(0, 100));
+    await page.click('#dlg button[data-btn="x"]');
+    assert.strictEqual(await page.evaluate(() => localStorage.getItem('netmap.quickstart.seen')), '1');
   });
 
   await step('hidden navigation stays hidden when clicking the map or changing mode', async () => {
@@ -743,11 +753,11 @@ const ok = (m) => console.log('  ok   ' + m);
       B.addObjectPlaced(p, mid, { type: 'socket', name: 'WS-L', portCount: 2 }, 5200, 300);
     }));
     await page.click('#toolbar button[data-act="newLink"]');
-    const opts = await page.$$eval('#dlg select[name="a"] option', (os) => os.map(o => o.textContent));
+    const opts = await page.$$eval('#dlg select[data-s="a"] option', (os) => os.map(o => o.textContent));
     assert.ok(opts.some(o => /WS-L \(wall socket\)/.test(o)), opts.join('|'));
-    await page.selectOption('#dlg select[name="a"]', { label: 'PP-L' });
-    await page.selectOption('#dlg select[name="b"]', { label: 'WS-L (wall socket)' });
-    await page.fill('#dlg input[name="n"]', '2');
+    await page.selectOption('#dlg select[data-s="a"]', { label: 'PP-L' });
+    await page.selectOption('#dlg select[data-s="b"]', { label: 'WS-L (wall socket)' });
+    await page.fill('#dlg input[data-s="n"]', '2'); await page.dispatchEvent('#dlg input[data-s="n"]', 'change');
     await page.click('#dlg button[data-btn="ok"]');
     await page.waitForTimeout(150);
     const link = await page.evaluate(() => { const S = NetMap.app.S, l = S.p.fixedLinks[S.p.fixedLinks.length - 1], idx = NetMap.model.buildIndex(S.p); return { n: l.wires.length, b: idx.objects[l.bObjectId].name, side: idx.ports[l.wires[0].bPortId].side }; });
@@ -756,6 +766,36 @@ const ok = (m) => console.log('  ok   ' + m);
     await page.click('#btnUndo'); await page.click('#btnUndo');
   });
 
+
+  await step('new fixed link: pick ports on both panels (1,3,5,7 to 1-4), occupied ports are greyed out, groups are shown', async () => {
+    await page.evaluate(() => NetMap.app.api.commit('pick test', (p) => {
+      const B = NetMap.builder, M = NetMap.model, mid = p.maps[0].id;
+      const a = B.addObjectPlaced(p, mid, { type: 'patchpanel', name: 'PK-A', portCount: 8, straight: true }, 5600, 40);
+      B.addObjectPlaced(p, mid, { type: 'patchpanel', name: 'PK-B', portCount: 8, straight: true }, 5600, 300);
+      M.addPortGroup(p, a.id, { name: 'to office', color: '#2ca02c', portsText: '1-2', side: 'rear' });
+    }));
+    await page.click('#toolbar button[data-act="newLink"]');
+    await page.selectOption('#dlg select[data-s="a"]', { label: 'PK-A' });
+    await page.selectOption('#dlg select[data-s="b"]', { label: 'PK-B' });
+    assert.ok(await page.isVisible('#dlg .pk-group'), 'port groups are shown');
+    const pick = (side, label, shift) => page.locator('#dlg .pk[data-side="' + side + '"]').filter({ hasText: new RegExp('^' + label + '$') }).click({ modifiers: shift ? ['Shift'] : [] });
+    for (const l of ['1', '3', '5', '7']) await pick('a', l);
+    await pick('b', '1'); await pick('b', '4', true);
+    assert.ok(/A: 1, 3, 5, 7/.test(await page.innerText('#dlg .pk-sum')) && /B: 1, 2, 3, 4/.test(await page.innerText('#dlg .pk-sum')), await page.innerText('#dlg .pk-sum'));
+    await page.click('#dlg button[data-btn="ok"]');
+    await page.waitForTimeout(150);
+    const pairs = await page.evaluate(() => { const S = NetMap.app.S, l = S.p.fixedLinks[S.p.fixedLinks.length - 1], idx = NetMap.model.buildIndex(S.p); return l.wires.map((w) => idx.ports[w.aPortId].label + '-' + idx.ports[w.bPortId].label); });
+    assert.deepStrictEqual(pairs, ['1-1', '3-2', '5-3', '7-4']);
+    await page.click('#toolbar button[data-act="newLink"]');
+    await page.selectOption('#dlg select[data-s="a"]', { label: 'PK-A' });
+    await page.selectOption('#dlg select[data-s="b"]', { label: 'PK-B' });
+    assert.strictEqual(await page.locator('#dlg .pk[data-side="a"]:disabled').count(), 4, 'occupied ports cannot be picked');
+    await page.click('#dlg .pk[data-side="a"]:disabled', { force: true }).catch(() => {});
+    await page.locator('#dlg .pk[data-side="a"]').filter({ hasText: /^2$/ }).click();
+    assert.ok(await page.isDisabled('#dlg button[data-btn="ok"]'), 'unequal counts block creation');
+    await page.click('#dlg button[data-btn="no"]');
+    await page.click('#btnUndo');
+  });
 
   await step('W hotkey: one-shot wire from the selected port keeps the new cable selected; plain W toggles the repeating tool', async () => {
     const ids = await page.evaluate(() => {
