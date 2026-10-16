@@ -252,5 +252,40 @@ test('14. PDF writer produces a structurally valid file', () => {
   entries.forEach((e, i) => assert.ok(s.slice(parseInt(e, 10)).startsWith((i + 1) + ' 0 obj')));
 });
 
+console.log('Port groups and panel layout');
+test('fixed link from an explicit port group (non-contiguous source, contiguous target)', () => {
+  const p = B.buildDemoProject();
+  const a = byName(p, 'PP-Standalone'), b = M.addObject(p, { type: 'patchpanel', name: 'PP-C', portCount: 15 });
+  const rear = (o, n) => port(o, n, 'rear').id;
+  const l = M.addFixedLink(p, { aObjectId: a.id, bObjectId: b.id, pairs: [[rear(a, 3), rear(b, 10)], [rear(a, 5), rear(b, 11)], [rear(a, 6), rear(b, 12)]] });
+  assert.strictEqual(l.wires.length, 3);
+  assert.strictEqual(l.wires[1].aPortId, rear(a, 5));
+  assert.strictEqual(l.wires[2].bPortId, rear(b, 12));
+  assert.throws(() => M.addFixedLink(p, { aObjectId: a.id, bObjectId: b.id, pairs: [[rear(a, 3), rear(b, 10)]] }), /occupied/);
+  assert.throws(() => M.addFixedLink(p, { aObjectId: a.id, bObjectId: b.id, pairs: [[port(a, 1).id, rear(b, 1)]] }), /rear/);
+  assert.ok(M.validateProject(p).every(i => i.severity !== 'error'));
+});
+test('any port count works, e.g. a 15-port panel', () => {
+  const p = M.createProject('x');
+  const o = M.addObject(p, { type: 'patchpanel', name: 'Custom', portCount: 15, straight: true });
+  assert.strictEqual(o.ports.length, 30);
+  assert.strictEqual(p.internalMappings.length, 15);
+  const sz = NM.layout.defaultSize(o);
+  const lay = NM.layout.computeLayout(o, sz.w, sz.h, {});
+  assert.strictEqual(Object.keys(lay.ports).length, 30);
+  assert.strictEqual(lay.sections.length, 2);
+});
+test('collapsing a panel section shrinks it and anchors cables to the strip', () => {
+  const p = B.buildDemoProject();
+  const pp = byName(p, 'PP-A'), pl = p.placements.find(x => x.refId === pp.id);
+  const full = R.renderMap(p, p.maps[0].id, {});
+  const coll = R.renderMap(p, p.maps[0].id, { collapsed: { [pl.id]: { rear: true } } });
+  const rp = port(pp, 12, 'rear').id;
+  assert.ok(coll.portGeo[rp].hidden && !full.portGeo[rp].hidden);
+  assert.ok(coll.content.length < full.content.length);
+  assert.ok(R.svgDocument(p, p.maps[0].id).indexOf('data-toggle') < 0, 'exports are always expanded');
+  assert.ok(full.content.indexOf('data-toggle="rear"') > 0 && full.content.indexOf('REAR (24)') > 0);
+});
+
 console.log('\n' + passed + ' passed, ' + failed + ' failed');
 process.exit(failed ? 1 : 0);

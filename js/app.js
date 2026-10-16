@@ -4,12 +4,13 @@
   const NM = window.NetMap, M = NM.model, L = NM.layout, T = NM.trace, R = NM.render, X = NM.exporters, B = NM.builder;
   const $ = (id) => document.getElementById(id);
   const esc = R.esc;
-  const KEY = 'netmap.autosave.v1', KEY_EXPORT = 'netmap.lastExport';
+  const KEY = 'netmap.autosave.v1', KEY_EXPORT = 'netmap.lastExport', KEY_COLL = 'netmap.collapsed.v1';
 
   const S = {
     p: null, mapId: null, mode: 'view', sel: null, trace: null, tool: null,
     undo: [], redo: [], unsaved: false, saveErr: null, savedAt: null, lastExport: null,
-    drag: null, geo: null, query: '', showIssues: false, issues: []
+    drag: null, geo: null, query: '', showIssues: false, issues: [],
+    collapsed: {}, pgroup: null, hoverPort: null, preview: null
   };
   NM.app = { S: S, M: M }; // exposed for tests
 
@@ -53,6 +54,16 @@
     } catch (e) { return null; }
   }
 
+  /* collapsed patch-panel sections are view state: kept in this browser, never in the project file */
+  function loadCollapsed() { try { S.collapsed = JSON.parse(localStorage.getItem(KEY_COLL) || '{}') || {}; } catch (e) { S.collapsed = {}; } }
+  function toggleCollapse(plId, side) {
+    const c = S.collapsed[plId] = S.collapsed[plId] || {};
+    c[side] = !c[side];
+    if (!c.front && !c.rear) delete S.collapsed[plId];
+    try { localStorage.setItem(KEY_COLL, JSON.stringify(S.collapsed)); } catch (e) { /* ignore */ }
+    renderCanvas();
+  }
+
   /* ---------------------------------------------------------------- store */
   function commit(label, fn) {
     const snap = JSON.stringify(S.p);
@@ -84,6 +95,7 @@
   function afterChange() {
     if (!S.p.maps.some((m) => m.id === S.mapId)) S.mapId = S.p.maps[0].id;
     if (!selExists()) S.sel = null;
+    if (S.pgroup && !M.buildIndex(S.p).objects[S.pgroup.objId]) clearPgroup();
     if (S.trace) {
       const t = S.trace.target;
       const idx = M.buildIndex(S.p);
@@ -154,7 +166,7 @@
     closeLeft();
   }
   function switchMap(id, keepSel) {
-    S.mapId = id; if (!keepSel) { S.sel = null; }
+    S.mapId = id; clearPgroup(); if (!keepSel) { S.sel = null; }
     renderAll();
     const v = vpState();
     if (v.zoom === 1 && v.x === 0 && v.y === 0 && S.p.placements.some((p) => p.mapId === id)) fitMap();
@@ -169,8 +181,62 @@
   function setTool(t) { S.tool = t; renderAll(); }
   function cancelTool() { if (S.tool) { S.tool = null; renderAll(); } }
 
-  function handleTap(target) {
+  function clearPgroup() { S.pgroup = null; S.hoverPort = null; S.preview = null; }
+
+  /* Ctrl+click builds a group of free rear ports on one patch panel (Shift extends a range) */
+  function pickGroupPort(id, shift) {
+    const idx = M.buildIndex(S.p), pt = idx.ports[id], o = idx.portObj[id];
+    if (!o || o.type !== 'patchpanel' || pt.side !== 'rear') { toast('Ctrl+click rear ports of a patch panel to group them for a fixed link', true); return; }
+    if (idx.portUse[id]) { toast('That port already has a fixed wire', true); return; }
+    if (!S.pgroup || S.pgroup.objId !== o.id) S.pgroup = { objId: o.id, ids: [], last: null };
+    const rear = M.rearPorts(o), g = S.pgroup;
+    let add = [id];
+    if (shift && g.last) {
+      const a = rear.findIndex((x) => x.id === g.last), b = rear.findIndex((x) => x.id === id);
+      add = rear.slice(Math.min(a, b), Math.max(a, b) + 1).filter((x) => !idx.portUse[x.id]).map((x) => x.id);
+    }
+    if (!shift && g.ids.indexOf(id) >= 0) g.ids = g.ids.filter((x) => x !== id);
+    else add.forEach((x) => { if (g.ids.indexOf(x) < 0) g.ids.push(x); });
+    g.ids.sort((x, y) => rear.findIndex((r) => r.id === x) - rear.findIndex((r) => r.id === y));
+    g.last = id;
+    if (!g.ids.length) clearPgroup();
+    S.hoverPort = null; S.preview = null;
+    renderAll();
+  }
+
+  /* the same number of rear ports on another panel, starting at the hovered port */
+  function previewFor(hoverId) {
+    const g = S.pgroup, idx = M.buildIndex(S.p), o = idx.portObj[hoverId], pt = idx.ports[hoverId];
+    if (!g || !o || o.type !== 'patchpanel' || pt.side !== 'rear' || o.id === g.objId) return null;
+    const rear = M.rearPorts(o), start = rear.findIndex((x) => x.id === hoverId), n = g.ids.length;
+    const ids = rear.slice(start, start + n).map((x) => x.id);
+    let ok = true, text = idx.objects[g.objId].name + ' -> ' + o.name + ': ' + n + ' wire(s), rear ' + rear[start].label + (n > 1 ? '..' + rear[Math.min(start + n, rear.length) - 1].label : '');
+    if (ids.length < n) { ok = false; text = 'Not enough ports on ' + o.name + ' after rear ' + rear[start].label + ' (need ' + n + ')'; }
+    else if (ids.some((x) => idx.portUse[x])) { ok = false; text = 'Some target ports on ' + o.name + ' are already occupied'; }
+    return { ids: ids, ok: ok, text: text, objId: o.id };
+  }
+  function createLinkFromGroup() {
+    const pv = S.preview, g = S.pgroup;
+    if (!pv || !pv.ok) { toast(pv ? pv.text : 'Hover the ports of another patch panel first', true); return; }
+    const pairs = g.ids.map((x, i) => [x, pv.ids[i]]);
+    clearPgroup();
+    const r = commit('Create fixed link', (p) => M.addFixedLink(p, { aObjectId: g.objId, bObjectId: pv.objId, pairs: pairs }).id);
+    if (r && r !== true) { toast('Created fixed link - edit its properties on the right'); select({ kind: 'link', id: r }); }
+  }
+
+  function handleTap(target, ev) {
+    const tg = target.closest ? target.closest('[data-toggle]') : null;
+    if (tg) { toggleCollapse(tg.dataset.pl, tg.dataset.toggle); return; }
     const el = target.closest ? target.closest('[data-kind]') : null;
+    if (isEdit() && !S.tool && ev && (ev.ctrlKey || ev.metaKey) && el && el.dataset.kind === 'port') { pickGroupPort(el.dataset.id, ev.shiftKey); return; }
+    if (S.pgroup) {
+      if (el && el.dataset.kind === 'port' && el.dataset.id !== undefined) {
+        const pv = previewFor(el.dataset.id);
+        if (pv) { S.preview = pv; createLinkFromGroup(); return; }
+      }
+      clearPgroup(); renderAll();
+      if (!el) return;
+    }
     const kind = el && el.dataset.kind, id = el && el.dataset.id;
     if (S.tool && S.tool.type === 'patch') {
       if (kind !== 'port') { if (!el) cancelTool(); else select({ kind: kind, id: id }); return; }
@@ -225,6 +291,12 @@
       gesture = { x: e.clientX, y: e.clientY, vx: vpState().x, vy: vpState().y, target: e.target, moved: false };
     });
     cv.addEventListener('pointermove', (e) => {
+      if (S.pgroup && isEdit() && !pointers.size) {
+        const pe = e.target.closest ? e.target.closest('[data-kind="port"]') : null;
+        const hid = pe ? pe.dataset.id : null;
+        if (hid !== S.hoverPort) { S.hoverPort = hid; S.preview = hid ? previewFor(hid) : null; scheduleRender(); }
+        return;
+      }
       if (!pointers.has(e.pointerId)) return;
       pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
       if (pinch && pointers.size === 2) {
@@ -259,7 +331,7 @@
       if (S.drag) { finishDrag(); return; }
       if (gesture) {
         const g = gesture; gesture = null;
-        if (!g.moved) handleTap(g.target); else scheduleSave(true);
+        if (!g.moved) handleTap(g.target, e); else scheduleSave(true);
       }
     };
     cv.addEventListener('pointerup', up);
@@ -316,7 +388,8 @@
     const map = curMap();
     const r = R.renderMap(S.p, map.id, {
       mode: S.mode, selection: S.sel, highlight: S.trace && S.trace.highlight,
-      pendingPortId: S.tool && S.tool.pending
+      pendingPortId: S.tool && S.tool.pending, collapsed: S.collapsed,
+      groupPorts: S.pgroup ? S.pgroup.ids : null, preview: S.preview
     });
     S.geo = r;
     $('vp').innerHTML = r.content;
@@ -330,6 +403,11 @@
     }
     const th = $('toolHint');
     if (S.tool && S.tool.type === 'patch') { th.hidden = false; th.textContent = S.tool.pending ? 'Tap the destination port (Esc to cancel)' : 'Patch cable: tap the first port (Esc to stop)'; }
+    else if (S.pgroup) {
+      th.hidden = false;
+      const pv = S.preview;
+      th.textContent = pv ? (pv.ok ? 'Click to create a fixed link: ' + pv.text : pv.text) : S.pgroup.ids.length + ' rear port(s) selected - hover another patch panel and click to link (Ctrl+click adds, Esc cancels)';
+    }
     else if (S.tool && S.tool.type === 'reconnect') { th.hidden = false; th.textContent = 'Tap the new port for end ' + S.tool.end.toUpperCase() + ' (Esc to cancel)'; }
     else th.hidden = true;
   }
@@ -664,7 +742,7 @@
   async function createItem(type) {
     const isGroup = type === 'group';
     const fields = [{ k: 'name', label: 'Name', v: '' }];
-    if (type === 'switch' || type === 'patchpanel') fields.push({ k: 'portCount', label: 'Ports', type: 'select', opts: [8, 12, 16, 24, 48, 96].map((n) => [n, String(n)]), v: 24 });
+    if (type === 'switch' || type === 'patchpanel') fields.push({ k: 'portCount', label: 'Ports', type: 'number', v: 24, min: 1, max: 96, hint: 'Any number from 1 to 96 (for example 8, 12, 15, 16, 24, 48).' });
     if (type === 'socket') fields.push({ k: 'portCount', label: 'Ports', type: 'number', v: 2, min: 1, max: 12 });
     if (type === 'generic') fields.push({ k: 'portCount', label: 'Ports', type: 'number', v: 0, min: 0, max: 96 });
     if (type === 'rack') fields.push({ k: 'rackHeight', label: 'Height (U)', type: 'number', v: 42, min: 1, max: 60 });
@@ -964,7 +1042,7 @@
   /* ---------------------------------------------------------------- wiring up */
   function setMode(mode) {
     if (S.mode === mode) return;
-    S.mode = mode; S.tool = null; S.drag = null;
+    S.mode = mode; S.tool = null; S.drag = null; clearPgroup();
     if (mode === 'view') saveNow();
     renderAll();
     toast(mode === 'edit' ? 'Edit mode on' : 'View mode - saved, read-only');
@@ -1024,7 +1102,7 @@
     document.addEventListener('keydown', (e) => {
       if ($('dlg').open) return;
       const typing = /INPUT|SELECT|TEXTAREA/.test((e.target.tagName || ''));
-      if (e.key === 'Escape') { if (S.tool) cancelTool(); else if (S.trace) clearTrace(); else if (S.sel) { S.sel = null; renderAll(); } }
+      if (e.key === 'Escape') { if (S.pgroup) { clearPgroup(); renderAll(); } else if (S.tool) cancelTool(); else if (S.trace) clearTrace(); else if (S.sel) { S.sel = null; renderAll(); } }
       else if (isEdit() && !typing && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); }
       else if (isEdit() && !typing && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') { e.preventDefault(); redo(); }
       else if (isEdit() && !typing && (e.key === 'Delete')) deleteSelection();
@@ -1038,6 +1116,7 @@
     try { S.lastExport = localStorage.getItem(KEY_EXPORT); } catch (_) { S.lastExport = null; }
     S.p = loadSaved() || M.createProject('Untitled project');
     S.mapId = S.p.maps[0].id;
+    loadCollapsed();
     bindUi(); bindCanvas();
     renderAll();
     if (S.p.placements.some((q) => q.mapId === S.mapId)) { const v = vpState(); if (v.zoom === 1 && v.x === 0 && v.y === 0) fitMap(); }

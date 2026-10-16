@@ -146,6 +146,58 @@ const ok = (m) => console.log('  ok   ' + m);
     assert.strictEqual(await page.evaluate(() => NetMap.app.S.p.fixedLinks[0].wires.length), 24);
   });
 
+
+  await step('ctrl-select rear ports, hover preview, click creates a fixed link', async () => {
+    await page.evaluate(() => { const S = NetMap.app.S; NetMap.app.api.goTo('object', S.p.objects.find(o => o.name === 'PP-Standalone').id, S.p.maps[0].id); });
+    await page.evaluate(() => NetMap.app.api.commit('add 15-port panel', (p) => NetMap.builder.addObjectPlaced(p, p.maps[0].id, { type: 'patchpanel', name: 'PP-C', portCount: 15 }, 700, 300)));
+    const ids = await page.evaluate(() => {
+      const p = NetMap.app.S.p, a = p.objects.find(o => o.name === 'PP-Standalone'), b = p.objects.find(o => o.name === 'PP-C');
+      const r = (o, l) => o.ports.find(x => x.side === 'rear' && x.label === l).id;
+      return { a3: r(a, '3'), a5: r(a, '5'), t20: r(b, '12'), t21: r(b, '13'), t22: r(b, '14'), t24: r(b, '15') };
+    });
+    const sel = (id) => page.locator('#vp rect[data-kind="port"][data-id="' + id + '"]');
+    await sel(ids.a3).click({ modifiers: ['Control'], force: true });
+    await sel(ids.a5).click({ modifiers: ['Control', 'Shift'], force: true });
+    assert.strictEqual(await page.evaluate(() => NetMap.app.S.pgroup.ids.length), 3, 'ports 3..5 grouped');
+    await sel(ids.t20).hover({ force: true });
+    await page.waitForTimeout(80);
+    let pv = await page.evaluate(() => NetMap.app.S.preview);
+    assert.ok(pv && pv.ok && pv.ids.length === 3, 'preview of 3 target ports');
+    assert.ok(/rear 12\.\.14/.test(await page.innerText('#toolHint')));
+    await shot('port-group-preview');
+    await sel(ids.t24).hover({ force: true });
+    await page.waitForTimeout(80);
+    pv = await page.evaluate(() => NetMap.app.S.preview);
+    assert.ok(pv && !pv.ok, 'not enough ports from 15');
+    await sel(ids.t20).hover({ force: true });
+    await page.waitForTimeout(80);
+    const links = await page.evaluate(() => NetMap.app.S.p.fixedLinks.length);
+    await sel(ids.t20).click({ force: true });
+    await page.waitForTimeout(100);
+    const st = await page.evaluate(() => ({ n: NetMap.app.S.p.fixedLinks.length, sel: NetMap.app.S.sel, link: NetMap.app.S.p.fixedLinks[NetMap.app.S.p.fixedLinks.length - 1], pg: NetMap.app.S.pgroup }));
+    assert.strictEqual(st.n, links + 1);
+    assert.strictEqual(st.sel.kind, 'link');
+    assert.strictEqual(st.link.wires.length, 3);
+    assert.strictEqual(st.pg, null);
+    assert.ok(/fixed link/i.test(await page.innerText('#detailsPane')));
+    await page.click('#btnUndo');
+    assert.strictEqual(await page.evaluate(() => NetMap.app.S.p.fixedLinks.length), links);
+    assert.strictEqual(await page.evaluate(() => NetMap.app.S.p.objects.find(o => o.name === 'PP-C').ports.length), 30);
+  });
+
+  await step('patch panel front/rear strips collapse and expand', async () => {
+    const before = await page.locator('#vp [data-toggle="rear"]').first().boundingBox();
+    const heightOf = () => page.evaluate(() => { const S = NetMap.app.S; return document.querySelector('#vp rect[data-kind="object"]') && Array.from(document.querySelectorAll('#vp rect[data-kind="object"]')).map(r => r.getAttribute('height')).join(','); });
+    const h0 = await heightOf();
+    await page.locator('#vp rect[data-toggle="rear"]').first().click({ force: true });
+    const h1 = await heightOf();
+    assert.notStrictEqual(h0, h1, 'panel shrank');
+    assert.ok(/v<\/text>/.test(await page.evaluate(() => document.getElementById('vp').innerHTML)));
+    await page.locator('#vp rect[data-toggle="rear"]').first().click({ force: true });
+    assert.strictEqual(await heightOf(), h0);
+    assert.ok(before);
+  });
+
   await step('autosave survives a refresh', async () => {
     await page.click('#btnMode'); // back to view mode flushes the save
     const name = await page.evaluate(() => NetMap.app.S.p.name);

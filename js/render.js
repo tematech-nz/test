@@ -46,7 +46,6 @@
     var hl = opts.highlight || null, sel = opts.selection || null;
     var pls = p.placements.filter(function (x) { return x.mapId === mapId; });
     var byRef = {};
-    pls.forEach(function (x) { byRef[x.refId] = x; });
     var portGeo = {}; // portId -> absolute rect
     var parts = [], cableParts = [], bounds = null;
 
@@ -61,9 +60,22 @@
       return { pl: pl, ref: ref, isGroup: isGroup, rank: !ref ? 99 : (isGroup ? 0 : (ref.type === 'rack' ? 1 : 2)), depth: ref ? containerDepth(p, pl.refId) : 0 };
     }).filter(function (it) { return it.ref; });
     items.sort(function (a, b) { return a.rank - b.rank || a.depth - b.depth; });
+    // effective box: collapsed patch-panel sections shrink the drawn height (view state only, never stored)
+    var groupSet = {}, prevSet = {};
+    (opts.groupPorts || []).forEach(function (id) { groupSet[id] = true; });
+    var prev = opts.preview || null;
+    if (prev) prev.ids.forEach(function (id) { prevSet[id] = true; });
+    items.forEach(function (it) {
+      var pl = it.pl, coll = (!exporting && !it.isGroup && opts.collapsed && opts.collapsed[pl.id]) || null;
+      it.coll = coll;
+      it.lay = !it.isGroup && it.ref.ports.length ? L.computeLayout(it.ref, pl.w, pl.h, coll) : null;
+      var anyColl = coll && (coll.front || coll.rear);
+      it.box = { x: pl.x, y: pl.y, w: pl.w, h: it.lay && anyColl ? it.lay.h : pl.h, id: pl.id };
+      byRef[pl.refId] = it.box;
+    });
 
     items.forEach(function (it) {
-      var pl = it.pl, ref = it.ref, st = STYLE[it.isGroup ? 'group' : ref.type];
+      var pl = it.box, ref = it.ref, st = STYLE[it.isGroup ? 'group' : ref.type], plId = it.pl.id;
       grow(pl.x, pl.y, pl.w, pl.h);
       var isSel = sel && sel.id === ref.id && (sel.kind === 'group' || sel.kind === 'object');
       var container = it.isGroup || ref.type === 'rack';
@@ -75,29 +87,40 @@
       var tx = pl.x + (editing ? 22 : 6);
       var label = ref.name + (!it.isGroup && ref.type === 'rack' && ref.rackHeight ? ' (' + ref.rackHeight + 'U)' : '');
       x.push('<text x="' + num(tx) + '" y="' + num(pl.y + 14) + '" font-size="12" font-weight="bold" fill="#222" font-family="sans-serif" pointer-events="none">' + esc(trunc(label, Math.floor((pl.w - (tx - pl.x) - 4) / 6.5))) + '</text>');
-      if (!it.isGroup && ref.ports.length) {
-        var geo = L.layoutPorts(ref, pl.w, pl.h);
+      if (it.lay) {
+        if (it.lay.sections.length) {
+          it.lay.sections.forEach(function (sec) {
+            var rear = sec.side === 'rear', coll = sec.collapsed;
+            x.push('<rect x="' + num(pl.x + sec.x) + '" y="' + num(pl.y + sec.y) + '" width="' + num(sec.w) + '" height="' + num(sec.h) + '" rx="3" fill="' + (rear ? '#ffe9cc' : '#fffdf0') + '" stroke="' + (rear ? '#d38b2c' : '#d4b44a') + '" stroke-width="1"' + (rear ? ' stroke-dasharray="4 2"' : '') + ' pointer-events="none"/>');
+            x.push('<text x="' + num(pl.x + sec.x + 5) + '" y="' + num(pl.y + sec.y + 10.5) + '" font-size="8.5" font-weight="bold" fill="' + (rear ? '#8a4b00' : '#7a6200') + '" font-family="sans-serif" pointer-events="none">' + (rear ? 'REAR' : 'FRONT') + ' (' + sec.count + ')</text>');
+            if (!exporting) {
+              x.push('<g data-toggle="' + sec.side + '" data-pl="' + esc(plId) + '" style="cursor:pointer"><title>' + (coll ? 'Expand' : 'Collapse') + ' ' + sec.side + ' ports</title>' +
+                '<rect data-toggle="' + sec.side + '" data-pl="' + esc(plId) + '" x="' + num(pl.x + sec.x) + '" y="' + num(pl.y + sec.y) + '" width="' + num(sec.w) + '" height="' + sec.headH + '" fill="transparent"/>' +
+                '<text x="' + num(pl.x + sec.x + sec.w - 8) + '" y="' + num(pl.y + sec.y + 11) + '" font-size="12" font-weight="bold" text-anchor="middle" fill="#444" font-family="sans-serif" pointer-events="none">' + (coll ? 'v' : '^') + '</text></g>');
+            }
+          });
+        }
         ref.ports.forEach(function (pt) {
-          var r = geo[pt.id]; if (!r) return;
-          var abs = { x: pl.x + r.x, y: pl.y + r.y, w: r.w, h: r.h, objId: ref.id, pl: pl };
+          var r = it.lay.ports[pt.id]; if (!r) return;
+          var abs = { x: pl.x + r.x, y: pl.y + r.y, w: r.w, h: r.h, objId: ref.id, pl: pl, hidden: r.hidden };
           portGeo[pt.id] = abs;
+          if (r.hidden) return;
           var use = idx.portUse[pt.id], mapped = idx.mapByPort[pt.id];
           var fill = use ? (use.kind === 'patch' ? '#bbdefb' : '#ffe0b2') : (mapped ? '#f5f5f5' : '#ffffff');
           var isHi = hl && hl.ports[pt.id], isSelPort = sel && sel.kind === 'port' && sel.id === pt.id, isPending = opts.pendingPortId === pt.id;
           if (isHi) fill = HI;
-          var stroke = isPending ? '#d500f9' : (isSelPort ? SEL : '#444');
+          var stroke = isPending ? '#d500f9' : (isSelPort ? SEL : '#444'), sw = isPending || isSelPort ? 2.5 : 1;
+          if (groupSet[pt.id]) { fill = '#e1bee7'; stroke = '#8e24aa'; sw = 2.5; }
+          if (prevSet[pt.id]) { fill = prev.ok ? '#c8e6c9' : '#ffcdd2'; stroke = prev.ok ? '#2e7d32' : '#c62828'; sw = 2.5; }
           x.push('<g data-kind="port" data-id="' + esc(pt.id) + '"><title>' + esc(ref.name + ' / ' + pt.label + (pt.side === 'rear' ? ' (rear)' : '')) + '</title>' +
-            '<rect data-kind="port" data-id="' + esc(pt.id) + '" x="' + num(abs.x) + '" y="' + num(abs.y) + '" width="' + num(abs.w) + '" height="' + num(abs.h) + '" rx="2" fill="' + fill + '" stroke="' + stroke + '" stroke-width="' + (isPending || isSelPort ? 2.5 : 1) + '"' + (pt.side === 'rear' ? ' stroke-dasharray="3 1"' : '') + '/>' +
+            '<rect data-kind="port" data-id="' + esc(pt.id) + '" x="' + num(abs.x) + '" y="' + num(abs.y) + '" width="' + num(abs.w) + '" height="' + num(abs.h) + '" rx="2" fill="' + fill + '" stroke="' + stroke + '" stroke-width="' + sw + '"' + (pt.side === 'rear' ? ' stroke-dasharray="3 1"' : '') + '/>' +
             '<text x="' + num(abs.x + abs.w / 2) + '" y="' + num(abs.y + abs.h / 2 + 3) + '" font-size="' + num(Math.min(9, abs.h * 0.55)) + '" text-anchor="middle" fill="#111" font-family="sans-serif" pointer-events="none">' + esc(trunc(pt.label, Math.max(1, Math.floor(abs.w / 5.5)))) + '</text></g>');
         });
-        if (ref.type === 'patchpanel') {
-          x.push('<text x="' + num(pl.x + pl.w - 4) + '" y="' + num(pl.y + 14) + '" font-size="8" text-anchor="end" fill="#8a6d00" font-family="sans-serif" pointer-events="none">front / rear</text>');
-        }
       }
       if (editing) {
-        x.push('<rect data-handle="move" data-pl="' + esc(pl.id) + '" x="' + num(pl.x + 3) + '" y="' + num(pl.y + 3) + '" width="16" height="14" rx="2" fill="#37474f" style="cursor:move"/>' +
+        x.push('<rect data-handle="move" data-pl="' + esc(plId) + '" x="' + num(pl.x + 3) + '" y="' + num(pl.y + 3) + '" width="16" height="14" rx="2" fill="#37474f" style="cursor:move"/>' +
           '<path d="M' + num(pl.x + 6) + ' ' + num(pl.y + 8) + 'h10M' + num(pl.x + 6) + ' ' + num(pl.y + 12) + 'h10" stroke="#fff" stroke-width="1.5" pointer-events="none"/>');
-        x.push('<rect data-handle="resize" data-pl="' + esc(pl.id) + '" x="' + num(pl.x + pl.w - 12) + '" y="' + num(pl.y + pl.h - 12) + '" width="12" height="12" fill="#37474f" opacity="0.7" style="cursor:nwse-resize"/>');
+        x.push('<rect data-handle="resize" data-pl="' + esc(plId) + '" x="' + num(pl.x + pl.w - 12) + '" y="' + num(pl.y + pl.h - 12) + '" width="12" height="12" fill="#37474f" opacity="0.7" style="cursor:nwse-resize"/>');
       }
       x.push('</g>');
       parts.push(x.join(''));

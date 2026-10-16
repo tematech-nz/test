@@ -26,7 +26,14 @@ Try it: File -> Load demo project (two rooms, a fixed link between racks, a wall
 - **Fixed links**: installed cabling between two patch panels with N numbered wires, each mapped rear port to rear port.
   Mapping is never assumed; "sequential" is an explicit choice. Endpoints and wires change only through
   "Edit installed wiring", which shows a review of every added, deleted or changed wire before applying (one undo step).
-- **Patch panels** have front and rear terminations. Front-to-rear internal mappings are explicit records
+- **Quick fixed link from ports** (edit mode, mouse): Ctrl+click free rear ports on one patch panel to group them
+  (Shift+Ctrl+click extends a range). Move the pointer over another panel: the same number of rear ports, starting
+  under the pointer, are highlighted (green = valid, red = occupied or not enough ports). Click to create the link
+  and open its properties. Esc cancels. Wires map in port order, 1:1.
+- **Patch panels** have any number of ports (1-96, e.g. 15) and show separate FRONT and REAR strips. Click the `^`
+  on a strip to fold it (`v` unfolds), like a details element; cables then attach to the strip. Folding is view state
+  stored in the browser only, never in the project file, and exports always show everything.
+  Patch panels have front and rear terminations. Front-to-rear internal mappings are explicit records
   (the "straight-through" option or per-port mapping writes them); tracing follows only documented mappings.
 - **Maps**: the same object can be shown on several maps ("Add existing here"); connections reference the shared
   object and port records. Trace results offer "open <map>" links to continue across maps.

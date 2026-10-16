@@ -371,9 +371,23 @@
     var idx = buildIndex(p), a = idx.objects[o.aObjectId], b = idx.objects[o.bObjectId];
     if (!a || !b || a.type !== 'patchpanel' || b.type !== 'patchpanel') throw new Error('Fixed links join two patch panels');
     if (a === b) throw new Error('A fixed link needs two different panels');
-    var n = o.wireCount;
+    var pairs = null, n;
+    if (o.pairs) {
+      pairs = o.pairs; n = pairs.length;
+      var usedPorts = {};
+      pairs.forEach(function (pr) {
+        [[pr[0], a], [pr[1], b]].forEach(function (x) {
+          var pt = idx.ports[x[0]];
+          if (!pt || idx.portObj[x[0]] !== x[1] || pt.side !== 'rear') throw new Error('Wires must join rear ports of the two panels');
+          if (idx.portUse[x[0]] || usedPorts[x[0]]) throw new Error('Port ' + portName(p, x[0], idx) + ' is already occupied');
+          usedPorts[x[0]] = true;
+        });
+      });
+    } else {
+      n = o.wireCount;
+      pairs = o.mapping === 'sequential' ? sequentialPorts(p, a, b, n) : null;
+    }
     if (!(n >= 1 && n <= 288) || n !== Math.floor(n)) throw new Error('Wire count must be 1-288');
-    var pairs = o.mapping === 'sequential' ? sequentialPorts(p, a, b, n) : null;
     p.counters.fixed++;
     var link = {
       id: uid('fl'), name: o.name || ('FL-' + pad3(p.counters.fixed)), aObjectId: a.id, bObjectId: b.id,
