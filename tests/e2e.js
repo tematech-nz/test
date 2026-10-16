@@ -851,6 +851,75 @@ const ok = (m) => console.log('  ok   ' + m);
     for (let i = 0; i < 5; i++) await page.click('#btnUndo');
   });
 
+
+  await step('named port groups: Ctrl+select, G to name, edit ranges and colour, add from the form, link from a group', async () => {
+    const ids = await page.evaluate(() => {
+      let out;
+      NetMap.app.api.commit('pg test', (p) => {
+        const B = NetMap.builder, mid = p.maps[0].id;
+        const a = B.addObjectPlaced(p, mid, { type: 'patchpanel', name: 'PgA', portCount: 24, straight: true }, 9000, 40);
+        const b = B.addObjectPlaced(p, mid, { type: 'patchpanel', name: 'PgB', portCount: 24, straight: true }, 9000, 300);
+        out = { a: a.id, b: b.id };
+      });
+      NetMap.app.api.goTo('object', out.a, NetMap.app.S.p.maps[0].id);
+      return out;
+    });
+    const rear = (obj, n) => page.evaluate(([o, l]) => NetMap.app.S.p.objects.find(x => x.id === o).ports.find(q => q.side === 'rear' && q.label === l).id, [obj, String(n)]);
+    const port = async (obj, n) => page.locator('#vp rect[data-kind="port"][data-id="' + await rear(obj, n) + '"]');
+    await (await port(ids.a, 17)).click({ modifiers: ['Control'], force: true });
+    await (await port(ids.a, 20)).click({ modifiers: ['Control', 'Shift'], force: true });
+    assert.strictEqual(await page.evaluate(() => NetMap.app.S.pgroup.ids.length), 4);
+    await page.keyboard.press('g');
+    await page.waitForSelector('#dlg[open]');
+    await page.click('#dlg button[data-btn="ok"]');
+    assert.ok(/name/i.test(await page.innerText('#dlg .form-err')), 'a name is required');
+    await page.fill('#dlg input[name="name"]', 'to rack office');
+    await page.selectOption('#dlg select[name="color"]', { label: 'green' });
+    await page.click('#dlg button[data-btn="ok"]');
+    await page.waitForTimeout(100);
+    const g = await page.evaluate(() => { const o = NetMap.app.S.p.objects.find(x => x.name === 'PgA'); return o.portGroups[0]; });
+    assert.deepStrictEqual([g.name, g.color, g.portIds.length], ['to rack office', '#2ca02c', 4]);
+    assert.strictEqual(await page.evaluate(() => NetMap.app.S.sel.kind), 'pgroup');
+    assert.ok((await page.innerHTML('#vp')).indexOf('>to rack office</text>') > 0, 'name tag drawn');
+    await shot('port-group');
+    // edit the ports and name in the properties
+    await page.fill('#detailsPane input[data-f="pgPorts"]', '7-14');
+    await page.keyboard.press('Tab');
+    assert.strictEqual(await page.evaluate(() => NetMap.app.S.p.objects.find(x => x.name === 'PgA').portGroups[0].portIds.length), 8);
+    await page.fill('#detailsPane input[data-f="pgName"]', 'L1');
+    await page.keyboard.press('Tab');
+    await page.selectOption('#detailsPane select[data-f="pgPreset"]', { label: 'red' });
+    const g2 = await page.evaluate(() => NetMap.app.S.p.objects.find(x => x.name === 'PgA').portGroups[0]);
+    assert.deepStrictEqual([g2.name, g2.color], ['L1', '#d62728']);
+    // a second group from the object form
+    await page.evaluate((id) => NetMap.app.api.select({ kind: 'object', id }), ids.a);
+    await page.fill('#detailsPane #pgNewName', 'to rack office');
+    await page.fill('#detailsPane #pgNewPorts', '17-20');
+    await page.click('#detailsPane button[data-act="addPGroup"]');
+    await page.waitForTimeout(100);
+    assert.strictEqual(await page.evaluate(() => NetMap.app.S.p.objects.find(x => x.name === 'PgA').portGroups.length), 2);
+    // bad range is reported
+    await page.evaluate((id) => NetMap.app.api.select({ kind: 'object', id }), ids.a);
+    await page.fill('#detailsPane #pgNewName', 'bad'); await page.fill('#detailsPane #pgNewPorts', '99');
+    await page.click('#detailsPane button[data-act="addPGroup"]');
+    assert.ok(/No port/.test(await page.innerText('#toast')));
+    // fixed link from the group
+    const gid = await page.evaluate(() => NetMap.app.S.p.objects.find(x => x.name === 'PgA').portGroups.find(q => q.name === 'L1').id);
+    await page.evaluate((id) => NetMap.app.api.select({ kind: 'pgroup', id }), gid);
+    await page.click('#detailsPane button[data-act="linkFromGroup"]');
+    assert.strictEqual(await page.evaluate(() => NetMap.app.S.pgroup.ids.length), 8);
+    await (await port(ids.b, 1)).hover({ force: true });
+    await page.waitForTimeout(80);
+    await (await port(ids.b, 1)).click({ force: true });
+    await page.waitForTimeout(120);
+    assert.strictEqual(await page.evaluate(() => NetMap.app.S.p.fixedLinks[NetMap.app.S.p.fixedLinks.length - 1].wires.length), 8);
+    // delete the group again
+    await page.evaluate((id) => NetMap.app.api.select({ kind: 'pgroup', id }), gid);
+    await page.click('#detailsPane button[data-act="deletePGroup"]');
+    assert.ok(!(await page.evaluate((id) => !!NetMap.model.findPortGroup(NetMap.app.S.p, id), gid)));
+    for (let i = 0; i < 12; i++) await page.click('#btnUndo');
+  });
+
   await step('autosave survives a refresh', async () => {
     await page.click('#btnMode'); // back to view mode flushes the save
     const name = await page.evaluate(() => NetMap.app.S.p.name);

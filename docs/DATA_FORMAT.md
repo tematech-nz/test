@@ -40,6 +40,8 @@ cannot break a connection. Files use LF line endings and are written with 2-spac
 - Generic devices and switches may carry `ipAddress` (devices: used for a single-port device, per-port `ip` otherwise; switches: the
   management / web interface address). A segment is a set of devices joined by switches; routers and generic devices never bridge.
 - Router ports may carry `networkColor` (hex), the default colour for patch cables extending from them.
+- Any equipment with ports may carry `portGroups`: `[{ "id", "name", "color", "portIds": [...] }]` (a port is in at most one
+  group; purely visual/organisational).
 - Any port may carry an optional `description` (free text label shown on hover and in descriptions); `label` is the number
   drawn on the port's face.
 - Patch panels have `front` and `rear` ports and an optional `sectionSize` (ports per visual section; must divide the

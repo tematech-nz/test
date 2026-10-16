@@ -48,6 +48,12 @@ Try it: File -> Load demo project (two rooms, a fixed link between racks, a wall
   switches** have a **Management IP** (the web interface address) which belongs to the switch's own network segment, not to any
   port. Devices and switch management addresses take part in the subnet checks (different subnet, duplicate address); devices
   without an address (DHCP) are ignored. VLANs are not modelled, so a deliberate VLAN split on one switch will show as a warning.
+- **Named port groups**: give a set of ports a name and colour - e.g. rear 17-20 "to rack office" and 7-14 "L1" - and the
+  ports get a colour-coded band with the name tag on the map (also in exports). Create one by Ctrl+clicking the ports (Shift for a
+  range) and pressing `G`, or in the equipment's properties ("Port groups": a name, ports like `7-14, 17`, colour). Click a band to
+  edit its name, colour and ports, or use "Fixed link from this group..." to start a link from exactly those rear ports. A port
+  belongs to one group; groups work on any equipment with ports, are searchable, and the group name appears in the port tooltip
+  and in trace/cable descriptions.
 - **Cable colours**: pick white, grey, green, yellow, blue, orange, red or black from the list, or `Custom...` for an RGB
   picker. The patch cable tool has its own colour list for new cables. Cables are drawn with a thin dark outline so white and
   yellow stay visible.

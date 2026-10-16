@@ -124,6 +124,23 @@
         (it.lay.groups || []).forEach(function (gp) {
           x.push('<rect x="' + num(pl.x + gp.x) + '" y="' + num(pl.y + gp.y) + '" width="' + num(gp.w) + '" height="' + num(gp.h) + '" rx="3" fill="#ffffff" fill-opacity="0.7" stroke="' + (gp.side === 'rear' ? '#d9a35a' : (gp.side === 'uplink' ? '#8e6bbf' : '#cdb86a')) + '" stroke-width="' + (gp.side === 'uplink' ? 1.4 : 0.8) + '" pointer-events="none"/>');
         });
+        (ref.portGroups || []).forEach(function (g) {
+          // colour-coded band behind the group's ports, one per row, with the name tag above the first row
+          var rects = g.portIds.map(function (id) { return it.lay.ports[id]; }).filter(function (r) { return r && !r.hidden; });
+          if (!rects.length) return;
+          var rows = {}, gsel = sel && sel.kind === 'pgroup' && sel.id === g.id;
+          rects.forEach(function (r) { var k = Math.round(r.y); (rows[k] = rows[k] || []).push(r); });
+          Object.keys(rows).map(Number).sort(function (a, b) { return a - b; }).forEach(function (k, i) {
+            var rs = rows[k], x0 = Math.min.apply(null, rs.map(function (r) { return r.x; })) - 3, x1 = Math.max.apply(null, rs.map(function (r) { return r.x + r.w; })) + 3, h = rs[0].h + 6;
+            x.push('<g data-kind="pgroup" data-id="' + esc(g.id) + '"><title>' + esc(g.name + ' (' + g.portIds.length + ' ports)') + '</title><rect data-kind="pgroup" data-id="' + esc(g.id) + '" x="' + num(pl.x + x0) + '" y="' + num(pl.y + k - 3) + '" width="' + num(x1 - x0) + '" height="' + num(h) + '" rx="4" fill="' + esc(g.color) + '" fill-opacity="0.32" stroke="' + (gsel ? SEL : esc(g.color)) + '" stroke-width="' + (gsel ? 3 : 1.6) + '"/></g>');
+            if (i === 0) {
+              var tw = String(g.name).length * 5.4 + 8, minX = it.lay.sections.length ? 66 : Math.min(pl.w - tw - 4, 12 + String(ref.name).length * 6.5);
+              var tx = Math.max(x0, minX); tx = Math.min(tx, pl.w - tw - 2);
+              x.push('<g data-kind="pgroup" data-id="' + esc(g.id) + '"><rect data-kind="pgroup" data-id="' + esc(g.id) + '" x="' + num(pl.x + tx) + '" y="' + num(pl.y + k - 15) + '" width="' + num(tw) + '" height="11" rx="3" fill="' + esc(g.color) + '" stroke="#37474f" stroke-width="0.6"/>' +
+                '<text x="' + num(pl.x + tx + 4) + '" y="' + num(pl.y + k - 6.5) + '" font-size="8.5" font-weight="bold" fill="#111" font-family="sans-serif" pointer-events="none">' + esc(g.name) + '</text></g>');
+            }
+          });
+        });
         ref.ports.forEach(function (pt) {
           var r = it.lay.ports[pt.id]; if (!r) return;
           var abs = { x: pl.x + r.x, y: pl.y + r.y, w: r.w, h: r.h, objId: ref.id, pl: pl, hidden: r.hidden };
@@ -140,7 +157,7 @@
           if (groupSet[pt.id]) { fill = '#e1bee7'; stroke = '#8e24aa'; sw = 2.5; }
           if (prevSet[pt.id]) { fill = prev.ok ? '#c8e6c9' : '#ffcdd2'; stroke = prev.ok ? '#2e7d32' : '#c62828'; sw = 2.5; }
           var netBar = pt.networkColor ? '<rect x="' + num(abs.x) + '" y="' + num(abs.y + abs.h - 4) + '" width="' + num(abs.w) + '" height="4" rx="1" fill="' + esc(pt.networkColor) + '" stroke="#333" stroke-width="0.6" pointer-events="none"/>' : '';
-          x.push('<g data-kind="port" data-id="' + esc(pt.id) + '"><title>' + esc(ref.name + ' / ' + pt.label + (pt.side === 'rear' ? ' (rear)' : '') + (pt.role ? ' (' + pt.role.toUpperCase() + ')' : '') + (pt.description ? ' - ' + pt.description : '') + (pt.ip ? ' ' + pt.ip : '')) + '</title>' +
+          x.push('<g data-kind="port" data-id="' + esc(pt.id) + '"><title>' + esc(ref.name + ' / ' + pt.label + (pt.side === 'rear' ? ' (rear)' : '') + (pt.role ? ' (' + pt.role.toUpperCase() + ')' : '') + (pt.description ? ' - ' + pt.description : '') + (M.portGroupOf(ref, pt.id) ? ' [' + M.portGroupOf(ref, pt.id).name + ']' : '') + (pt.ip ? ' ' + pt.ip : '')) + '</title>' +
             '<rect data-kind="port" data-id="' + esc(pt.id) + '" x="' + num(abs.x) + '" y="' + num(abs.y) + '" width="' + num(abs.w) + '" height="' + num(abs.h) + '" rx="2" fill="' + fill + '" stroke="' + stroke + '" stroke-width="' + sw + '"' + (pt.side === 'rear' ? ' stroke-dasharray="3 1"' : '') + '/>' +
             '<text x="' + num(abs.x + abs.w / 2) + '" y="' + num(abs.y + abs.h / 2 + 3) + '" font-size="' + num(Math.min(9, abs.h * 0.55)) + '" text-anchor="middle" fill="#111" font-family="sans-serif" pointer-events="none">' + esc(trunc(pt.label, Math.max(1, Math.floor(abs.w / 5.5)))) + '</text>' + netBar + '</g>');
         });

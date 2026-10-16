@@ -101,7 +101,7 @@
     idx = idx || buildIndex(p);
     var pt = idx.ports[portId], o = idx.portObj[portId];
     if (!pt || !o) return '(missing port)';
-    return o.name + ' / ' + pt.label + (pt.side === 'rear' ? ' (rear)' : (isTermination(o) ? ' (front)' : '')) + (pt.description ? ' - ' + pt.description : '');
+    return o.name + ' / ' + pt.label + (pt.side === 'rear' ? ' (rear)' : (isTermination(o) ? ' (front)' : '')) + (pt.description ? ' - ' + pt.description : '') + (portGroupOf(o, portId) ? ' [' + portGroupOf(o, portId).name + ']' : '');
   }
   function wireName(link, wire) { return link.name + ' w' + wire.number; }
 
@@ -204,6 +204,84 @@
       containerId = par ? par.id : null;
     }
   }
+  /* ---------- named port groups: colour-coded sets of ports on one piece of equipment ("to rack office", "L1") ---------- */
+  function findPortGroup(p, groupId) {
+    for (var i = 0; i < p.objects.length; i++) {
+      var gs = p.objects[i].portGroups || [];
+      for (var j = 0; j < gs.length; j++) if (gs[j].id === groupId) return { obj: p.objects[i], group: gs[j] };
+    }
+    return null;
+  }
+  function prunePortGroups(o) {
+    if (!o.portGroups) return;
+    var ids = {};
+    o.ports.forEach(function (pt) { ids[pt.id] = true; });
+    o.portGroups.forEach(function (g) { g.portIds = g.portIds.filter(function (x) { return ids[x]; }); });
+    o.portGroups = o.portGroups.filter(function (g) { return g.portIds.length; });
+    if (!o.portGroups.length) delete o.portGroups;
+  }
+  /* "7-14, 17" -> port ids on `side` (any side when omitted) whose numeric label is in range or whose label matches */
+  function parsePortRange(o, text, side) {
+    var ports = o.ports.filter(function (pt) { return !side || pt.side === side; }), out = [], errors = [];
+    String(text || '').split(/[,;\s]+/).filter(Boolean).forEach(function (tok) {
+      var m = /^(\d+)-(\d+)$/.exec(tok), hit = [];
+      if (m) {
+        var a = Math.min(+m[1], +m[2]), b = Math.max(+m[1], +m[2]);
+        hit = ports.filter(function (pt) { return /^\d+$/.test(pt.label) && +pt.label >= a && +pt.label <= b; });
+      } else hit = ports.filter(function (pt) { return String(pt.label).toLowerCase() === tok.toLowerCase(); });
+      if (!hit.length) errors.push('No port "' + tok + '"' + (side ? ' on the ' + side + ' side' : ''));
+      hit.forEach(function (pt) { if (out.indexOf(pt.id) < 0) out.push(pt.id); });
+    });
+    var order = {}; o.ports.forEach(function (pt, i) { order[pt.id] = i; });
+    out.sort(function (x, y) { return order[x] - order[y]; });
+    return { ids: out, errors: errors };
+  }
+  /* spec: {name, color, portIds | (portsText + side)}; ports already in another group of the object move to this one */
+  function addPortGroup(p, objectId, spec) {
+    var o = buildIndex(p).objects[objectId];
+    if (!o) throw new Error('Object not found');
+    var ids = spec.portIds;
+    if (!ids) { var r = parsePortRange(o, spec.portsText, spec.side); if (r.errors.length) throw new Error(r.errors.join('; ')); ids = r.ids; }
+    var own = {}; o.ports.forEach(function (pt) { own[pt.id] = true; });
+    ids = ids.filter(function (x, i) { return own[x] && ids.indexOf(x) === i; });
+    if (!ids.length) throw new Error('Choose at least one port for the group');
+    var name = String(spec.name || '').trim();
+    if (!name) throw new Error('Give the group a name');
+    o.portGroups = o.portGroups || [];
+    o.portGroups.forEach(function (g) { g.portIds = g.portIds.filter(function (x) { return ids.indexOf(x) < 0; }); });
+    var grp = { id: uid('pgp'), name: name, color: spec.color || '#1f77b4', portIds: ids };
+    o.portGroups.push(grp);
+    prunePortGroups(o);
+    return grp;
+  }
+  function updatePortGroup(p, groupId, patch) {
+    var f = findPortGroup(p, groupId);
+    if (!f) throw new Error('Port group not found');
+    var g = f.group, o = f.obj;
+    if (patch.name !== undefined) { if (!String(patch.name).trim()) throw new Error('Give the group a name'); g.name = String(patch.name).trim(); }
+    if (patch.color !== undefined) g.color = patch.color;
+    if (patch.portsText !== undefined) {
+      var r = parsePortRange(o, patch.portsText, patch.side);
+      if (r.errors.length) throw new Error(r.errors.join('; '));
+      if (!r.ids.length) throw new Error('A group needs at least one port (delete it to remove it)');
+      o.portGroups.forEach(function (x) { if (x !== g) x.portIds = x.portIds.filter(function (i) { return r.ids.indexOf(i) < 0; }); });
+      g.portIds = r.ids;
+      prunePortGroups(o);
+    }
+    return g;
+  }
+  function deletePortGroup(p, groupId) {
+    var f = findPortGroup(p, groupId);
+    if (!f) return;
+    f.obj.portGroups = f.obj.portGroups.filter(function (g) { return g.id !== groupId; });
+    if (!f.obj.portGroups.length) delete f.obj.portGroups;
+  }
+  function portGroupOf(o, portId) {
+    var gs = o.portGroups || [];
+    for (var i = 0; i < gs.length; i++) if (gs[i].portIds.indexOf(portId) >= 0) return gs[i];
+    return null;
+  }
+
   function mapsFor(p, kind, id) {
     var idx = buildIndex(p), out = [];
     function add(ref) {
@@ -211,6 +289,7 @@
     }
     if (kind === 'map') return [id];
     if (kind === 'group' || kind === 'object') add(id);
+    else if (kind === 'pgroup') { var fg = findPortGroup(p, id); if (fg) add(fg.obj.id); }
     else if (kind === 'port') { var o = idx.portObj[id]; if (o) add(o.id); }
     else if (kind === 'cable') { var c = idx.cables[id]; if (c) [c.aPortId, c.bPortId].forEach(function (pid) { if (idx.portObj[pid]) add(idx.portObj[pid].id); }); }
     else if (kind === 'link') { var l = idx.links[id]; if (l) { add(l.aObjectId); add(l.bObjectId); } }
@@ -275,6 +354,7 @@
       var drop = list.slice(n);
       drop.forEach(function (pt) { if (idx.portUse[pt.id]) throw new Error('Uplink ' + pt.label + ' is in use; disconnect it first'); });
       o.ports = o.ports.filter(function (pt) { return drop.indexOf(pt) < 0; });
+      prunePortGroups(o);
     }
   }
   /* patch: sectionRows, portOrder ('rows'|'columns'), align ('left'|'center'|'right'), uplinkSide ('left'|'right'), portIsolation */
@@ -424,6 +504,7 @@
       adjust('front');
       if (o.sectionSize && n % o.sectionSize !== 0) { delete o.sectionSize; delete o.sectionRows; }
     }
+    prunePortGroups(o);
     o.ports.sort(function (a, b) { return (a.side === b.side ? (a.role === 'uplink' ? 1 : 0) - (b.role === 'uplink' ? 1 : 0) : (a.side === 'front' ? -1 : 1)); });
   }
 
@@ -443,6 +524,7 @@
       }
     }
     adjust('wan', wan, 'W'); adjust('lan', lan, 'L');
+    prunePortGroups(o);
     o.ports.sort(function (a, b) { return (a.role === b.role ? 0 : (a.role === 'wan' ? -1 : 1)); });
   }
 
@@ -727,6 +809,7 @@
       if (has(o.name, o.location, o.description, o.id, typeLabel(o), o.ipAddress)) out.push({ kind: 'object', id: o.id, title: o.name, sub: typeLabel(o) + (o.location ? ' - ' + o.location : '') });
     });
     p.objects.forEach(function (o) {
+      (o.portGroups || []).forEach(function (g) { if (has(g.name, g.id)) out.push({ kind: 'pgroup', id: g.id, title: g.name, sub: 'Port group on ' + o.name + ' (' + g.portIds.length + ' ports)' }); });
       o.ports.forEach(function (pt) {
         if (has(pt.label, pt.id, pt.ip, pt.role, pt.description)) out.push({ kind: 'port', id: pt.id, title: o.name + ' / ' + pt.label + (pt.side === 'rear' ? ' (rear)' : ''), sub: 'Port' + (pt.description ? ' - ' + pt.description : '') + (pt.ip ? ' - ' + pt.ip : '') });
       });
@@ -771,6 +854,10 @@
       if (!isValidIp(o.ipAddress)) add('warning', 'BAD_IP', '"' + o.name + '" has an invalid IP address: ' + o.ipAddress, 'object', o.id);
       o.ports.forEach(function (pt) { if (!isValidIp(pt.ip)) add('warning', 'BAD_IP', o.name + ' / ' + pt.label + ' has an invalid IP address: ' + pt.ip, 'port', pt.id); });
       if (o.portIsolation && !o.ports.some(function (pt) { return pt.role === 'uplink'; })) add('warning', 'ISOLATION_NO_UPLINK', 'Switch "' + o.name + '" has port isolation on but no uplink ports, so its devices can talk to nothing through it', 'object', o.id);
+      (o.portGroups || []).forEach(function (g) {
+        var own = {}; o.ports.forEach(function (pt) { own[pt.id] = true; });
+        if (g.portIds.some(function (x) { return !own[x]; })) add('warning', 'BAD_PORT_GROUP', 'Port group "' + g.name + '" on "' + o.name + '" refers to a missing port', 'object', o.id);
+      });
       var unused = o.ports.filter(function (pt) { return !idx.portUse[pt.id] && !idx.mapByPort[pt.id]; }).length;
       if (o.ports.length && unused) add('info', 'UNUSED_PORTS', unused + ' of ' + o.ports.length + ' terminations on "' + o.name + '" are unused', 'object', o.id);
     });
@@ -894,7 +981,7 @@
     findContainer: findContainer, groupOf: groupOf, parentOf: parentOf, containerChildren: containerChildren, descendants: descendants,
     addPlacement: addPlacement, placementOf: placementOf, placementGroup: placementGroup, movePlacement: movePlacement,
     growToFit: growToFit, mapsFor: mapsFor, addGroup: addGroup, addObject: addObject, setContainer: setContainer,
-    setPortCount: setPortCount, hasDeviceIp: hasDeviceIp, hasPortIp: hasPortIp, setDeviceIp: setDeviceIp, setPortIp: setPortIp, IP_ERROR: IP_ERROR, setDeviceKind: setDeviceKind, isTermination: isTermination, DEVICE_KINDS: DEVICE_KINDS, deviceKindInfo: deviceKindInfo, typeLabel: typeLabel, accessPorts: accessPorts, validSectionRows: validSectionRows, setUplinkPorts: setUplinkPorts, setSwitchLayout: setSwitchLayout, setFullWidth: setFullWidth, setSectionSize: setSectionSize, validSectionSizes: validSectionSizes, defaultSectionSize: defaultSectionSize, effectiveSectionSize: effectiveSectionSize, setRouterPorts: setRouterPorts, isValidIp: isValidIp, canConnectPatch: canConnectPatch, addPatchCable: addPatchCable,
+    setPortCount: setPortCount, findPortGroup: findPortGroup, parsePortRange: parsePortRange, addPortGroup: addPortGroup, updatePortGroup: updatePortGroup, deletePortGroup: deletePortGroup, portGroupOf: portGroupOf, prunePortGroups: prunePortGroups, hasDeviceIp: hasDeviceIp, hasPortIp: hasPortIp, setDeviceIp: setDeviceIp, setPortIp: setPortIp, IP_ERROR: IP_ERROR, setDeviceKind: setDeviceKind, isTermination: isTermination, DEVICE_KINDS: DEVICE_KINDS, deviceKindInfo: deviceKindInfo, typeLabel: typeLabel, accessPorts: accessPorts, validSectionRows: validSectionRows, setUplinkPorts: setUplinkPorts, setSwitchLayout: setSwitchLayout, setFullWidth: setFullWidth, setSectionSize: setSectionSize, validSectionSizes: validSectionSizes, defaultSectionSize: defaultSectionSize, effectiveSectionSize: effectiveSectionSize, setRouterPorts: setRouterPorts, isValidIp: isValidIp, canConnectPatch: canConnectPatch, addPatchCable: addPatchCable,
     updatePatchCable: updatePatchCable, deletePatchCable: deletePatchCable, addInternalMapping: addInternalMapping,
     removeInternalMapping: removeInternalMapping, autoMapPanel: autoMapPanel, rearPorts: rearPorts,
     sequentialPorts: sequentialPorts, addFixedLink: addFixedLink, updateLinkMeta: updateLinkMeta,

@@ -1128,5 +1128,55 @@ test('device addresses are drawn and checked for validity', () => {
   assert.ok(M.validateProject(p).some(i => i.code === 'BAD_IP'));
 });
 
+console.log('Named port groups');
+test('port groups: ranges, moving ports between groups, pruning when ports go away', () => {
+  const p = M.createProject('g');
+  const pp = M.addObject(p, { type: 'patchpanel', name: 'PP', portCount: 24, straight: true });
+  const rear = (n) => port(pp, n, 'rear').id;
+  const r = M.parsePortRange(pp, '7-14, 17', 'rear');
+  assert.deepStrictEqual(r.errors, []);
+  assert.strictEqual(r.ids.length, 9);
+  assert.deepStrictEqual(M.parsePortRange(pp, '30', 'rear').errors.length, 1);
+  const l1 = M.addPortGroup(p, pp.id, { name: 'L1', color: '#d62728', portsText: '7-14', side: 'rear' });
+  const off = M.addPortGroup(p, pp.id, { name: 'to rack office', color: '#2ca02c', portsText: '17-20', side: 'rear' });
+  assert.deepStrictEqual([l1.portIds.length, off.portIds.length], [8, 4]);
+  assert.strictEqual(M.portGroupOf(pp, rear(8)).name, 'L1');
+  assert.ok(M.portName(p, rear(18)).indexOf('[to rack office]') > 0);
+  // adding overlapping ports moves them; an emptied group disappears
+  M.addPortGroup(p, pp.id, { name: 'X', color: '#111111', portsText: '7-14', side: 'rear' });
+  assert.ok(!pp.portGroups.some(g => g.name === 'L1'));
+  M.updatePortGroup(p, off.id, { portsText: '17-24', side: 'rear', name: 'to office' });
+  assert.strictEqual(M.findPortGroup(p, off.id).group.portIds.length, 8);
+  assert.throws(() => M.updatePortGroup(p, off.id, { name: '  ' }), /name/);
+  assert.throws(() => M.addPortGroup(p, pp.id, { name: 'n', portsText: '99' }), /No port/);
+  assert.throws(() => M.addPortGroup(p, pp.id, { name: '', portsText: '1' }), /name/);
+  M.setPortCount(p, pp.id, 12);
+  assert.ok(!M.findPortGroup(p, off.id), 'ports removed -> group pruned');
+  assert.ok(M.search(p, 'X').some(r => r.kind === 'pgroup'));
+  assert.deepStrictEqual(M.mapsFor(p, 'pgroup', 'nope'), []);
+  M.deletePortGroup(p, pp.portGroups[0].id);
+  assert.strictEqual(pp.portGroups, undefined);
+  assert.ok(M.validateProject(p).every(i => i.severity !== 'error'));
+});
+test('port groups are drawn as a coloured band with a name tag, and exported', () => {
+  const p = M.createProject('g'), mid = p.maps[0].id;
+  const pp = B.addObjectPlaced(p, mid, { type: 'patchpanel', name: 'PP', portCount: 24, straight: true }, 0, 0);
+  const g = M.addPortGroup(p, pp.id, { name: 'to rack office', color: '#2ca02c', portsText: '17-20', side: 'rear' });
+  const r = R.renderMap(p, mid, {});
+  assert.ok(r.content.indexOf('data-kind="pgroup" data-id="' + g.id + '"') > 0);
+  assert.ok(r.content.indexOf('>to rack office</text>') > 0 && r.content.indexOf('fill="#2ca02c" fill-opacity="0.32"') > 0);
+  const geo = r.portGeo;
+  const rects = g.portIds.map(id => geo[id]);
+  assert.strictEqual(new Set(rects.map(x => Math.round(x.y))).size, 1, 'one row, one band');
+  assert.ok(R.svgDocument(p, mid).indexOf('to rack office') > 0);
+  assert.ok(R.renderMap(p, mid, { selection: { kind: 'pgroup', id: g.id } }).content.indexOf('stroke="#e91e63" stroke-width="3"') > 0);
+  const tip = r.content.slice(r.content.indexOf('data-id="' + g.portIds[0] + '"><title>'), r.content.indexOf('data-id="' + g.portIds[0] + '"><title>') + 150);
+  assert.ok(tip.indexOf('[to rack office]') > 0, 'tooltip names the group');
+  pp.ports.filter(x => x.side === 'rear').forEach(x => { x.label = x.label; });
+  // collapsed strip hides the band safely
+  const c = R.renderMap(p, mid, { collapsed: { [M.placementOf(p, mid, pp.id).id]: { rear: true } } });
+  assert.ok(c.content.indexOf('to rack office</text>') < 0);
+});
+
 console.log('\n' + passed + ' passed, ' + failed + ' failed');
 process.exit(failed ? 1 : 0);

@@ -91,6 +91,7 @@
   function selExists() {
     if (!S.sel) return true;
     const idx = M.buildIndex(S.p), k = S.sel.kind, id = S.sel.id;
+    if (k === 'pgroup') return !!M.findPortGroup(S.p, id);
     const t = { group: idx.groups, object: idx.objects, port: idx.ports, cable: idx.cables, link: idx.links, wire: idx.wires }[k];
     return !!(t && t[id]);
   }
@@ -143,6 +144,7 @@
     const add = (r) => { if (r) rects.push(r); };
     if (kind === 'group' || kind === 'object') add(pls(id));
     else if (kind === 'port') add(S.geo && S.geo.portGeo[id]);
+    else if (kind === 'pgroup') { const f = M.findPortGroup(S.p, id); if (f) f.group.portIds.forEach((pid) => add(S.geo && S.geo.portGeo[pid])); }
     else if (kind === 'cable') { const c = idx.cables[id]; if (c) [c.aPortId, c.bPortId].forEach((pid) => add(S.geo && S.geo.portGeo[pid])); }
     else if (kind === 'link') { const l = idx.links[id]; if (l) { add(pls(l.aObjectId)); add(pls(l.bObjectId)); } }
     else if (kind === 'wire') { const l = idx.wireLink[id]; if (l) { add(pls(l.aObjectId)); add(pls(l.bObjectId)); } }
@@ -243,6 +245,21 @@
       renderAll(); return;
     }
     setTool({ type: 'patch', pending: null, cableType: 'Cat6' });
+  }
+  /* 'G' after Ctrl+selecting ports: name and colour them as a port group */
+  async function nameSelectedPorts() {
+    const g = S.pgroup;
+    if (!g || !g.ids.length) return;
+    const o = M.buildIndex(S.p).objects[g.objId];
+    const v = await formDlg('Name port group', [
+      { k: 'name', label: 'Name', v: '', hint: g.ids.length + ' port(s) on ' + o.name + '. Examples: "to rack office", "L1".' },
+      { k: 'color', label: 'Colour', type: 'select', opts: M.CABLE_COLORS.filter((c) => c[0] !== 'white').map((c) => [c[1], c[0]]), v: '#1f77b4' }
+    ], 'Create group', '', (vals) => (vals.name.trim() ? null : 'Give the group a name'));
+    if (!v) return;
+    const created = commit('Add port group', (p) => M.addPortGroup(p, g.objId, { name: v.name, color: v.color, portIds: g.ids }));
+    clearPgroup();
+    if (created && created !== true) { S.sel = { kind: 'pgroup', id: created.id }; showTab('details'); openRight(); }
+    renderAll();
   }
   function clearPgroup() { S.pgroup = null; S.hoverPort = null; S.preview = null; }
 
@@ -500,7 +517,7 @@
     else if (S.pgroup) {
       th.hidden = false;
       const pv = S.preview;
-      th.textContent = pv ? (pv.ok ? 'Click to create a fixed link: ' + pv.text : pv.text) : S.pgroup.ids.length + ' rear port(s) selected - hover another patch panel and click to link (Ctrl+click adds, Esc cancels)';
+      th.textContent = pv ? (pv.ok ? 'Click to create a fixed link: ' + pv.text : pv.text) : S.pgroup.ids.length + ' rear port(s) selected - hover another panel and click to link, G names them as a group (Ctrl+click adds, Esc cancels)';
     }
     else if (S.tool && S.tool.type === 'reconnect') { th.hidden = false; th.textContent = 'Tap the new port for end ' + S.tool.end.toUpperCase() + ' (Esc to cancel)'; }
     else th.hidden = true;
@@ -575,10 +592,10 @@
   /* preset cable colours plus "Custom..." which reveals the RGB picker */
   /* special: optional first choice {value, label, swatch[, dt]} for "no colour" / "auto"; dt = data-t of the port being edited */
   function colorPicker(presetField, colorField, value, ownerId, special) {
-    const isSpecial = !!special && value === special.value;
+    const isSpecial = !!special && !special.noOption && value === special.value;
     const preset = M.CABLE_COLORS.find((c) => c[1].toLowerCase() === String(value).toLowerCase());
     const custom = S.customColorFor === ownerId || (!isSpecial && !preset);
-    const o = (special ? [[special.value, special.label]] : []).concat(M.CABLE_COLORS.map((c) => [c[1], c[0]]), [['custom', 'Custom...']]);
+    const o = (special && !special.noOption ? [[special.value, special.label]] : []).concat(M.CABLE_COLORS.map((c) => [c[1], c[0]]), [['custom', 'Custom...']]);
     const dt = special && special.dt ? ' data-t="' + esc(special.dt) + '"' : '';
     const hex = /^#[0-9a-f]{6}$/i.test(value) ? value : '#1f77b4';
     return '<span class="swatch" role="button" data-act="customColor" data-owner="' + esc(ownerId) + '" title="Click to choose any colour" style="background:' + esc(isSpecial ? (special.swatch || 'transparent') : value) + '"></span> <select data-f="' + presetField + '"' + dt + '>' +
@@ -624,7 +641,7 @@
       pane.innerHTML = '<h3>Nothing selected</h3><div class="sub">Tap an object, port, cable or fixed link on the map to see details. Use the search box to find a port, cable or wire by label or ID.</div>' +
         '<div class="btn-row">' + btn('help', 'Help') + '</div>';
     } else {
-      const d = { group: detGroup, object: detObject, port: detPort, cable: detCable, link: detLink, wire: detWire }[S.sel.kind];
+      const d = { group: detGroup, object: detObject, port: detPort, cable: detCable, link: detLink, wire: detWire, pgroup: detPGroup }[S.sel.kind];
       pane.innerHTML = d(S.sel.id);
     }
     renderTracePane();
@@ -742,6 +759,7 @@
         portState(o, pt, idx) + '</td><td>' +
         '<button data-act="trace" data-kind="port" data-id="' + esc(pt.id) + '" title="Trace connection">Trace</button></td></tr>').join('') + '</table>';
     }
+    h += pgroupSection(o);
     if (isEdit()) {
       h += '<div class="btn-row">' + placeButtons(id, 'object') + (M.isTermination(o) ? btn('automap', 'Map front N <-> rear N') + btn('newLinkFrom', 'Fixed link from here...') : '') +
         btn('deleteSel', 'Delete...', '', 'danger') + '</div>';
@@ -750,6 +768,48 @@
     return h;
   }
 
+  /* "7-14, 17" style text for a group's ports (numeric labels in runs) */
+  function portsText(o, g, side) {
+    const list = o.ports.filter((pt) => g.portIds.indexOf(pt.id) >= 0 && (!side || pt.side === side)), out = [];
+    let i = 0;
+    while (i < list.length) {
+      const a = list[i]; let j = i;
+      while (/^\d+$/.test(list[j].label) && j + 1 < list.length && /^\d+$/.test(list[j + 1].label) && +list[j + 1].label === +list[j].label + 1) j++;
+      out.push(j > i ? a.label + '-' + list[j].label : a.label); i = j + 1;
+    }
+    return out.join(', ');
+  }
+  const groupSide = (o, g) => { const sides = Array.from(new Set(o.ports.filter((pt) => g.portIds.indexOf(pt.id) >= 0).map((pt) => pt.side))); return M.isTermination(o) && sides.length === 1 ? sides[0] : null; };
+  function pgroupRows(o) {
+    return (o.portGroups || []).map((g) => '<div class="list-item" data-act="select" data-kind="pgroup" data-id="' + esc(g.id) + '"><span class="swatch" style="background:' + esc(g.color) + '"></span><div class="grow"><b>' + esc(g.name) + '</b> <span class="sub">' +
+      (groupSide(o, g) ? groupSide(o, g) + ' ' : '') + esc(portsText(o, g, groupSide(o, g))) + '</span></div></div>').join('');
+  }
+  function detPGroup(id) {
+    const f = M.findPortGroup(S.p, id), o = f.obj, g = f.group, side = groupSide(o, g);
+    let h = '<h3>Port group</h3>' + fld('On', lnk('object', o.id, o.name)) + inp('Name', 'pgName', g.name, g.id);
+    h += isEdit() ? fld('Colour', colorPicker('pgPreset', 'pgColor', g.color, 'pg:' + g.id, { noOption: true, dt: g.id })) : fld('Colour', '<span class="swatch" style="background:' + esc(g.color) + '"></span>');
+    h += inp('Ports', 'pgPorts', portsText(o, g, side), g.id, 'placeholder="7-14, 17"') + fld('Count', g.portIds.length + (side ? ' (' + side + ')' : ''));
+    if (isEdit()) h += '<div class="sub">Ports as numbers and ranges, e.g. 7-14, 17. A port belongs to one group.</div>';
+    h += '<div class="btn-row">';
+    if (isEdit()) {
+      const rear = o.ports.filter((pt) => g.portIds.indexOf(pt.id) >= 0 && pt.side === 'rear');
+      if (M.isTermination(o) && rear.length) h += btn('linkFromGroup', 'Fixed link from this group...', 'data-id="' + esc(g.id) + '"');
+      h += btn('deletePGroup', 'Delete group', 'data-id="' + esc(g.id) + '"', 'danger');
+    }
+    return h + '</div>';
+  }
+  function pgroupSection(o) {
+    let h = '';
+    if (!o.ports.length) return h;
+    h += '<h3>Port groups (' + (o.portGroups || []).length + ')</h3>' + (pgroupRows(o) || '<div class="sub">None. Name and colour a set of ports, e.g. "to rack office".</div>');
+    if (isEdit()) {
+      h += '<div class="sub" style="margin-top:6px">New group: <input type="text" id="pgNewName" placeholder="name" style="width:9em"> ports <input type="text" id="pgNewPorts" placeholder="7-14, 17" style="width:7em">' +
+        (M.isTermination(o) ? ' <select id="pgNewSide"><option value="rear">rear</option><option value="front">front</option></select>' : '') +
+        ' <select id="pgNewColor">' + opts(M.CABLE_COLORS.filter((c) => c[0] !== 'white').map((c) => [c[1], c[0]]), '#1f77b4') + '</select> ' + btn('addPGroup', 'Add') + '</div>';
+      h += '<div class="sub">Tip: Ctrl+click ports, then press G to name them as a group.</div>';
+    }
+    return h;
+  }
   function detPort(id) {
     const idx = M.buildIndex(S.p), pt = idx.ports[id], o = idx.portObj[id];
     let h = '<h3>Port</h3>' + fld('Equipment', lnk('object', o.id, o.name)) + inp('Number', 'plabel', pt.label, pt.id) + inp('Label', 'pdesc', pt.description || '', pt.id, 'placeholder="shown on hover"');
@@ -1138,6 +1198,10 @@
   function onFieldChange(el) {
     let f = el.dataset.f;
     const t = el.dataset.t, val = el.type === 'checkbox' ? el.checked : el.value;
+    if (f === 'pgPreset') {
+      if (val === 'custom') { S.customColorFor = 'pg:' + t; renderRight(); return; }
+      S.customColorFor = null; f = 'pgColor';
+    } else if (f === 'pgColor') S.customColorFor = null;
     if (f === 'netPreset') {
       if (val === 'custom') { S.customColorFor = 'net:' + t; renderRight(); return; }
       S.customColorFor = null; f = 'pnet';
@@ -1177,7 +1241,12 @@
           if (f === 'ipAddress') M.setDeviceIp(p, sel.id, val); else c.item[f] = val;
         }
       } else if (sel.kind === 'cable') M.updatePatchCable(p, sel.id, { [f]: val });
-      else if (sel.kind === 'link') M.updateLinkMeta(p, sel.id, { [f]: val });
+      else if (sel.kind === 'pgroup') {
+        const fg = M.findPortGroup(p, sel.id), side = fg && groupSide(fg.obj, fg.group);
+        if (f === 'pgName') M.updatePortGroup(p, sel.id, { name: val });
+        else if (f === 'pgColor') M.updatePortGroup(p, sel.id, { color: val });
+        else if (f === 'pgPorts') M.updatePortGroup(p, sel.id, { portsText: val, side: side || undefined });
+      } else if (sel.kind === 'link') M.updateLinkMeta(p, sel.id, { [f]: val });
     });
     if (ok && netPort) offerMatchNetworkColor(netPort);
     if (ok && (f === 'pip' || f === 'ipAddress')) { const fresh = netIssues().filter((i) => beforeNet.indexOf(i.message) < 0); if (fresh.length) toast('Network warning: ' + fresh[0].message, true); }
@@ -1364,6 +1433,21 @@
           });
           break;
         }
+        case 'addPGroup': {
+          const id = S.sel.id, side = $('pgNewSide') ? $('pgNewSide').value : undefined;
+          const spec = { name: $('pgNewName').value, portsText: $('pgNewPorts').value, side: side, color: $('pgNewColor').value };
+          const g = commit('Add port group', (p) => M.addPortGroup(p, id, spec));
+          if (g && g !== true) { S.sel = { kind: 'pgroup', id: g.id }; renderAll(); }
+          break;
+        }
+        case 'deletePGroup': { const f = M.findPortGroup(S.p, d.id), oid = f && f.obj.id; commit('Delete port group', (p) => M.deletePortGroup(p, d.id)); if (oid) { S.sel = { kind: 'object', id: oid }; renderAll(); } break; }
+        case 'linkFromGroup': {
+          const f = M.findPortGroup(S.p, d.id), idx = M.buildIndex(S.p);
+          const ids = f.group.portIds.filter((pid) => idx.ports[pid].side === 'rear' && !idx.portUse[pid]);
+          if (!ids.length) { toast('No free rear ports in this group', true); break; }
+          S.pgroup = { objId: f.obj.id, ids: ids, last: ids[ids.length - 1] }; S.hoverPort = null; S.preview = null;
+          renderAll(); toast(ids.length + ' port(s) ready: hover another panel or socket and click to link'); break;
+        }
         case 'applyUplinks': { const n = parseInt($('upInput').value, 10), id = S.sel.id; commit('Set uplink ports', (p) => { M.setUplinkPorts(p, id, n); B.refitObject(p, id); }); break; }
         case 'applyPortCount': { const n = parseInt($('pcInput').value, 10), id = S.sel.id; commit('Set port count', (p) => { M.setPortCount(p, id, n); B.refitObject(p, id); }); break; }
         case 'applyRouterPorts': { const id = S.sel.id, w = parseInt($('wanInput').value, 10), l = parseInt($('lanInput').value, 10); commit('Set router ports', (p) => M.setRouterPorts(p, id, w, l)); break; }
@@ -1404,6 +1488,7 @@
       else if (isEdit() && !typing && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); }
       else if (isEdit() && !typing && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') { e.preventDefault(); redo(); }
       else if (isEdit() && !typing && (e.key === 'Delete')) deleteSelection();
+      else if (isEdit() && !typing && !e.ctrlKey && !e.metaKey && !e.altKey && S.pgroup && (e.key === 'g' || e.key === 'G')) { e.preventDefault(); nameSelectedPorts(); }
       else if (!typing && !e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'w' || e.key === 'W')) { e.preventDefault(); startWire(); }
     });
     window.addEventListener('pagehide', () => { if (S.unsaved) saveNow(); });
