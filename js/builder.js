@@ -262,6 +262,44 @@
     M.growToFit(p, mapId, rackId);
   }
 
-  NM.builder = { resolveDrop: resolveDrop, settle: settle, findDropContainer: findDropContainer, dropSlot: dropSlot, restack: restack, captureChain: captureChain, restoreChain: restoreChain, applyExtension: applyExtension, refitObject: refitObject, placeItem: placeItem, addGroupPlaced: addGroupPlaced, addObjectPlaced: addObjectPlaced, buildDemoProject: buildDemoProject };
+  /* smallest size a placement may have: equipment keeps its labels readable, containers keep their contents inside */
+  function minPlacementSize(p, pl) {
+    var c = M.findContainer(p, pl.refId);
+    if (!c) return { w: 40, h: 30 };
+    var base = c.kind === 'object' ? L.minSize(c.item) : { w: 100, h: 60 };
+    M.containerChildren(p, pl.refId).forEach(function (k) {
+      var q = M.placementOf(p, pl.mapId, k.id);
+      if (q) { base.w = Math.max(base.w, q.x + q.w + M.PAD - pl.x); base.h = Math.max(base.h, q.y + q.h + M.PAD - pl.y); }
+    });
+    return base;
+  }
+  /*
+   * Repair placements that are too small (projects made by older versions or edited by hand): equipment grows to its
+   * minimum, containers grow around their contents, and overlaps that creates are resolved. Returns how many changed.
+   */
+  function normalizeSizes(p) {
+    var changed = 0, touched = [];
+    p.placements.forEach(function (pl) {
+      var c = M.findContainer(p, pl.refId);
+      if (!c || c.kind !== 'object') return;
+      var mn = L.minSize(c.item);
+      if (pl.w < mn.w || pl.h < mn.h) { pl.w = Math.max(pl.w, mn.w); pl.h = Math.max(pl.h, mn.h); changed++; touched.push(pl); }
+    });
+    touched.forEach(function (pl) { settle(p, pl); });
+    return changed;
+  }
+  /* after a label/port change: grow (never shrink) the object's placements to the new minimum */
+  function fitMinimum(p, objectId) {
+    var o = M.buildIndex(p).objects[objectId];
+    if (!o) return;
+    var mn = L.minSize(o);
+    p.placements.forEach(function (pl) {
+      if (pl.refId !== objectId || (pl.w >= mn.w && pl.h >= mn.h)) return;
+      pl.w = Math.max(pl.w, mn.w); pl.h = Math.max(pl.h, mn.h);
+      settle(p, pl);
+    });
+  }
+
+  NM.builder = { minPlacementSize: minPlacementSize, normalizeSizes: normalizeSizes, fitMinimum: fitMinimum, resolveDrop: resolveDrop, settle: settle, findDropContainer: findDropContainer, dropSlot: dropSlot, restack: restack, captureChain: captureChain, restoreChain: restoreChain, applyExtension: applyExtension, refitObject: refitObject, placeItem: placeItem, addGroupPlaced: addGroupPlaced, addObjectPlaced: addObjectPlaced, buildDemoProject: buildDemoProject };
   if (typeof module !== 'undefined' && module.exports) module.exports = NM.builder;
 })(typeof window !== 'undefined' ? window : globalThis);

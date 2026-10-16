@@ -61,6 +61,10 @@ Try it: File -> Load demo project (two rooms, a fixed link between racks, a wall
   or inside another container to move it there. Dropping inside the extension keeps the larger container.
 - **Rack stacking**: while you drag equipment over a rack, the rack is outlined green and a green line shows where it will
   attach (between its neighbours). On drop the rack's equipment is re-stacked top to bottom with it at that position.
+- **Readable sizes**: equipment can never be resized below the size where all its port labels fit (longer labels need wider
+  cells, and editing a label grows the panel if needed); groups and racks cannot be shrunk over their contents. Projects
+  loaded or imported from older versions have any too-small items enlarged automatically (you get a message), and the map
+  and exports never draw them below the minimum either.
 - **No overlaps**: items inside the same container (or at the top level of a map) never overlap. A dropped, newly placed or
   resized item slides to the nearest free spot; containers grow to hold what is inside and push neighbouring
   containers away (with their contents), cascading outward.

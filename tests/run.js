@@ -629,5 +629,51 @@ test('port ring is drawn for hovered cable ends', () => {
   assert.ok(svg.indexOf('data-ring="' + c.aPortId + '"') > 0 && svg.indexOf('#d500f9') > 0);
 });
 
+console.log('Minimum sizes');
+test('port labels set a minimum size; longer labels need wider cells', () => {
+  const p = M.createProject('m');
+  const o = M.addObject(p, { type: 'patchpanel', portCount: 24 });
+  const small = NM.layout.minSize(o);
+  o.ports[0].label = 'LONGLABEL'; // 9 chars
+  assert.ok(NM.layout.minSize(o).w > small.w);
+  assert.strictEqual(NM.layout.minSize(o).w, NM.layout.defaultSize(o).w);
+  assert.ok(NM.layout.cellFor(M.addObject(p, { type: 'switch', portCount: 8 })) >= 18);
+});
+test('rendering never draws equipment smaller than its minimum', () => {
+  const p = M.createProject('m'), mid = p.maps[0].id;
+  const o = B.addObjectPlaced(p, mid, { type: 'patchpanel', name: 'Tiny', portCount: 24 }, 0, 0);
+  const pl = M.placementOf(p, mid, o.id), mn = NM.layout.minSize(o);
+  pl.w = 40; pl.h = 20; // hand-edited / old file
+  const r = R.renderMap(p, mid, {});
+  const g = r.portGeo[o.ports[0].id];
+  assert.ok(g.w >= 16 && g.h >= 16, 'ports stay readable: ' + g.w + 'x' + g.h);
+  const last = r.portGeo[o.ports[23].id];
+  assert.ok(last.x + last.w <= pl.x + mn.w, 'all ports inside the minimum box');
+});
+test('normalizeSizes repairs old projects and keeps the layout overlap-free', () => {
+  const p = B.buildDemoProject();
+  p.placements.forEach(pl => { if (pl.refType === 'object') { const o = p.objects.find(x => x.id === pl.refId); if (o.ports.length) { pl.w = 60; pl.h = 30; } } });
+  const fixed = B.normalizeSizes(p);
+  assert.ok(fixed >= 5, 'fixed ' + fixed);
+  p.placements.forEach(pl => {
+    const o = p.objects.find(x => x.id === pl.refId);
+    if (o && o.ports.length) { const mn = NM.layout.minSize(o); assert.ok(pl.w >= mn.w && pl.h >= mn.h, o.name); }
+  });
+  assert.deepStrictEqual(overlapPairs(p), []);
+  assert.strictEqual(B.normalizeSizes(p), 0, 'idempotent');
+});
+test('minPlacementSize keeps containers around their contents; editing a label grows the panel', () => {
+  const p = B.buildDemoProject(), mid = p.maps[0].id;
+  const rack = byName(p, 'Rack A'), rp = M.placementOf(p, mid, rack.id);
+  const mn = B.minPlacementSize(p, rp);
+  const children = M.containerChildren(p, rack.id).map(c => M.placementOf(p, mid, c.id));
+  assert.ok(mn.w >= Math.max(...children.map(c => c.x + c.w)) + M.PAD - rp.x);
+  assert.ok(mn.h >= Math.max(...children.map(c => c.y + c.h)) + M.PAD - rp.y);
+  const pp = byName(p, 'PP-A'), pl = M.placementOf(p, mid, pp.id), w0 = pl.w;
+  pp.ports[0].label = 'VERYLONGLABEL'; B.fitMinimum(p, pp.id);
+  assert.ok(pl.w > w0);
+  assert.deepStrictEqual(overlapPairs(p), []);
+});
+
 console.log('\n' + passed + ' passed, ' + failed + ' failed');
 process.exit(failed ? 1 : 0);

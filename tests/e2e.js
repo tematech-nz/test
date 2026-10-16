@@ -449,6 +449,43 @@ const ok = (m) => console.log('  ok   ' + m);
     await page.click('#btnUndo'); await page.click('#btnUndo'); await page.click('#btnUndo');
   });
 
+
+  await step('resizing cannot shrink equipment below readable size; containers stay around contents', async () => {
+    const ids = await page.evaluate(() => {
+      let out;
+      NetMap.app.api.commit('resize test', (p) => {
+        const B = NetMap.builder, mid = p.maps[0].id;
+        const pp = B.addObjectPlaced(p, mid, { type: 'patchpanel', name: 'ResizeMe', portCount: 24 }, 2600, 40);
+        out = { id: pp.id };
+      });
+      const S = NetMap.app.S;
+      out.pl = S.p.placements.find(q => q.refId === out.id).id;
+      NetMap.app.api.goTo('object', out.id, S.p.maps[0].id);
+      return out;
+    });
+    const size = () => page.evaluate((i) => { const q = NetMap.app.S.p.placements.find(x => x.id === i); const mn = NetMap.layout.minSize(NetMap.app.S.p.objects.find(o => o.name === 'ResizeMe')); return { w: q.w, h: q.h, mw: mn.w, mh: mn.h, zoom: NetMap.app.S.p.maps[0].viewport.zoom }; }, ids.pl);
+    const s0 = await size();
+    const box = await page.locator('[data-handle="resize"][data-pl="' + ids.pl + '"]').boundingBox();
+    await page.mouse.move(box.x + 5, box.y + 5); await page.mouse.down();
+    await page.mouse.move(box.x - 600 * s0.zoom, box.y - 300 * s0.zoom, { steps: 10 }); await page.mouse.up();
+    await page.waitForTimeout(100);
+    const s1 = await size();
+    assert.ok(s1.w >= s1.mw && s1.h >= s1.mh, 'clamped to minimum: ' + JSON.stringify(s1));
+    await page.click('#btnUndo');
+    const rackId = await page.evaluate(() => NetMap.app.S.p.placements.find(q => q.refId === NetMap.app.S.p.objects.find(o => o.name === 'Rack A').id && q.mapId === NetMap.app.S.p.maps[0].id).id);
+    await page.evaluate(() => NetMap.app.api.goTo('object', NetMap.app.S.p.objects.find(o => o.name === 'Rack A').id, NetMap.app.S.p.maps[0].id));
+    const rb = await page.locator('[data-handle="resize"][data-pl="' + rackId + '"]').boundingBox();
+    await page.mouse.move(rb.x + 5, rb.y + 5); await page.mouse.down();
+    await page.mouse.move(rb.x - 800 * s0.zoom, rb.y - 800 * s0.zoom, { steps: 10 }); await page.mouse.up();
+    await page.waitForTimeout(100);
+    const inside = await page.evaluate((rid) => {
+      const S = NetMap.app.S, r = S.p.placements.find(q => q.id === rid);
+      return NetMap.model.containerChildren(S.p, r.refId).every(c => { const q = NetMap.model.placementOf(S.p, r.mapId, c.id); return q.x + q.w <= r.x + r.w && q.y + q.h <= r.y + r.h; });
+    }, rackId);
+    assert.ok(inside, 'rack stays around its equipment');
+    await page.click('#btnUndo');
+  });
+
   await step('autosave survives a refresh', async () => {
     await page.click('#btnMode'); // back to view mode flushes the save
     const name = await page.evaluate(() => NetMap.app.S.p.name);

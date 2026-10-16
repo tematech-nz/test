@@ -35,13 +35,21 @@
     return HEADER + sides.length * (SECHEAD + SECGAP) + rows * (CELL + 2) + 4;
   }
 
+  /* width of one port cell: wide enough that the longest label is readable (2 chars = the 18px default) */
+  function cellFor(obj) {
+    var m = 0;
+    obj.ports.forEach(function (p) { m = Math.max(m, String(p.label == null ? '' : p.label).length); });
+    return Math.max(CELL, Math.min(64, m * 6 + 6));
+  }
+
   function defaultSize(obj) {
     if (obj.type === 'rack') return { w: 340, h: 300 };
-    if (obj.type === 'generic') return { w: 120, h: 60 };
+    if (obj.type === 'generic' && !obj.ports.length) return { w: 120, h: 60 };
     var ks = sidesOf(obj), gs = ks.map(function (k) { return gridOf(obj, k); });
     var front = gs[0] || { rows: 0, cols: 0 }, rear = gs[1] || { rows: 0, cols: 0 };
     var cols = Math.max(front.cols, rear.cols, 4);
-    var w = cols * CELL + PADX * 2 + (SECTIONED[obj.type] ? 6 : 0);
+    var w = cols * cellFor(obj) + PADX * 2 + (SECTIONED[obj.type] ? 6 : 0);
+    if (obj.type === 'generic') w = Math.max(w, 100);
     if (obj.type === 'patchpanel') w += (Math.max(front.perRow || 1, rear.perRow || 1) - 1) * SGAP;
     if (obj.type === 'router') w = Math.max(w, 150);
     if (obj.type === 'internet') w = Math.max(w, 130);
@@ -49,6 +57,17 @@
     return { w: w, h: HEADER + (front.rows + rear.rows) * (CELL + 2) + 8 };
   }
   function defaultGroupSize() { return { w: 420, h: 340 }; }
+
+  /*
+   * Smallest size at which every port label stays readable. Equipment with ports can never be drawn smaller than its
+   * natural size (it may be larger); empty equipment and containers have small fixed minimums (containers are also
+   * limited by their contents - see builder.minPlacementSize).
+   */
+  function minSize(obj) {
+    if (obj.type === 'rack') return { w: 160, h: 80 };
+    if (!obj.ports.length) return { w: 80, h: 40 };
+    return defaultSize(obj);
+  }
 
   function placeGrid(obj, side, list, x0, y0, w, rowH, out, hidden) {
     var gr = gridFor(list.length);
@@ -88,7 +107,7 @@
       var anyCollapsed = sides.some(function (s) { return collapsed[s]; });
       var rows = 0;
       sides.forEach(function (s) { if (!collapsed[s]) rows += gridOf(obj, s).rows; });
-      var rowH = anyCollapsed || !rows ? CELL + 2 : Math.max(10, (h - chrome) / rows);
+      var rowH = anyCollapsed || !rows ? CELL + 2 : Math.max(CELL + 2, (h - chrome) / rows);
       var y = HEADER;
       sides.forEach(function (side) {
         var list = inSide(obj, side);
@@ -106,7 +125,7 @@
     }
     var grids = sides.map(function (s) { return gridFor(sideCount(obj, s)); });
     var totalRows = grids.reduce(function (a, x) { return a + x.rows; }, 0);
-    var rh = Math.max(10, (h - HEADER - 8) / totalRows), y0 = HEADER + 2;
+    var rh = Math.max(CELL + 2, (h - HEADER - 8) / totalRows), y0 = HEADER + 2;
     sides.forEach(function (side, si) {
       placeGrid(obj, side, inSide(obj, side), 0, y0, w, rh, out.ports, false);
       y0 += grids[si].rows * rh;
@@ -115,6 +134,6 @@
   }
   function layoutPorts(obj, w, h, collapsed) { return computeLayout(obj, w, h, collapsed).ports; }
 
-  NM.layout = { HEADER: HEADER, defaultSize: defaultSize, defaultGroupSize: defaultGroupSize, layoutPorts: layoutPorts, computeLayout: computeLayout, gridOf: gridOf, panelHeight: panelHeight, gridFor: gridFor };
+  NM.layout = { HEADER: HEADER, defaultSize: defaultSize, defaultGroupSize: defaultGroupSize, layoutPorts: layoutPorts, minSize: minSize, cellFor: cellFor, computeLayout: computeLayout, gridOf: gridOf, panelHeight: panelHeight, gridFor: gridFor };
   if (typeof module !== 'undefined' && module.exports) module.exports = NM.layout;
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -340,7 +340,8 @@
           S.drop = B.dropSlot(S.p, d.items[0].q);
         } else {
           const it = d.items[0];
-          it.q.w = Math.max(60, snap(it.ow + dx)); it.q.h = Math.max(40, snap(it.oh + dy));
+          const mn = B.minPlacementSize(S.p, it.q);
+          it.q.w = Math.max(mn.w, snap(it.ow + dx)); it.q.h = Math.max(mn.h, snap(it.oh + dy));
         }
         scheduleRender(); return;
       }
@@ -1035,7 +1036,7 @@
       if (f === 'plabel' || f === 'ptype' || f === 'pspeed' || f === 'pmedia' || f === 'pip') {
         const pt = idx.ports[t || sel.id]; if (!pt) return;
         if (f === 'pip' && !M.isValidIp(val)) toast('That does not look like a valid IP address (kept as typed)', true);
-        if (f === 'plabel') pt.label = val; else pt[{ ptype: 'portType', pspeed: 'speed', pmedia: 'media', pip: 'ip' }[f]] = val.trim();
+        if (f === 'plabel') { pt.label = val; B.fitMinimum(p, idx.portObj[pt.id].id); } else pt[{ ptype: 'portType', pspeed: 'speed', pmedia: 'media', pip: 'ip' }[f]] = val.trim();
         return;
       }
       if (f === 'wstatus') { M.updateWireStatus(p, t, val); return; }
@@ -1105,6 +1106,8 @@
     toast('Imported ' + res.project.name);
   }
   function loadProject(p) {
+    const fixed = B.normalizeSizes(p);
+    if (fixed) setTimeout(() => toast('Enlarged ' + fixed + ' item(s) that were too small to read', false), 100);
     S.p = p; S.mapId = p.maps[0].id; S.sel = null; S.trace = null; S.tool = null; S.undo = []; S.redo = []; S.issues = []; S.showIssues = false;
     saveNow(); renderAll();
     if (p.placements.some((q) => q.mapId === S.mapId)) fitMap();
@@ -1255,6 +1258,7 @@
   function init() {
     try { S.lastExport = localStorage.getItem(KEY_EXPORT); } catch (_) { S.lastExport = null; }
     S.p = loadSaved() || M.createProject('Untitled project');
+    if (B.normalizeSizes(S.p)) saveNow();
     S.mapId = S.p.maps[0].id;
     loadCollapsed();
     bindUi(); bindCanvas();

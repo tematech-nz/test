@@ -71,9 +71,11 @@
     items.forEach(function (it) {
       var pl = it.pl, coll = (!exporting && !it.isGroup && opts.collapsed && opts.collapsed[pl.id]) || null;
       it.coll = coll;
-      it.lay = !it.isGroup && it.ref.ports.length ? L.computeLayout(it.ref, pl.w, pl.h, coll) : null;
-      var anyColl = coll && (coll.front || coll.rear);
-      it.box = { x: pl.x, y: pl.y, w: pl.w, h: it.lay && anyColl ? it.lay.h : pl.h, id: pl.id };
+      // never draw equipment below the size where its port labels are readable (old or hand-edited files)
+      var mn = it.isGroup ? { w: 0, h: 0 } : L.minSize(it.ref), bw = Math.max(pl.w, mn.w), bh = Math.max(pl.h, mn.h);
+      it.lay = !it.isGroup && it.ref.ports.length ? L.computeLayout(it.ref, bw, bh, coll) : null;
+      var anyColl = coll && Object.keys(coll).some(function (k) { return coll[k]; });
+      it.box = { x: pl.x, y: pl.y, w: bw, h: it.lay && anyColl ? it.lay.h : bh, id: pl.id };
       byRef[pl.refId] = it.box;
     });
 
