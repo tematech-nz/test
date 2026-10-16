@@ -1135,6 +1135,19 @@ test('single-port generic devices use the device address; managed switches have 
   assert.ok(/192\.168\.5\.2/.test(html));
   assert.ok(R.svgDocument(p, p.maps[0].id).length > 0);
 });
+test('generic device address propagates to ports without their own; chip lists every address', () => {
+  const p = M.createProject('i'), mid = p.maps[0].id;
+  const pc = B.addObjectPlaced(p, mid, { type: 'generic', name: 'PC', portCount: 2, ipAddress: '192.168.3.240' }, 0, 0);
+  assert.strictEqual(M.effectivePortIp(pc, pc.ports[0]), '192.168.3.240');
+  assert.strictEqual(M.effectivePortIp(pc, pc.ports[1]), '192.168.3.240');
+  M.setPortIp(p, pc.ports[1].id, '192.168.4.5');
+  assert.strictEqual(M.effectivePortIp(pc, pc.ports[0]), '192.168.3.240');
+  assert.strictEqual(M.effectivePortIp(pc, pc.ports[1]), '192.168.4.5');
+  assert.deepStrictEqual(M.ipList(pc).map((x) => x.ip), ['192.168.3.240', '192.168.4.5']);
+  assert.strictEqual(NM.topology.effectiveIp(pc, pc.ports[0]), '192.168.3.240');
+  const svg = R.svgDocument(p, mid);
+  assert.ok(svg.indexOf('class="ipchip"') > 0 && svg.indexOf('192.168.4.5') > 0 && !/<text[^>]*>192\.168/.test(svg), 'addresses are in a tooltip, not drawn over the name');
+});
 test('device addresses are drawn and checked for validity', () => {
   const p = M.createProject('i'), mid = p.maps[0].id;
   const sw = B.addObjectPlaced(p, mid, { type: 'switch', name: 'Managed', portCount: 8, ipAddress: '192.168.1.2', portIsolation: true }, 0, 0);

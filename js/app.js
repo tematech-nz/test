@@ -735,7 +735,7 @@
     if (M.hasDeviceIp(o)) {
       h += inp(o.type === 'internet' ? 'Public IP' : (o.type === 'switch' ? 'Management IP' : 'IP address'), 'ipAddress', o.ipAddress || '');
       if (isEdit() && o.type === 'switch') h += '<div class="sub">Address of the switch\'s web interface (managed switch). It joins the network of the switch, not its ports.</div>';
-      if (isEdit() && o.type === 'generic') h += '<div class="sub">Used for its port when it has just one; with several ports (e.g. a PC with two NICs) give each port its own IP below - a device never joins its networks together.</div>';
+      if (isEdit() && o.type === 'generic') h += '<div class="sub">Every port without its own address uses this one. For several networks (e.g. a PC with two NICs) give ports their own IP below - a device never joins its networks together.</div>';
     }
     const par = o.containerId ? M.findContainer(S.p, o.containerId) : null;
     h += isEdit() ? fld('Inside', '<select data-f="container">' + opts(containerOptions('object', o.type, id), o.containerId || '') + '</select>') : fld('Inside', par ? lnk(par.kind, par.id, par.item.name) : '-');
@@ -769,7 +769,7 @@
         '<tr><td>' + (isEdit() ? '<input type="text" data-f="plabel" data-t="' + esc(pt.id) + '" value="' + esc(pt.label) + '" style="width:5em">' : '<a class="lnk" data-act="select" data-kind="port" data-id="' + esc(pt.id) + '">' + esc(pt.label) + '</a>') +
         (M.isTermination(o) ? ' <span class="tag">' + pt.side + '</span>' : '') + ((o.type === 'router' || pt.role === 'uplink') ? ' <span class="tag">' + esc(pt.role) + '</span>' : '') + '</td><td>' +
         (isEdit() ? '<input type="text" data-f="pdesc" data-t="' + esc(pt.id) + '" value="' + esc(pt.description || '') + '" placeholder="Label (shown on hover)" style="width:100%;margin-bottom:2px">' : (pt.description ? '<div><b>' + esc(pt.description) + '</b></div>' : '')) +
-        (hasIp(o) ? (isEdit() ? '<input type="text" data-f="pip" data-t="' + esc(pt.id) + '" value="' + esc(pt.ip || '') + '" placeholder="IP" style="width:100%;margin-bottom:2px">' : (pt.ip ? '<div>' + esc(pt.ip) + '</div>' : '')) : '') +
+        (hasIp(o) ? (isEdit() ? '<input type="text" data-f="pip" data-t="' + esc(pt.id) + '" value="' + esc(pt.ip || '') + '" placeholder="' + esc(M.effectivePortIp(o, pt) || 'IP') + '" style="width:100%;margin-bottom:2px">' : (M.effectivePortIp(o, pt) ? '<div>' + esc(M.effectivePortIp(o, pt)) + (pt.ip ? '' : ' <span class="tag">device</span>') + '</div>' : '')) : '') +
         portState(o, pt, idx) + '</td><td>' +
         '<button data-act="trace" data-kind="port" data-id="' + esc(pt.id) + '" title="Trace connection">Trace</button></td></tr>').join('') + '</table>';
     }
@@ -829,7 +829,7 @@
     let h = '<h3>Port</h3>' + fld('Equipment', lnk('object', o.id, o.name)) + inp('Number', 'plabel', pt.label, pt.id) + inp('Label', 'pdesc', pt.description || '', pt.id, 'placeholder="shown on hover"');
     if (M.isTermination(o)) h += fld('Side', pt.side);
     if (o.type === 'router') h += fld('Role', esc((pt.role || '').toUpperCase()));
-    if (hasIp(o)) h += inp('IP address', 'pip', pt.ip || '', pt.id);
+    if (hasIp(o)) h += inp('IP address', 'pip', pt.ip || '', pt.id, 'placeholder="' + esc(M.effectivePortIp(o, pt) || '') + '"') + (!pt.ip && M.effectivePortIp(o, pt) ? '<div class="sub">Empty: uses the device address ' + esc(M.effectivePortIp(o, pt)) + '.</div>' : '');
     if (o.type === 'router') h += isEdit() ? fld('Network colour', colorPicker('netPreset', 'pnet', pt.networkColor || '', 'net:' + pt.id, { value: '', label: 'none', swatch: 'transparent', dt: pt.id }) + '<div class="sub">New patch cables extending from this port default to this colour.</div>') : (pt.networkColor ? fld('Network colour', '<span class="swatch" style="background:' + esc(pt.networkColor) + '"></span>') : '');
     if (o.type === 'switch') h += inp('Type', 'ptype', pt.portType || '', pt.id) + inp('Speed', 'pspeed', pt.speed || '', pt.id) + inp('Media', 'pmedia', pt.media || '', pt.id);
     h += fld('Connection', portState(o, pt, idx));
@@ -1019,7 +1019,7 @@
       fields.push({ k: 'ipAddress', label: 'Public IP / circuit', v: '' });
     }
     if (type === 'switch') fields.push({ k: 'ipAddress', label: 'Management IP', v: '', hint: 'Optional: the web interface address of a managed switch (IPv4, e.g. 192.168.1.2).' });
-    if (type === 'generic') fields.push({ k: 'ipAddress', label: 'IP address', v: '', hint: 'Optional IPv4 address for a single-port device; give multi-port devices per-port addresses afterwards.' });
+    if (type === 'generic') fields.push({ k: 'ipAddress', label: 'IP address', v: '', hint: 'Optional IPv4 address; all ports use it unless given an address of their own.' });
     if (type === 'socket') fields.push({ k: 'portCount', label: 'Ports', type: 'number', v: 2, min: 1, max: 12 });
     if (type === 'generic') {
       fields.unshift({ k: 'deviceKind', label: 'Device type', type: 'select', opts: M.DEVICE_KINDS.map((k) => [k[0], k[1]]), v: 'other' });

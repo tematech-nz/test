@@ -780,6 +780,24 @@
     var m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(s);
     return !!m && [m[1], m[2], m[3], m[4]].every(function (x) { return +x <= 255 && String(+x) === x.replace(/^0+(?=\d)/, ''); });
   }
+  /* address a port answers to: its own, else the device address (routers: LAN ports only; generic devices: every port without its own) */
+  function effectivePortIp(o, pt) {
+    var ip = pt.ip || '';
+    if (!ip && o.type === 'router' && pt.role === 'lan') ip = o.ipAddress || '';
+    if (!ip && o.type === 'generic') ip = o.ipAddress || '';
+    return String(ip).trim();
+  }
+  /* every address shown for a piece of equipment: [{ label, ip, inherited }] */
+  function ipList(o) {
+    var out = [];
+    if (o.type === 'switch' || o.type === 'internet') { if (o.ipAddress) out.push({ label: o.type === 'switch' ? 'management' : 'public', ip: o.ipAddress }); }
+    o.ports.forEach(function (pt) {
+      var ip = effectivePortIp(o, pt);
+      if (ip) out.push({ label: 'port ' + pt.label, ip: ip, inherited: !pt.ip });
+    });
+    if (!out.length && o.ipAddress) out.push({ label: 'device', ip: o.ipAddress });
+    return out;
+  }
   function setDeviceIp(p, objectId, ip) {
     var o = buildIndex(p).objects[objectId];
     if (!o || !hasDeviceIp(o)) throw new Error('This equipment has no IP address (routers, switches, generic devices and the Internet object do)');
@@ -981,7 +999,7 @@
     findContainer: findContainer, groupOf: groupOf, parentOf: parentOf, containerChildren: containerChildren, descendants: descendants,
     addPlacement: addPlacement, placementOf: placementOf, placementGroup: placementGroup, movePlacement: movePlacement,
     growToFit: growToFit, mapsFor: mapsFor, addGroup: addGroup, addObject: addObject, setContainer: setContainer,
-    setPortCount: setPortCount, findPortGroup: findPortGroup, parsePortRange: parsePortRange, addPortGroup: addPortGroup, updatePortGroup: updatePortGroup, deletePortGroup: deletePortGroup, portGroupOf: portGroupOf, prunePortGroups: prunePortGroups, hasDeviceIp: hasDeviceIp, hasPortIp: hasPortIp, setDeviceIp: setDeviceIp, setPortIp: setPortIp, IP_ERROR: IP_ERROR, setDeviceKind: setDeviceKind, isTermination: isTermination, DEVICE_KINDS: DEVICE_KINDS, deviceKindInfo: deviceKindInfo, typeLabel: typeLabel, accessPorts: accessPorts, validSectionRows: validSectionRows, setUplinkPorts: setUplinkPorts, setSwitchLayout: setSwitchLayout, setFullWidth: setFullWidth, setSectionSize: setSectionSize, validSectionSizes: validSectionSizes, defaultSectionSize: defaultSectionSize, effectiveSectionSize: effectiveSectionSize, setRouterPorts: setRouterPorts, isValidIp: isValidIp, canConnectPatch: canConnectPatch, addPatchCable: addPatchCable,
+    setPortCount: setPortCount, findPortGroup: findPortGroup, parsePortRange: parsePortRange, addPortGroup: addPortGroup, updatePortGroup: updatePortGroup, deletePortGroup: deletePortGroup, portGroupOf: portGroupOf, prunePortGroups: prunePortGroups, hasDeviceIp: hasDeviceIp, hasPortIp: hasPortIp, setDeviceIp: setDeviceIp, effectivePortIp: effectivePortIp, ipList: ipList, setPortIp: setPortIp, IP_ERROR: IP_ERROR, setDeviceKind: setDeviceKind, isTermination: isTermination, DEVICE_KINDS: DEVICE_KINDS, deviceKindInfo: deviceKindInfo, typeLabel: typeLabel, accessPorts: accessPorts, validSectionRows: validSectionRows, setUplinkPorts: setUplinkPorts, setSwitchLayout: setSwitchLayout, setFullWidth: setFullWidth, setSectionSize: setSectionSize, validSectionSizes: validSectionSizes, defaultSectionSize: defaultSectionSize, effectiveSectionSize: effectiveSectionSize, setRouterPorts: setRouterPorts, isValidIp: isValidIp, canConnectPatch: canConnectPatch, addPatchCable: addPatchCable,
     updatePatchCable: updatePatchCable, deletePatchCable: deletePatchCable, addInternalMapping: addInternalMapping,
     removeInternalMapping: removeInternalMapping, autoMapPanel: autoMapPanel, rearPorts: rearPorts,
     sequentialPorts: sequentialPorts, addFixedLink: addFixedLink, updateLinkMeta: updateLinkMeta,

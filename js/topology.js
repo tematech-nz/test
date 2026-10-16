@@ -20,7 +20,8 @@
   }
   function nodeNets(o) {
     var out = [];
-    [o.ipAddress].concat(o.ports.map(function (pt) { return pt.ip; })).forEach(function (ip) {
+    var ips = o.type === 'generic' || o.type === 'router' ? o.ports.map(function (pt) { return M.effectivePortIp(o, pt); }).concat(o.ports.length ? [] : [o.ipAddress]) : [o.ipAddress].concat(o.ports.map(function (pt) { return pt.ip; }));
+    ips.forEach(function (ip) {
       var s = subnetOf(ip);
       if (s && out.indexOf(s) < 0) out.push(s);
     });
@@ -43,7 +44,7 @@
     p.objects.forEach(function (o) {
       if (PASSIVE[o.type] || pluggedSocket(o)) return;
       nodes[o.id] = {
-        id: o.id, name: o.name, type: o.type, label: M.typeLabel(o), ip: o.ipAddress || o.ports.map(function (pt) { return pt.ip; }).filter(Boolean).join(', '), nets: nodeNets(o),
+        id: o.id, name: o.name, type: o.type, label: M.typeLabel(o), ip: M.ipList(o).map(function (x) { return x.ip; }).filter(function (v, i, a) { return a.indexOf(v) === i; }).join(', '), nets: nodeNets(o),
         transit: !TERMINAL[o.type] || (o.type === 'internet' && !!opts.viaInternet),
         isolated: o.type === 'switch' && !!o.portIsolation
       };
@@ -232,13 +233,10 @@
    */
   /*
    * Address a port answers to. Routers: the port's own, else (LAN ports) the router address. Generic devices: the port's own, else
-   * the device address when it has a single port. Switches have a management address only (see below), no per-port ones.
+   * the device address (so every port without its own address answers to it). Switches have a management address only (see below), no per-port ones.
    */
   function effectiveIp(o, pt) {
-    var ip = pt.ip || '';
-    if (!ip && o.type === 'router' && pt.role === 'lan') ip = o.ipAddress || '';
-    if (!ip && o.type === 'generic' && o.ports.length === 1) ip = o.ipAddress || '';
-    return String(ip).trim();
+    return M.effectivePortIp(o, pt);
   }
   function hostOf(ip) { return String(ip).toLowerCase(); }
 

@@ -103,8 +103,11 @@
       if (!it.isGroup && ref.type === 'switch' && ref.portIsolation) {
         x.push('<text x="' + num(pl.x + pl.w - 5) + '" y="' + num(pl.y + 13) + '" font-size="8" text-anchor="end" fill="#b71c1c" font-family="sans-serif" pointer-events="none">PORT ISOLATION</text>');
       }
-      if (!it.isGroup && M.hasDeviceIp(ref) && ref.ipAddress) {
-        x.push('<text x="' + num(pl.x + pl.w - (ref.portIsolation ? 82 : 5)) + '" y="' + num(pl.y + 14) + '" font-size="9" text-anchor="end" fill="#0d47a1" font-family="sans-serif" pointer-events="none">' + esc(ref.ipAddress) + '</text>');
+      // addresses never compete with the name for space: a small chip whose tooltip lists them all
+      var ips = !it.isGroup && M.hasDeviceIp(ref) ? M.ipList(ref) : [];
+      if (ips.length) {
+        var cx = pl.x + pl.w - (ref.portIsolation ? 96 : 20), cy = pl.y + 3;
+        x.push('<g class="ipchip"><title>' + esc(ips.map(function (i) { return i.label + ': ' + i.ip + (i.inherited ? ' (device address)' : ''); }).join('\n')) + '</title><rect x="' + num(cx) + '" y="' + num(cy) + '" width="16" height="11" rx="3" fill="#e3f2fd" stroke="#1565c0" stroke-width="0.8"/><text x="' + num(cx + 8) + '" y="' + num(cy + 8.5) + '" font-size="7" font-weight="bold" text-anchor="middle" fill="#0d47a1" font-family="sans-serif" pointer-events="none">IP</text></g>');
       }
       if (it.lay) {
         if (it.lay.sections.length) {
@@ -157,7 +160,7 @@
           if (groupSet[pt.id]) { fill = '#e1bee7'; stroke = '#8e24aa'; sw = 2.5; }
           if (prevSet[pt.id]) { fill = prev.ok ? '#c8e6c9' : '#ffcdd2'; stroke = prev.ok ? '#2e7d32' : '#c62828'; sw = 2.5; }
           var netBar = pt.networkColor ? '<rect x="' + num(abs.x) + '" y="' + num(abs.y + abs.h - 4) + '" width="' + num(abs.w) + '" height="4" rx="1" fill="' + esc(pt.networkColor) + '" stroke="#333" stroke-width="0.6" pointer-events="none"/>' : '';
-          x.push('<g data-kind="port" data-id="' + esc(pt.id) + '"><title>' + esc(ref.name + ' / ' + pt.label + (pt.side === 'rear' ? ' (rear)' : '') + (pt.role ? ' (' + pt.role.toUpperCase() + ')' : '') + (pt.description ? ' - ' + pt.description : '') + (M.portGroupOf(ref, pt.id) ? ' [' + M.portGroupOf(ref, pt.id).name + ']' : '') + (pt.ip ? ' ' + pt.ip : '')) + '</title>' +
+          x.push('<g data-kind="port" data-id="' + esc(pt.id) + '"><title>' + esc(ref.name + ' / ' + pt.label + (pt.side === 'rear' ? ' (rear)' : '') + (pt.role ? ' (' + pt.role.toUpperCase() + ')' : '') + (pt.description ? ' - ' + pt.description : '') + (M.portGroupOf(ref, pt.id) ? ' [' + M.portGroupOf(ref, pt.id).name + ']' : '') + (M.effectivePortIp(ref, pt) ? ' ' + M.effectivePortIp(ref, pt) : '')) + '</title>' +
             '<rect data-kind="port" data-id="' + esc(pt.id) + '" x="' + num(abs.x) + '" y="' + num(abs.y) + '" width="' + num(abs.w) + '" height="' + num(abs.h) + '" rx="2" fill="' + fill + '" stroke="' + stroke + '" stroke-width="' + sw + '"' + (pt.side === 'rear' ? ' stroke-dasharray="3 1"' : '') + '/>' +
             '<text x="' + num(abs.x + abs.w / 2) + '" y="' + num(abs.y + abs.h / 2 + 3) + '" font-size="' + num(Math.min(9, abs.h * 0.55)) + '" text-anchor="middle" fill="#111" font-family="sans-serif" pointer-events="none">' + esc(trunc(pt.label, Math.max(1, Math.floor(abs.w / 5.5)))) + '</text>' + netBar + '</g>');
         });
