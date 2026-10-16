@@ -557,6 +557,45 @@ const ok = (m) => console.log('  ok   ' + m);
     await page.click('#btnUndo'); await page.click('#btnUndo'); await page.click('#btnUndo');
   });
 
+
+  await step('switch: 2x4 sections, uplinks, alignment, full width and port isolation from the properties panel', async () => {
+    const ids = await page.evaluate(() => {
+      let out;
+      NetMap.app.api.commit('rack+switch', (p) => {
+        const B = NetMap.builder, mid = p.maps[0].id;
+        const rack = B.addObjectPlaced(p, mid, { type: 'rack', name: 'SwRack' }, 4400, 40);
+        const sw = B.addObjectPlaced(p, mid, { type: 'switch', name: 'Sw16', portCount: 16, containerId: rack.id });
+        out = { rack: rack.id, sw: sw.id };
+      });
+      NetMap.app.api.goTo('object', out.sw, NetMap.app.S.p.maps[0].id);
+      return out;
+    });
+    const sel = (f, v) => page.selectOption('#detailsPane select[data-f="' + f + '"]', String(v));
+    const sw = () => page.evaluate((i) => { const o = NetMap.app.S.p.objects.find(x => x.id === i); const geo = NetMap.app.S.geo.portGeo; const pl = NetMap.app.S.p.placements.find(q => q.refId === i); return { o: JSON.parse(JSON.stringify(o)), x1: geo[o.ports[0].id].x, y1: geo[o.ports[0].id].y, x2: geo[o.ports[1].id].x, y2: geo[o.ports[1].id].y, w: pl.w, plx: pl.x }; }, ids.sw);
+    await sel('sectionSize', 8);
+    await sel('sectionRows', 2);
+    let s = await sw();
+    assert.strictEqual(s.o.sectionSize, 8); assert.strictEqual(s.o.sectionRows, 2);
+    assert.ok(s.x1 === s.x2 && s.y1 < s.y2, 'port 1 above port 2');
+    await page.fill('#detailsPane #upInput', '2');
+    await page.click('#detailsPane button[data-act="applyUplinks"]');
+    s = await sw();
+    assert.strictEqual(s.o.ports.filter(p => p.role === 'uplink').length, 2);
+    await page.check('#detailsPane input[data-f="fullWidth"]');
+    s = await sw();
+    const rackW = await page.evaluate((i) => NetMap.app.S.p.placements.find(q => q.refId === i).w, ids.rack);
+    assert.ok(s.o.fullWidth && s.w >= rackW - 20 - 1, 'stretched to the rack width: ' + s.w + ' vs ' + rackW);
+    const left = s.x1;
+    await sel('align', 'center'); const c = (await sw()).x1;
+    await sel('align', 'right'); const r = (await sw()).x1;
+    assert.ok(left < c && c < r, 'alignment moves the ports: ' + [left, c, r]);
+    await shot('switch-layout');
+    await page.check('#detailsPane input[data-f="portIsolation"]');
+    assert.strictEqual((await sw()).o.portIsolation, true);
+    assert.ok((await page.innerHTML('#vp')).indexOf('PORT ISOLATION') > 0);
+    for (let i = 0; i < 7; i++) await page.click('#btnUndo');
+  });
+
   await step('autosave survives a refresh', async () => {
     await page.click('#btnMode'); // back to view mode flushes the save
     const name = await page.evaluate(() => NetMap.app.S.p.name);

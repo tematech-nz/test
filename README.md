@@ -32,8 +32,15 @@ Try it: File -> Load demo project (two rooms, a fixed link between racks, a wall
 - **Fixed links**: installed cabling between two patch panels with N numbered wires, each mapped rear port to rear port.
   Mapping is never assumed; "sequential" is an explicit choice. Endpoints and wires change only through
   "Edit installed wiring", which shows a review of every added, deleted or changed wire before applying (one undo step).
-- **Switch sections**: switches use plain rows by default; in edit mode (or when creating one) choose "N per section" in the
-  properties to get equal sections in one line like patch panels (e.g. 3 x 8 for 24 ports), or "None" to go back.
+- **Switch layout**: switches use plain rows by default. In the properties (or when creating one) choose ports per section
+  and the section shape - e.g. a 16-port switch as two 2 x 4 sections (ports numbered 1 above 2, or across then down) - plus
+  **uplink ports** (any number, shown in a purple block next to the sections: in line by default, left or right side) and
+  **align** left / center / right to match the real faceplate. "Full width" stretches equipment to the inner width of its rack
+  or group and keeps following the rack when you resize it. Switches can also have **port isolation**.
+- **Port isolation** (switches): access ports cannot talk to each other, only to uplink ports. The Graph view honours it:
+  devices on an isolated switch's access ports reach the uplink side but not each other directly. They can only meet by going
+  up an uplink and back down (e.g. through a router, shown as a longer path through the switch twice); if nothing upstream turns
+  the traffic around, they cannot reach each other at all. A U-turn on the same link is only allowed at a router.
 - **Routers** (`+ Router`): choose how many WAN and LAN ports (0-96 in total, changeable later) and an optional IP
   address; every port can have its own IP too. WAN and LAN ports sit in separate strips that fold with `^`.
   Routers cable like switches and are searchable by IP.

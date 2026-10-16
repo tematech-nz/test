@@ -236,15 +236,72 @@
     var s = obj && obj.sectionSize;
     return s && n % s === 0 ? s : defaultSectionSize(n);
   }
+  /* switch ports that are not uplinks */
+  function accessPorts(o) { return o.ports.filter(function (x) { return x.role !== 'uplink'; }); }
   function setSectionSize(p, objectId, size) {
     var o = buildIndex(p).objects[objectId];
     if (!o || (o.type !== 'patchpanel' && o.type !== 'switch')) throw new Error('Sections apply to patch panels and switches');
-    var n = o.ports.filter(function (x) { return x.side === 'front'; }).length;
-    if (o.type === 'switch' && !size) { delete o.sectionSize; return; } // switches default to plain rows
+    var n = o.ports.filter(function (x) { return x.side === 'front' && x.role !== 'uplink'; }).length;
+    if (o.type === 'switch' && !size) { delete o.sectionSize; delete o.sectionRows; return; } // switches default to plain rows
     if (!(size >= 1) || size !== Math.floor(size) || n % size !== 0) {
       throw new Error('Sections must be equal: ' + n + ' ports cannot be split into sections of ' + size + ' (valid: ' + validSectionSizes(n).join(', ') + ')');
     }
     o.sectionSize = size;
+    if (o.sectionRows && size % o.sectionRows !== 0) delete o.sectionRows;
+  }
+
+  /* ---- switch layout and uplinks ---- */
+  function validSectionRows(size) {
+    var out = [];
+    for (var d = 1; d <= Math.min(size, 8); d++) if (size % d === 0) out.push(d);
+    return out;
+  }
+  function setUplinkPorts(p, objectId, n) {
+    var idx = buildIndex(p), o = idx.objects[objectId];
+    if (!o || o.type !== 'switch') throw new Error('Uplink ports apply to switches');
+    if (!(n >= 0 && n <= 16) || n !== Math.floor(n)) throw new Error('Uplink ports: 0-16');
+    var list = o.ports.filter(function (x) { return x.role === 'uplink'; });
+    if (n > list.length) {
+      for (var i = list.length + 1; i <= n; i++) o.ports.push({ id: uid('prt'), label: 'U' + i, side: 'front', role: 'uplink', portType: '', speed: '', media: '' });
+    } else if (n < list.length) {
+      var drop = list.slice(n);
+      drop.forEach(function (pt) { if (idx.portUse[pt.id]) throw new Error('Uplink ' + pt.label + ' is in use; disconnect it first'); });
+      o.ports = o.ports.filter(function (pt) { return drop.indexOf(pt) < 0; });
+    }
+  }
+  /* patch: sectionRows, portOrder ('rows'|'columns'), align ('left'|'center'|'right'), uplinkSide ('left'|'right'), portIsolation */
+  function setSwitchLayout(p, objectId, patch) {
+    var o = buildIndex(p).objects[objectId];
+    if (!o || o.type !== 'switch') throw new Error('Not a switch');
+    if (patch.sectionRows !== undefined) {
+      var r = patch.sectionRows;
+      if (!o.sectionSize) throw new Error('Choose ports per section first');
+      if (!(r >= 1) || r !== Math.floor(r) || o.sectionSize % r !== 0) throw new Error('Rows must divide the section evenly (valid: ' + validSectionRows(o.sectionSize).join(', ') + ')');
+      if (r === 1) delete o.sectionRows; else o.sectionRows = r;
+    }
+    if (patch.portOrder !== undefined) {
+      if (patch.portOrder !== 'rows' && patch.portOrder !== 'columns') throw new Error('Port order is rows or columns');
+      o.portOrder = patch.portOrder;
+    }
+    if (patch.align !== undefined) {
+      if (['left', 'center', 'right'].indexOf(patch.align) < 0) throw new Error('Align is left, center or right');
+      if (patch.align === 'left') delete o.align; else o.align = patch.align;
+    }
+    if (patch.uplinkSide !== undefined) {
+      if (patch.uplinkSide !== 'left' && patch.uplinkSide !== 'right') throw new Error('Uplinks sit on the left or right');
+      if (patch.uplinkSide === 'right') delete o.uplinkSide; else o.uplinkSide = 'left';
+    }
+    if (patch.uplinkRows !== undefined) {
+      if (!(patch.uplinkRows >= 1 && patch.uplinkRows <= 8) || patch.uplinkRows !== Math.floor(patch.uplinkRows)) throw new Error('Uplink rows: 1-8');
+      if (patch.uplinkRows === 1) delete o.uplinkRows; else o.uplinkRows = patch.uplinkRows;
+    }
+    if (patch.portIsolation !== undefined) { if (patch.portIsolation) o.portIsolation = true; else delete o.portIsolation; }
+  }
+  /* equipment in a rack/group can be stretched to the container's full inner width */
+  function setFullWidth(p, objectId, on) {
+    var o = buildIndex(p).objects[objectId];
+    if (!o || o.type === 'rack') throw new Error('Full width applies to equipment');
+    if (on) o.fullWidth = true; else delete o.fullWidth;
   }
 
   /* routers: WAN ports first, then LAN ports; each port has a role and an optional IP address */
@@ -292,10 +349,15 @@
     if (o.type === 'router' || o.type === 'internet') obj.ipAddress = o.ipAddress || '';
     if (o.type === 'rack') obj.rackHeight = o.rackHeight || 42;
     p.objects.push(obj);
+    if (o.type === 'switch') {
+      if (o.uplinkPorts) setUplinkPorts(p, obj.id, o.uplinkPorts);
+      if (o.portIsolation) obj.portIsolation = true;
+    }
     if ((o.type === 'patchpanel' || o.type === 'switch') && o.sectionSize) {
       var sz = o.sectionSize;
       if (!(sz >= 1) || sz !== Math.floor(sz) || n % sz !== 0) { p.objects.pop(); throw new Error('Sections must be equal: ' + n + ' ports cannot be split into sections of ' + sz + ' (valid: ' + validSectionSizes(n).join(', ') + ')'); }
       obj.sectionSize = sz;
+      if (o.sectionRows > 1) { try { setSwitchLayout(p, obj.id, { sectionRows: o.sectionRows }); } catch (e) { p.objects.pop(); throw e; } }
     }
     if (o.type === 'patchpanel' && o.straight) autoMapPanel(p, obj.id);
     return obj;
@@ -319,7 +381,7 @@
     if (n < 0 || n > 96 || n !== Math.floor(n)) throw new Error('Port count must be 0-96');
     function used(pt) { return idx.portUse[pt.id] || idx.mapByPort[pt.id]; }
     function adjust(side) {
-      var list = o.ports.filter(function (pt) { return pt.side === side; });
+      var list = o.ports.filter(function (pt) { return pt.side === side && pt.role !== 'uplink'; });
       if (n > list.length) {
         for (var i = list.length + 1; i <= n; i++) {
           var pt = { id: uid('prt'), label: String(i), side: side };
@@ -337,9 +399,9 @@
       if (o.sectionSize && n % o.sectionSize !== 0) delete o.sectionSize;
     } else {
       adjust('front');
-      if (o.sectionSize && n % o.sectionSize !== 0) delete o.sectionSize;
+      if (o.sectionSize && n % o.sectionSize !== 0) { delete o.sectionSize; delete o.sectionRows; }
     }
-    o.ports.sort(function (a, b) { return (a.side === b.side ? 0 : (a.side === 'front' ? -1 : 1)); });
+    o.ports.sort(function (a, b) { return (a.side === b.side ? (a.role === 'uplink' ? 1 : 0) - (b.role === 'uplink' ? 1 : 0) : (a.side === 'front' ? -1 : 1)); });
   }
 
   /* routers: set WAN and LAN counts independently; ports in use cannot be removed */
@@ -670,6 +732,7 @@
       }
       if (!isValidIp(o.ipAddress)) add('warning', 'BAD_IP', '"' + o.name + '" has an invalid IP address: ' + o.ipAddress, 'object', o.id);
       o.ports.forEach(function (pt) { if (!isValidIp(pt.ip)) add('warning', 'BAD_IP', o.name + ' / ' + pt.label + ' has an invalid IP address: ' + pt.ip, 'port', pt.id); });
+      if (o.portIsolation && !o.ports.some(function (pt) { return pt.role === 'uplink'; })) add('warning', 'ISOLATION_NO_UPLINK', 'Switch "' + o.name + '" has port isolation on but no uplink ports, so its devices can talk to nothing through it', 'object', o.id);
       var unused = o.ports.filter(function (pt) { return !idx.portUse[pt.id] && !idx.mapByPort[pt.id]; }).length;
       if (o.ports.length && unused) add('info', 'UNUSED_PORTS', unused + ' of ' + o.ports.length + ' terminations on "' + o.name + '" are unused', 'object', o.id);
     });
@@ -767,7 +830,7 @@
     findContainer: findContainer, groupOf: groupOf, parentOf: parentOf, containerChildren: containerChildren, descendants: descendants,
     addPlacement: addPlacement, placementOf: placementOf, placementGroup: placementGroup, movePlacement: movePlacement,
     growToFit: growToFit, mapsFor: mapsFor, addGroup: addGroup, addObject: addObject, setContainer: setContainer,
-    setPortCount: setPortCount, setSectionSize: setSectionSize, validSectionSizes: validSectionSizes, defaultSectionSize: defaultSectionSize, effectiveSectionSize: effectiveSectionSize, setRouterPorts: setRouterPorts, isValidIp: isValidIp, canConnectPatch: canConnectPatch, addPatchCable: addPatchCable,
+    setPortCount: setPortCount, accessPorts: accessPorts, validSectionRows: validSectionRows, setUplinkPorts: setUplinkPorts, setSwitchLayout: setSwitchLayout, setFullWidth: setFullWidth, setSectionSize: setSectionSize, validSectionSizes: validSectionSizes, defaultSectionSize: defaultSectionSize, effectiveSectionSize: effectiveSectionSize, setRouterPorts: setRouterPorts, isValidIp: isValidIp, canConnectPatch: canConnectPatch, addPatchCable: addPatchCable,
     updatePatchCable: updatePatchCable, deletePatchCable: deletePatchCable, addInternalMapping: addInternalMapping,
     removeInternalMapping: removeInternalMapping, autoMapPanel: autoMapPanel, rearPorts: rearPorts,
     sequentialPorts: sequentialPorts, addFixedLink: addFixedLink, updateLinkMeta: updateLinkMeta,

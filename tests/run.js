@@ -721,5 +721,135 @@ test('fixed links hide behind unrelated containers and show in full when selecte
   assert.ok(rackM);
 });
 
+console.log('Switch layout, uplinks, full width, isolation');
+test('16-port switch as two 2x4 sections: columns order, one line', () => {
+  const p = M.createProject('s');
+  const sw = M.addObject(p, { type: 'switch', portCount: 16, sectionSize: 8, sectionRows: 2 });
+  assert.strictEqual(sw.sectionRows, 2);
+  const L = NM.layout, sz = L.defaultSize(sw), lay = L.computeLayout(sw, sz.w, sz.h, {});
+  const P = (n) => lay.ports[sw.ports[n - 1].id];
+  assert.strictEqual(lay.groups.length, 2);
+  assert.strictEqual(P(1).x, P(2).x, '1 above 2 (zig-zag order)');
+  assert.ok(P(1).y < P(2).y);
+  assert.ok(P(3).x > P(1).x && P(3).y === P(1).y, '3 right of 1 on the top row');
+  assert.ok(P(9).x > P(8).x + 6, 'second section after a gap');
+  assert.strictEqual(new Set(sw.ports.map(x => Math.round(lay.ports[x.id].y))).size, 2, 'two rows tall, both sections in one line');
+  M.setSwitchLayout(p, sw.id, { portOrder: 'rows' });
+  const lay2 = L.computeLayout(sw, sz.w, sz.h, {});
+  assert.ok(lay2.ports[sw.ports[1].id].y === lay2.ports[sw.ports[0].id].y && lay2.ports[sw.ports[1].id].x > lay2.ports[sw.ports[0].id].x, 'rows order: 2 right of 1');
+  assert.throws(() => M.setSwitchLayout(p, sw.id, { sectionRows: 3 }), /evenly/);
+  assert.deepStrictEqual(M.validSectionRows(8), [1, 2, 4, 8]);
+});
+test('uplink ports sit next to the sections, left or right, in line', () => {
+  const p = M.createProject('s');
+  const sw = M.addObject(p, { type: 'switch', portCount: 16, sectionSize: 8, sectionRows: 2, uplinkPorts: 2 });
+  assert.deepStrictEqual(sw.ports.slice(-2).map(x => x.label + ':' + x.role), ['U1:uplink', 'U2:uplink']);
+  const L = NM.layout, sz = L.defaultSize(sw), lay = L.computeLayout(sw, sz.w, sz.h, {});
+  const u1 = lay.ports[sw.ports[16].id], u2 = lay.ports[sw.ports[17].id], last = lay.ports[sw.ports[15].id];
+  assert.ok(u1.x > last.x && u2.x > u1.x, 'to the right of the sections');
+  assert.ok(lay.groups.some(g => g.side === 'uplink'));
+  M.setSwitchLayout(p, sw.id, { uplinkSide: 'left' });
+  const l2 = L.computeLayout(sw, sz.w, sz.h, {});
+  assert.ok(l2.ports[sw.ports[16].id].x < l2.ports[sw.ports[0].id].x, 'uplinks on the left');
+  M.setPortCount(p, sw.id, 24);
+  assert.deepStrictEqual(sw.ports.slice(-2).map(x => x.role), ['uplink', 'uplink'], 'uplinks stay last');
+  assert.strictEqual(M.accessPorts(sw).length, 24);
+  M.setUplinkPorts(p, sw.id, 4);
+  assert.strictEqual(sw.ports.length, 28);
+  const a = M.addObject(p, { type: 'switch', portCount: 4 });
+  M.addPatchCable(p, { aPortId: sw.ports[27].id, bPortId: a.ports[0].id });
+  assert.throws(() => M.setUplinkPorts(p, sw.id, 3), /in use/);
+});
+test('alignment moves the ports inside a wider switch', () => {
+  const p = M.createProject('s');
+  const sw = M.addObject(p, { type: 'switch', portCount: 16, sectionSize: 8, sectionRows: 2 });
+  const L = NM.layout, sz = L.defaultSize(sw), W = sz.w + 200;
+  const first = (al) => { sw.align = al; if (al === 'left') delete sw.align; return L.computeLayout(sw, W, sz.h, {}).ports[sw.ports[0].id].x; };
+  const left = first('left'), center = first('center'), right = first('right');
+  assert.ok(left < center && center < right);
+  assert.ok(Math.abs(center - left - 101) < 1 && Math.abs(right - left - 202) < 1);
+});
+test('fullWidth equipment fills its rack, follows rack resizes and never shrinks below readable', () => {
+  const p = M.createProject('s'), mid = p.maps[0].id;
+  const rack = B.addObjectPlaced(p, mid, { type: 'rack', name: 'R' }, 0, 0);
+  const sw = B.addObjectPlaced(p, mid, { type: 'switch', name: 'S', portCount: 24, containerId: rack.id });
+  const rp = M.placementOf(p, mid, rack.id), sp = M.placementOf(p, mid, sw.id), mn = NM.layout.minSize(sw).w;
+  M.setFullWidth(p, sw.id, true); B.applyFullWidthFor(p, sw.id);
+  assert.strictEqual(sp.w, Math.max(mn, rp.w - 2 * M.PAD));
+  assert.strictEqual(sp.x, rp.x + M.PAD);
+  rp.w = 600; B.settle(p, rp);
+  assert.strictEqual(sp.w, 600 - 2 * M.PAD);
+  assert.ok(B.minPlacementSize(p, rp).w <= mn + 2 * M.PAD + 1, 'rack can shrink to the switch minimum, not stay at its stretched width');
+  rp.w = 100; B.settle(p, rp);
+  assert.ok(sp.w >= mn && rp.w >= sp.w + 2 * M.PAD, 'rack grew instead of crushing the switch');
+  M.setFullWidth(p, sw.id, false); assert.strictEqual(sw.fullWidth, undefined);
+  assert.deepStrictEqual(overlapPairs(p), []);
+});
+function isoNet(isolated, upstream) {
+  const p = M.createProject('iso');
+  const up = upstream === 'router' ? M.addObject(p, { type: 'router', name: 'R', wanPorts: 1, lanPorts: 2 }) : M.addObject(p, { type: 'switch', name: 'T', portCount: 4 });
+  const sw = M.addObject(p, { type: 'switch', name: 'S', portCount: 4, uplinkPorts: 1, portIsolation: isolated });
+  const d1 = M.addObject(p, { type: 'generic', name: 'D1', portCount: 1 }), d2 = M.addObject(p, { type: 'generic', name: 'D2', portCount: 1 });
+  const acc = (n) => sw.ports.find(x => x.label === String(n)).id;
+  const upPort = up.type === 'router' ? up.ports.find(x => x.label === 'L1').id : up.ports[0].id;
+  M.addPatchCable(p, { aPortId: upPort, bPortId: sw.ports.find(x => x.role === 'uplink').id });
+  M.addPatchCable(p, { aPortId: d1.ports[0].id, bPortId: acc(1) });
+  M.addPatchCable(p, { aPortId: d2.ports[0].id, bPortId: acc(2) });
+  return { p, up, sw, d1, d2 };
+}
+test('port isolation: access devices cannot talk directly; only up-and-back through a router', () => {
+  const TP = NM.topology;
+  // upstream is a plain switch: nothing can turn the traffic around
+  const dead = isoNet(true, 'switch'), g = TP.buildGraph(dead.p);
+  assert.strictEqual(g.nodes[dead.sw.id].isolated, true);
+  const fromD1 = TP.reachTree(g, dead.d1.id);
+  assert.strictEqual(fromD1.depth[dead.up.id], 2, 'D1 -> S -> T through the uplink');
+  assert.strictEqual(fromD1.depth[dead.d2.id], undefined, 'D1 cannot reach D2');
+  assert.strictEqual(TP.allPaths(g, dead.d1.id, dead.d2.id).length, 0);
+  const fromT = TP.reachTree(g, dead.up.id);
+  assert.ok(fromT.depth[dead.d1.id] === 2 && fromT.depth[dead.d2.id] === 2, 'the uplink side reaches every access device');
+  const fromS = TP.reachTree(g, dead.sw.id);
+  assert.ok(fromS.depth[dead.d1.id] === 1 && fromS.depth[dead.d2.id] === 1, 'the switch itself talks to everything');
+  // upstream is a router: D1 and D2 can still meet by going up to the router and back (4 hops)
+  const rt = isoNet(true, 'router'), g2 = TP.buildGraph(rt.p);
+  assert.strictEqual(TP.reachTree(g2, rt.d1.id).depth[rt.d2.id], 4);
+  const paths = TP.allPaths(g2, rt.d1.id, rt.d2.id);
+  assert.strictEqual(paths.length, 1);
+  assert.deepStrictEqual(paths[0].nodes.map(id => g2.nodes[id].name), ['D1', 'S', 'R', 'S', 'D2']);
+  // same wiring without isolation: direct, 2 hops
+  const open = isoNet(false, 'router'), g3 = TP.buildGraph(open.p);
+  assert.strictEqual(TP.reachTree(g3, open.d1.id).depth[open.d2.id], 2);
+  assert.strictEqual(TP.allPaths(g3, open.d1.id, open.d2.id)[0].nodes.length, 3);
+});
+test('no U-turn on the same link except at a router; isolation across chained switches and in the graph view', () => {
+  const TP = NM.topology, GV = NM.graphview;
+  const p = M.createProject('chain');
+  const mk = (n, extra) => M.addObject(p, Object.assign({ type: 'switch', name: n, portCount: 4, uplinkPorts: 1 }, extra || {}));
+  const s1 = mk('S1', { portIsolation: true }), s2 = mk('S2'), t = M.addObject(p, { type: 'switch', name: 'T', portCount: 4 });
+  const up = (o) => o.ports.find(x => x.role === 'uplink').id, acc = (o, n) => o.ports.find(x => x.label === String(n)).id;
+  M.addPatchCable(p, { aPortId: acc(s2, 1), bPortId: acc(s1, 1) });
+  M.addPatchCable(p, { aPortId: up(s1), bPortId: acc(t, 1) });
+  const d = M.addObject(p, { type: 'generic', name: 'D', portCount: 1 });
+  M.addPatchCable(p, { aPortId: d.ports[0].id, bPortId: acc(s1, 2) });
+  const g = TP.buildGraph(p);
+  assert.strictEqual(TP.reachTree(g, s2.id).depth[t.id], 2, 'access -> uplink on S1 is fine');
+  const fromD = TP.reachTree(g, d.id);
+  assert.strictEqual(fromD.depth[s2.id], undefined, 'D and S2 both sit on S1 access ports; T cannot turn traffic around');
+  assert.strictEqual(fromD.depth[t.id], 2);
+  const html = GV.render(p, { from: t.id, to: d.id, via: false });
+  assert.ok(/isolated/.test(html) && /Port isolation on: S1/.test(html));
+  const sw3 = mk('S3', { portIsolation: true });
+  assert.ok(!M.validateProject(p).some(i => i.code === 'ISOLATION_NO_UPLINK'));
+  M.setUplinkPorts(p, sw3.id, 0);
+  assert.ok(M.validateProject(p).some(i => i.code === 'ISOLATION_NO_UPLINK'));
+});
+test('rendering shows uplinks, shapes and the isolation badge', () => {
+  const p = M.createProject('s'), mid = p.maps[0].id;
+  B.addObjectPlaced(p, mid, { type: 'switch', name: 'Sw', portCount: 16, sectionSize: 8, sectionRows: 2, uplinkPorts: 2, portIsolation: true }, 0, 0);
+  const svg = R.svgDocument(p, mid);
+  assert.ok(svg.indexOf('PORT ISOLATION') > 0 && svg.indexOf('#ede7f6') > 0 && svg.indexOf('#8e6bbf') > 0);
+  assert.deepStrictEqual(overlapPairs(p), []);
+});
+
 console.log('\n' + passed + ' passed, ' + failed + ' failed');
 process.exit(failed ? 1 : 0);

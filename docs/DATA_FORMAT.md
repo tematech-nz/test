@@ -28,7 +28,11 @@ cannot break a connection. Files use LF line endings and are written with 2-spac
 - `internet` objects (ISP / upstream) have ordinary front ports and an optional `ipAddress` (public IP or circuit note).
 - Routers have an optional `ipAddress` and ports with `"role": "wan"|"lan"` (labels `W1..`, `L1..`) and an optional
   per-port `"ip"`. IPs are free text (IPv4 with optional /prefix, or IPv6); invalid values produce validation warnings.
-- Switches may also carry `sectionSize` (omitted = plain rows).
+- Switches may carry (all optional, omitted = default): `sectionSize` (ports per section; omitted = plain rows),
+  `sectionRows` (rows per section, default 1), `portOrder` (`rows`|`columns`, default `columns` when sectionRows > 1),
+  `align` (`center`|`right`), `uplinkSide` (`left`), `uplinkRows`, and `portIsolation` (true). Uplink ports are ports with
+  `"role": "uplink"` (labels `U1..`), always listed after the access ports; `sectionSize` counts access ports only.
+- Any object inside a rack or group may carry `fullWidth: true` (stretch to the container's inner width).
 - Patch panels have `front` and `rear` ports and an optional `sectionSize` (ports per visual section; must divide the
   per-side port count, otherwise the automatic split is used). It is cosmetic and never affects connectivity. All other equipment has `front` ports only.
 - A **placement** is the visual position of a group or object on one map. The same record may have placements

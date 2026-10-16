@@ -40,7 +40,8 @@
       if (PASSIVE[o.type]) return;
       nodes[o.id] = {
         id: o.id, name: o.name, type: o.type, ip: o.ipAddress || '', nets: nodeNets(o),
-        transit: !TERMINAL[o.type] || (o.type === 'internet' && !!opts.viaInternet)
+        transit: !TERMINAL[o.type] || (o.type === 'internet' && !!opts.viaInternet),
+        isolated: o.type === 'switch' && !!o.portIsolation
       };
       order.push(o.id);
     });
@@ -75,51 +76,80 @@
     edges.forEach(function (e) {
       var key = [e.a, e.b].sort().join('|');
       var l = links[key];
-      if (!l) { l = links[key] = { id: 'lk' + linkList.length, a: e.a < e.b ? e.a : e.b, b: e.a < e.b ? e.b : e.a, paths: [] }; linkList.push(l); adj[e.a].push({ to: e.b, link: l }); adj[e.b].push({ to: e.a, link: l }); }
+      if (!l) { l = links[key] = { id: 'lk' + linkList.length, a: e.a < e.b ? e.a : e.b, b: e.a < e.b ? e.b : e.a, paths: [], uplinkAt: {} }; linkList.push(l); adj[e.a].push({ to: e.b, link: l }); adj[e.b].push({ to: e.a, link: l }); }
       l.paths.push(e);
+      if (idx.ports[e.aPortId].role === 'uplink') l.uplinkAt[e.a] = true;
+      if (idx.ports[e.bPortId].role === 'uplink') l.uplinkAt[e.b] = true;
     });
     return { nodes: nodes, order: order, links: linkList, adj: adj, dangling: dangling };
   }
 
-  /* breadth-first tree of everything reachable from rootId (shortest hop count) */
+  /*
+   * May traffic arriving at nodeId over inLink continue over outLink? Endpoints never pass traffic; a switch with port
+   * isolation only forwards between an access port and an uplink port (never access to access).
+   */
+  function canPass(graph, nodeId, inLink, outLink, rootId) {
+    if (nodeId === rootId) return true;
+    var n = graph.nodes[nodeId];
+    if (!n.transit) return false;
+    if (inLink && outLink && inLink === outLink && n.type !== 'router') return false; // no U-turn on the same link (a router on a stick may)
+    if (n.isolated && inLink && outLink) return !!(inLink.uplinkAt[nodeId] || outLink.uplinkAt[nodeId]);
+    return true;
+  }
+
+  /*
+   * Breadth-first tree of everything reachable from rootId (shortest hop count). States are (device, arrival link), so
+   * port isolation is exact: devices on an isolated switch's access ports can only meet by going up an uplink and
+   * coming back down (for example through a router), which counts as a longer path.
+   */
   function reachTree(graph, rootId) {
-    var depth = {}, parent = {}, parentLink = {}, queue = [rootId], out = [];
+    var depth = {}, seenState = {}, queue = [{ id: rootId, via: null, d: 0 }], out = [];
     depth[rootId] = 0;
+    out.push({ id: rootId, depth: 0, parent: null, link: null });
+    seenState[rootId + '|'] = true;
     while (queue.length) {
-      var id = queue.shift();
-      out.push({ id: id, depth: depth[id], parent: parent[id] || null, link: parentLink[id] || null });
-      if (id !== rootId && !graph.nodes[id].transit) continue;
-      (graph.adj[id] || []).forEach(function (n) {
-        if (depth[n.to] === undefined) { depth[n.to] = depth[id] + 1; parent[n.to] = id; parentLink[n.to] = n.link; queue.push(n.to); }
+      var st = queue.shift();
+      (graph.adj[st.id] || []).forEach(function (n) {
+        if (!canPass(graph, st.id, st.via, n.link, rootId)) return;
+        var key = n.to + '|' + n.link.id;
+        if (seenState[key]) return;
+        seenState[key] = true;
+        if (depth[n.to] === undefined) {
+          depth[n.to] = st.d + 1;
+          out.push({ id: n.to, depth: st.d + 1, parent: st.id, link: n.link });
+        }
+        queue.push({ id: n.to, via: n.link, d: st.d + 1 });
       });
     }
     var unreachable = graph.order.filter(function (id) { return depth[id] === undefined; });
     return { order: out, depth: depth, unreachable: unreachable };
   }
 
-  /* all simple paths from -> to; transit rules apply; shortest first */
+  /* all paths from -> to; transit and isolation rules apply; shortest first. Devices are visited once, except isolated switches (up and back down) */
   function allPaths(graph, from, to, limit, maxHops) {
     limit = limit || 100; maxHops = maxHops || 12;
     var out = [], visited = {};
+    function cap(id) { return graph.nodes[id].isolated ? 2 : 1; }
     function dfs(id, nodes, links) {
       if (out.length >= limit * 4) return;
       if (id === to) { out.push({ nodes: nodes.slice(), links: links.slice() }); return; }
       if (nodes.length - 1 >= maxHops) return;
-      if (id !== from && !graph.nodes[id].transit) return;
+      var inLink = links.length ? links[links.length - 1] : null;
       (graph.adj[id] || []).forEach(function (n) {
-        if (visited[n.to]) return;
-        visited[n.to] = true; nodes.push(n.to); links.push(n.link);
+        if ((visited[n.to] || 0) >= cap(n.to)) return;
+        if (!canPass(graph, id, inLink, n.link, from)) return;
+        visited[n.to] = (visited[n.to] || 0) + 1; nodes.push(n.to); links.push(n.link);
         dfs(n.to, nodes, links);
-        nodes.pop(); links.pop(); visited[n.to] = false;
+        nodes.pop(); links.pop(); visited[n.to]--;
       });
     }
     if (!graph.nodes[from] || !graph.nodes[to] || from === to) return [];
-    visited[from] = true;
+    visited[from] = 1;
     dfs(from, [from], []);
     out.sort(function (a, b) { return a.nodes.length - b.nodes.length; });
     return out.slice(0, limit);
   }
 
-  NM.topology = { buildGraph: buildGraph, reachTree: reachTree, allPaths: allPaths, subnetOf: subnetOf, PASSIVE: PASSIVE, TERMINAL: TERMINAL };
+  NM.topology = { canPass: canPass, buildGraph: buildGraph, reachTree: reachTree, allPaths: allPaths, subnetOf: subnetOf, PASSIVE: PASSIVE, TERMINAL: TERMINAL };
   if (typeof module !== 'undefined' && module.exports) module.exports = NM.topology;
 })(typeof window !== 'undefined' ? window : globalThis);

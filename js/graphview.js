@@ -66,9 +66,9 @@
     graph.order.forEach(function (id) {
       var n = graph.nodes[id], P = pos[id], c = COLORS[n.type] || COLORS.generic;
       var faded = dim && !hiNode[id], isRoot = id === state.from, isTo = id === state.to;
-      var sub = M.TYPE_LABELS[n.type] + (n.ip ? '  ' + n.ip : '');
+      var sub = M.TYPE_LABELS[n.type] + (n.isolated ? ' (isolated)' : '') + (n.ip ? '  ' + n.ip : '');
       var nets = n.nets.join(', ');
-      svg += '<g data-gnode="' + esc(id) + '" style="cursor:pointer"' + (faded ? ' opacity="0.25"' : '') + '><title>' + esc(n.name + ' (' + M.TYPE_LABELS[n.type] + ')' + (nets ? '\nNetworks: ' + nets : '') + (n.transit ? '' : '\nEndpoint: paths do not pass through')) + '</title>' +
+      svg += '<g data-gnode="' + esc(id) + '" style="cursor:pointer"' + (faded ? ' opacity="0.25"' : '') + '><title>' + esc(n.name + ' (' + M.TYPE_LABELS[n.type] + ')' + (nets ? '\nNetworks: ' + nets : '') + (n.transit ? '' : '\nEndpoint: paths do not pass through') + (n.isolated ? '\nPort isolation: only uplink ports talk to access ports' : '')) + '</title>' +
         '<rect x="' + P.x + '" y="' + P.y + '" width="' + NW + '" height="' + NH + '" rx="' + (n.type === 'internet' ? 22 : 6) + '" fill="' + c[0] + '" stroke="' + (isRoot ? '#d32f2f' : (isTo ? '#6a1b9a' : c[1])) + '" stroke-width="' + (isRoot || isTo ? 3.5 : 1.5) + '"' + (n.transit ? '' : ' stroke-dasharray="6 3"') + '/>' +
         '<text x="' + (P.x + 8) + '" y="' + (P.y + 19) + '" font-size="13" font-weight="bold" fill="#111" font-family="sans-serif">' + esc(n.name.length > 22 ? n.name.slice(0, 21) + '~' : n.name) + '</text>' +
         '<text x="' + (P.x + 8) + '" y="' + (P.y + 33) + '" font-size="10" fill="#444" font-family="sans-serif">' + esc(sub.length > 30 ? sub.slice(0, 29) + '~' : sub) + '</text>' +
@@ -108,6 +108,8 @@
       html += '</div>';
       if (tree.unreachable.length) html += '<h3>Not reachable (' + tree.unreachable.length + ')</h3>' + tree.unreachable.map(function (id) { return '<div class="gv-tn">' + nameLink(id) + '</div>'; }).join('');
     }
+    var isoNodes = graph.order.filter(function (id) { return graph.nodes[id].isolated; });
+    if (isoNodes.length) html += '<div class="gv-note">Port isolation on: ' + isoNodes.map(function (id) { return esc(graph.nodes[id].name); }).join(', ') + ' - devices on their access ports talk to the uplink side only, never directly to each other (they can still meet by going up an uplink and back down, e.g. through a router).</div>';
     if (graph.dangling.length) html += '<div class="gv-note">' + graph.dangling.length + ' cable chain(s) end on a patch panel with nothing connected beyond it.</div>';
     return html;
   }

@@ -616,6 +616,27 @@
     return parts.length ? parts.join('<br>') : '<span class="sub">free</span>';
   }
 
+  /* switch port layout, uplinks and isolation */
+  function switchBlock(o) {
+    const per = M.accessPorts(o).length, up = o.ports.length - per;
+    const cur = o.sectionSize > 0 && per % o.sectionSize === 0 ? o.sectionSize : 0;
+    const rows = cur && o.sectionRows > 0 && cur % o.sectionRows === 0 ? o.sectionRows : 1;
+    const order = o.portOrder === 'rows' ? 'rows' : 'columns', align = o.align || 'left', side = o.uplinkSide === 'left' ? 'left' : 'right';
+    const sel = (f, list, v) => '<select data-f="' + f + '">' + opts(list, v) + '</select>';
+    if (!isEdit()) {
+      return fld('Sections', cur ? per / cur + ' x (' + rows + ' x ' + cur / rows + ')' : 'none') + (up ? fld('Uplink ports', up) : '') + (o.portIsolation ? fld('Port isolation', 'on: access ports only reach uplinks') : '');
+    }
+    let h = fld('Sections', sel('sectionSize', [[0, 'None (plain rows)']].concat(M.validSectionSizes(per).map((d) => [d, d + ' per section (' + per / d + ' x ' + d + ')'])), cur) + '<div class="sub">Equal sections only.</div>');
+    if (cur) h += fld('Section shape', sel('sectionRows', M.validSectionRows(cur).map((d) => [d, d + (d === 1 ? ' row' : ' rows') + ' x ' + cur / d + ' columns']), rows));
+    if (cur && rows > 1) h += fld('Port order', sel('portOrder', [['columns', 'down, then across (1 above 2)'], ['rows', 'across, then down']], order));
+    h += fld('Align', sel('align', [['left', 'left'], ['center', 'center'], ['right', 'right']], align) + '<div class="sub">Where the ports sit when the switch is wider than its ports (e.g. full width).</div>');
+    h += fld('Uplink ports', '<input type="number" id="upInput" min="0" max="16" value="' + up + '" style="width:60px"> ' + btn('applyUplinks', 'Apply') + '<div class="sub">Extra ports next to the sections (SFP, trunk...).</div>');
+    if (up) h += fld('Uplinks on', sel('uplinkSide', [['right', 'right'], ['left', 'left']], side));
+    if (up > 1) h += fld('Uplink rows', sel('uplinkRows', [1, 2, 3, 4].filter((d) => d <= up).map((d) => [d, d === 1 ? '1 (in line)' : d + ' rows']), o.uplinkRows || 1));
+    h += fld('Port isolation', '<label><input type="checkbox" data-f="portIsolation"' + (o.portIsolation ? ' checked' : '') + '> access ports cannot reach each other, only uplinks</label>');
+    return h;
+  }
+
   function detObject(id) {
     const idx = M.buildIndex(S.p), o = idx.objects[id];
     let h = '<h3>' + esc(M.TYPE_LABELS[o.type]) + '</h3>' + inp('Name', 'name', o.name) + inp('Location', 'location', o.location) + inp('Description', 'description', o.description);
@@ -628,14 +649,13 @@
       const kids = M.containerChildren(S.p, id);
       h += '<h3>Contents (' + kids.length + ')</h3>' + (kids.map((k) => '<div class="list-item" data-act="goto" data-kind="object" data-id="' + esc(k.id) + '">' + esc(idx.objects[k.id].name) + '</div>').join('') || '<div class="sub">Empty rack.</div>');
     } else if (o.type !== 'generic' || o.ports.length) {
-      const per = o.type === 'patchpanel' ? o.ports.length / 2 : o.ports.length;
+      const per = o.type === 'patchpanel' ? o.ports.length / 2 : (o.type === 'switch' ? M.accessPorts(o).length : o.ports.length);
       const used = o.ports.filter((p) => idx.portUse[p.id]).length;
-      h += '<h3>Ports (' + per + (o.type === 'patchpanel' ? ' front + ' + per + ' rear' : '') + ', ' + used + ' cabled)</h3>';
+      h += '<h3>Ports (' + per + (o.type === 'patchpanel' ? ' front + ' + per + ' rear' : '') + (o.type === 'switch' && o.ports.length > per ? ' + ' + (o.ports.length - per) + ' uplink' : '') + ', ' + used + ' cabled)</h3>';
     }
-    if (o.type === 'switch' && o.ports.length) {
-      const per = o.ports.length, cur = o.sectionSize > 0 && per % o.sectionSize === 0 ? o.sectionSize : 0;
-      h += isEdit() ? fld('Sections', '<select data-f="sectionSize">' + opts([[0, 'None (plain rows)']].concat(M.validSectionSizes(per).map((d) => [d, d + ' per section (' + per / d + ' x ' + d + ')'])), cur) + '</select><div class="sub">Equal sections only.</div>') :
-        fld('Sections', cur ? per / cur + ' x ' + cur : 'none');
+    if (o.type === 'switch') h += switchBlock(o);
+    if (o.type !== 'rack' && o.type !== 'internet' && o.containerId) {
+      h += isEdit() ? fld('Full width', '<label><input type="checkbox" data-f="fullWidth"' + (o.fullWidth ? ' checked' : '') + '> stretch to the width of its ' + (M.findContainer(S.p, o.containerId).kind === 'group' ? 'group' : 'rack') + '</label>') : (o.fullWidth ? fld('Full width', 'yes') : '');
     }
     if (o.type === 'patchpanel') {
       const per = o.ports.length / 2, cur = M.effectiveSectionSize(o, per);
@@ -646,13 +666,13 @@
       const nw = o.ports.filter((x) => x.role === 'wan').length, nl = o.ports.length - nw;
       h += fld('Ports', 'WAN <input type="number" id="wanInput" min="0" max="96" value="' + nw + '" style="width:60px"> LAN <input type="number" id="lanInput" min="0" max="96" value="' + nl + '" style="width:60px"> ' + btn('applyRouterPorts', 'Apply'));
     } else if (isEdit() && o.type !== 'rack') {
-      h += fld('Port count', '<input type="number" id="pcInput" min="0" max="96" value="' + (o.type === 'patchpanel' ? o.ports.length / 2 : o.ports.length) + '" style="width:70px"> ' + btn('applyPortCount', 'Apply') +
+      h += fld('Port count', '<input type="number" id="pcInput" min="0" max="96" value="' + (o.type === 'patchpanel' ? o.ports.length / 2 : (o.type === 'switch' ? M.accessPorts(o).length : o.ports.length)) + '" style="width:70px"> ' + btn('applyPortCount', 'Apply') +
         (o.type === 'switch' ? '<div class="sub">Presets: ' + [8, 16, 24, 48].map((n) => '<a class="lnk" data-act="presetPorts" data-n="' + n + '">' + n + '</a>').join(' ') + '</div>' : ''));
     }
     if (o.ports.length) {
       h += '<table class="t"><tr><th>Port</th><th>Connection</th><th></th></tr>' + o.ports.map((pt) =>
         '<tr><td>' + (isEdit() ? '<input type="text" data-f="plabel" data-t="' + esc(pt.id) + '" value="' + esc(pt.label) + '" style="width:5em">' : '<a class="lnk" data-act="select" data-kind="port" data-id="' + esc(pt.id) + '">' + esc(pt.label) + '</a>') +
-        (o.type === 'patchpanel' ? ' <span class="tag">' + pt.side + '</span>' : '') + (o.type === 'router' ? ' <span class="tag">' + esc(pt.role) + '</span>' : '') + '</td><td>' +
+        (o.type === 'patchpanel' ? ' <span class="tag">' + pt.side + '</span>' : '') + ((o.type === 'router' || pt.role === 'uplink') ? ' <span class="tag">' + esc(pt.role) + '</span>' : '') + '</td><td>' +
         (hasIp(o) ? (isEdit() ? '<input type="text" data-f="pip" data-t="' + esc(pt.id) + '" value="' + esc(pt.ip || '') + '" placeholder="IP" style="width:100%;margin-bottom:2px">' : (pt.ip ? '<div>' + esc(pt.ip) + '</div>' : '')) : '') +
         portState(o, pt, idx) + '</td><td>' +
         '<button data-act="trace" data-kind="port" data-id="' + esc(pt.id) + '" title="Trace connection">Trace</button></td></tr>').join('') + '</table>';
@@ -855,7 +875,10 @@
     if (type === 'generic') fields.push({ k: 'portCount', label: 'Ports', type: 'number', v: 0, min: 0, max: 96 });
     if (type === 'rack') fields.push({ k: 'rackHeight', label: 'Height (U)', type: 'number', v: 42, min: 1, max: 60 });
     if (type === 'patchpanel') fields.push({ k: 'sectionSize', label: 'Ports per section', type: 'number', v: '', min: 1, max: 96, hint: 'Leave empty for automatic (24 -> 3 x 8, 12 -> 2 x 6, 16 -> 2 x 8). Must divide the port count evenly.' });
+    if (type === 'switch') fields.push({ k: 'uplinkPorts', label: 'Uplink ports', type: 'number', v: 0, min: 0, max: 16, hint: 'Extra ports next to the main ports (1, 2, 4...).' });
     if (type === 'switch') fields.push({ k: 'sectionSize', label: 'Ports per section', type: 'number', v: '', min: 1, max: 96, hint: 'Optional, e.g. 8 for 3 x 8 on a 24-port switch. Leave empty for plain rows. Must divide the port count evenly.' });
+    if (type === 'switch') fields.push({ k: 'sectionRows', label: 'Rows per section', type: 'number', v: '', min: 1, max: 8, hint: 'Optional: 2 makes 8-port sections 2 x 4. Needs ports per section.' });
+    if (type === 'switch') fields.push({ k: 'portIsolation', label: 'Port isolation', type: 'check', v: false, hint: 'Access ports can only talk to uplinks, not to each other.' });
     if (type === 'patchpanel') fields.push({ k: 'straight', label: 'Front N <-> rear N', type: 'check', v: true, hint: 'Documents a straight-through internal mapping. Untick if this panel is not wired that way.' });
     fields.push({ k: 'container', label: 'Inside', type: 'select', opts: containerOptions(isGroup ? 'group' : 'object', type, null), v: defaultContainer(type) });
     const v = await formDlg('New ' + (isGroup ? 'group' : M.TYPE_LABELS[type]), fields, 'Create');
@@ -864,7 +887,7 @@
     const r = commit('Create ' + type, (p) => {
       if (isGroup) return B.addGroupPlaced(p, mid, { name: v.name || undefined, parentGroupId: v.container || null }, pos.x, pos.y).id;
       const portCount = v.portCount != null ? parseInt(v.portCount, 10) : undefined;
-      return B.addObjectPlaced(p, mid, { type: type, name: v.name || undefined, portCount: portCount, rackHeight: v.rackHeight, straight: v.straight, wanPorts: v.wanPorts, lanPorts: v.lanPorts, sectionSize: (type === 'patchpanel' || type === 'switch') && v.sectionSize > 0 ? v.sectionSize : undefined, ipAddress: v.ipAddress, containerId: v.container || null }, pos.x, pos.y).id;
+      return B.addObjectPlaced(p, mid, { type: type, name: v.name || undefined, portCount: portCount, rackHeight: v.rackHeight, straight: v.straight, wanPorts: v.wanPorts, lanPorts: v.lanPorts, sectionSize: (type === 'patchpanel' || type === 'switch') && v.sectionSize > 0 ? v.sectionSize : undefined, uplinkPorts: v.uplinkPorts > 0 ? v.uplinkPorts : undefined, sectionRows: v.sectionRows > 1 ? v.sectionRows : undefined, portIsolation: !!v.portIsolation, ipAddress: v.ipAddress, containerId: v.container || null }, pos.x, pos.y).id;
     });
     if (r && r !== true) { S.sel = { kind: isGroup ? 'group' : 'object', id: r }; renderAll(); openRight(); }
   }
@@ -1036,7 +1059,7 @@
   /* ---------------------------------------------------------------- field editing */
   function onFieldChange(el) {
     let f = el.dataset.f;
-    const t = el.dataset.t, val = el.value;
+    const t = el.dataset.t, val = el.type === 'checkbox' ? el.checked : el.value;
     if (f === 'colorPreset') {
       if (val === 'custom') { S.customColorFor = S.sel && S.sel.id; renderRight(); return; }
       S.customColorFor = null; f = 'color';
@@ -1054,6 +1077,11 @@
       if (sel.kind === 'group' || sel.kind === 'object') {
         const c = M.findContainer(p, sel.id);
         if (f === 'sectionSize') { M.setSectionSize(p, sel.id, parseInt(val, 10)); B.refitObject(p, sel.id); }
+        else if (f === 'sectionRows') { M.setSwitchLayout(p, sel.id, { sectionRows: parseInt(val, 10) }); B.refitObject(p, sel.id); }
+        else if (f === 'portOrder' || f === 'align' || f === 'uplinkSide') M.setSwitchLayout(p, sel.id, { [f]: val });
+        else if (f === 'uplinkRows') { M.setSwitchLayout(p, sel.id, { uplinkRows: parseInt(val, 10) }); B.refitObject(p, sel.id); }
+        else if (f === 'portIsolation') M.setSwitchLayout(p, sel.id, { portIsolation: !!val });
+        else if (f === 'fullWidth') { M.setFullWidth(p, sel.id, !!val); B.applyFullWidthFor(p, sel.id); }
         else if (f === 'container') {
           M.setContainer(p, sel.kind, sel.id, val || null);
           M.mapsFor(p, sel.kind, sel.id).forEach((m) => { if (val) M.growToFit(p, m, val); });
@@ -1228,6 +1256,7 @@
           if (pick) { try { pick.showPicker(); } catch (_) { pick.click(); } }
           break;
         }
+        case 'applyUplinks': { const n = parseInt($('upInput').value, 10), id = S.sel.id; commit('Set uplink ports', (p) => { M.setUplinkPorts(p, id, n); B.refitObject(p, id); }); break; }
         case 'applyPortCount': { const n = parseInt($('pcInput').value, 10), id = S.sel.id; commit('Set port count', (p) => { M.setPortCount(p, id, n); B.refitObject(p, id); }); break; }
         case 'applyRouterPorts': { const id = S.sel.id, w = parseInt($('wanInput').value, 10), l = parseInt($('lanInput').value, 10); commit('Set router ports', (p) => M.setRouterPorts(p, id, w, l)); break; }
         case 'presetPorts': { const id = S.sel.id, n = parseInt(d.n, 10); commit('Set port count', (p) => { M.setPortCount(p, id, n); B.refitObject(p, id); }); break; }

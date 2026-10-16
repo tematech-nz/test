@@ -20,7 +20,7 @@
   /* patch panels always use sections (automatic split unless chosen); switches only when a valid split was chosen */
   function usesSections(obj) {
     if (obj.type === 'patchpanel') return true;
-    var n = sideCount(obj, 'front');
+    var n = obj.ports.filter(function (x) { return x.role !== 'uplink'; }).length;
     return obj.type === 'switch' && obj.sectionSize > 0 && n > 0 && n % obj.sectionSize === 0;
   }
   function gridOf(obj, side) {
@@ -48,7 +48,58 @@
     return Math.max(CELL, Math.min(64, m * 6 + 6));
   }
 
+  /*
+   * Switches: access ports in equal sections (rows x columns each, lines of up to 24 ports), optional uplink ports in a
+   * block of their own on the left or right, and left/center/right alignment of the whole block when the switch is wider
+   * than its natural width. Without a section size the access ports keep the plain grid.
+   */
+  var LINEGAP = 6;
+  function switchSpec(obj) {
+    var access = obj.ports.filter(function (x) { return x.role !== 'uplink'; }), u = obj.ports.length - access.length, n = access.length;
+    var sec = usesSections(obj), size, nsec, R, C, perRow, order;
+    if (sec) {
+      size = obj.sectionSize; nsec = n / size;
+      R = obj.sectionRows > 0 && size % obj.sectionRows === 0 ? obj.sectionRows : 1; C = size / R;
+      perRow = Math.max(1, Math.min(nsec, Math.floor(LINEMAX / size)));
+      order = obj.portOrder === 'rows' ? 'rows' : (R > 1 ? 'columns' : 'rows');
+    } else {
+      var gr = gridFor(n); size = n; nsec = n ? 1 : 0; R = gr.rows; C = gr.cols; perRow = 1; order = 'rows';
+    }
+    var lines = nsec ? Math.ceil(nsec / perRow) : 0, upRows = u ? Math.max(1, Math.min(R || 1, u, obj.uplinkRows > 0 ? obj.uplinkRows : 1)) : 0, upCols = u ? Math.ceil(u / upRows) : 0;
+    var cw = cellFor(obj), secW = C * cw, lineW = nsec ? perRow * secW + (perRow - 1) * SGAP : 0, upW = upCols * cw;
+    var contentW = lineW + (u ? (nsec ? SGAP : 0) + upW : 0);
+    var rowsAll = Math.max(lines * R, upRows, 1);
+    return {
+      access: access, uplinks: obj.ports.filter(function (x) { return x.role === 'uplink'; }), sectioned: sec, size: size, nsec: nsec, R: R, C: C, perRow: perRow, order: order,
+      lines: lines, upRows: upRows, upCols: upCols, cw: cw, secW: secW, lineW: lineW, upW: upW, contentW: contentW, rowsAll: rowsAll,
+      w: Math.max(contentW + PADX * 2 + 2, obj.type === 'switch' ? 60 : 0), h: HEADER + 2 + rowsAll * (CELL + 2) + Math.max(0, lines - 1) * LINEGAP + 6
+    };
+  }
+  function switchLayout(obj, w, h, out) {
+    var s = switchSpec(obj), y0 = HEADER + 2;
+    var rowH = Math.max(CELL + 2, (h - HEADER - 8 - Math.max(0, s.lines - 1) * LINEGAP) / s.rowsAll);
+    var pw = Math.min(s.cw - 2, 26), ph = Math.min(rowH - 2, 22);
+    var extra = Math.max(0, w - PADX * 2 - s.contentW), off = obj.align === 'center' ? extra / 2 : (obj.align === 'right' ? extra : 0);
+    var x0 = PADX + off, upLeft = obj.uplinkSide === 'left' && s.uplinks.length;
+    var upY = y0 + Math.max(0, ((s.lines ? s.R : s.upRows) - s.upRows) * rowH / 2); // uplinks sit vertically centred beside taller sections
+    var secX = x0 + (upLeft ? s.upW + SGAP : 0), upX = upLeft ? x0 : x0 + s.lineW + (s.nsec ? SGAP : 0);
+    s.access.forEach(function (p, i) {
+      var sec = Math.floor(i / s.size), k = i % s.size, line = Math.floor(sec / s.perRow), c = sec % s.perRow, row, col;
+      if (s.order === 'columns') { col = Math.floor(k / s.R); row = k % s.R; } else { row = Math.floor(k / s.C); col = k % s.C; }
+      var sx = secX + c * (s.secW + SGAP), sy = y0 + line * (s.R * rowH + LINEGAP);
+      out.ports[p.id] = { x: sx + col * s.cw + (s.cw - pw) / 2, y: sy + row * rowH + (rowH - ph) / 2, w: pw, h: ph, side: 'front', hidden: false };
+      if (s.sectioned && k === 0) out.groups.push({ x: sx - 1, y: sy + 1, w: s.secW + 2, h: s.R * rowH - 2, side: 'front' });
+    });
+    s.uplinks.forEach(function (p, j) {
+      var col = Math.floor(j / s.upRows), row = j % s.upRows;
+      out.ports[p.id] = { x: upX + col * s.cw + (s.cw - pw) / 2, y: upY + row * rowH + (rowH - ph) / 2, w: pw, h: ph, side: 'front', hidden: false };
+    });
+    if (s.uplinks.length) out.groups.push({ x: upX - 1, y: upY + 1, w: s.upW + 2, h: s.upRows * rowH - 2, side: 'uplink' });
+    return out;
+  }
+
   function defaultSize(obj) {
+    if (obj.type === 'switch' && obj.ports.length) { var sp = switchSpec(obj); return { w: sp.w, h: sp.h }; }
     if (obj.type === 'rack') return { w: 340, h: 300 };
     if (obj.type === 'generic' && !obj.ports.length) return { w: 120, h: 60 };
     var ks = sidesOf(obj), gs = ks.map(function (k) { return gridOf(obj, k); });
@@ -108,6 +159,7 @@
     var out = { ports: {}, sections: [], groups: [], h: h };
     var sides = sidesOf(obj);
     if (!sides.length) return out;
+    if (obj.type === 'switch') return switchLayout(obj, w, h, out);
     if (SECTIONED[obj.type]) {
       var chrome = HEADER + sides.length * (SECHEAD + SECGAP) + 4;
       var anyCollapsed = sides.some(function (s) { return collapsed[s]; });
@@ -141,6 +193,6 @@
   }
   function layoutPorts(obj, w, h, collapsed) { return computeLayout(obj, w, h, collapsed).ports; }
 
-  NM.layout = { HEADER: HEADER, defaultSize: defaultSize, defaultGroupSize: defaultGroupSize, layoutPorts: layoutPorts, minSize: minSize, cellFor: cellFor, computeLayout: computeLayout, gridOf: gridOf, usesSections: usesSections, panelHeight: panelHeight, gridFor: gridFor };
+  NM.layout = { HEADER: HEADER, defaultSize: defaultSize, defaultGroupSize: defaultGroupSize, layoutPorts: layoutPorts, minSize: minSize, cellFor: cellFor, computeLayout: computeLayout, switchSpec: switchSpec, gridOf: gridOf, usesSections: usesSections, panelHeight: panelHeight, gridFor: gridFor };
   if (typeof module !== 'undefined' && module.exports) module.exports = NM.layout;
 })(typeof window !== 'undefined' ? window : globalThis);

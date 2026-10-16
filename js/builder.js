@@ -64,10 +64,35 @@
     }
     return out;
   }
+  /* equipment flagged fullWidth fills the inner width of its container (never below its readable minimum) */
+  function applyFullWidth(p, mapId, containerRefId) {
+    var cp = M.placementOf(p, mapId, containerRefId), changed = false;
+    if (!cp) return false;
+    M.containerChildren(p, containerRefId).forEach(function (k) {
+      if (k.kind !== 'object') return;
+      var o = M.findContainer(p, k.id).item;
+      if (!o.fullWidth || o.type === 'rack') return;
+      var q = M.placementOf(p, mapId, k.id);
+      if (!q) return;
+      var w = Math.max(L.minSize(o).w, cp.w - 2 * M.PAD), x = cp.x + M.PAD;
+      if (q.w !== w || q.x !== x) { q.w = w; q.x = x; changed = true; }
+    });
+    return changed;
+  }
+  function applyFullWidthFor(p, objectId) {
+    var c = M.findContainer(p, objectId);
+    if (!c || !c.item.containerId) return;
+    p.placements.forEach(function (pl) { if (pl.refId === objectId) { applyFullWidth(p, pl.mapId, c.item.containerId); settle(p, pl); } });
+  }
   function settle(p, startPl) {
     var pm = parentMap(p), queue = [startPl].concat(ancestorPlacements(p, pm, startPl.mapId, startPl.refId)), guard = 0;
     while (queue.length && guard++ < 400) {
       var pl = queue.shift();
+      applyFullWidth(p, pl.mapId, pl.refId);
+      // a container must hold its (possibly just stretched) contents
+      var selfBefore = pl.w + 'x' + pl.h;
+      M.growToFit(p, pl.mapId, pl.refId);
+      if (pl.w + 'x' + pl.h !== selfBefore) ancestorPlacements(p, pm, pl.mapId, pl.refId).forEach(function (q) { queue.push(q); });
       // 1. parents grow to hold this item; grown parents get checked as well
       var chain = ancestorPlacements(p, pm, pl.mapId, pl.refId);
       if (chain.length) {
@@ -181,6 +206,7 @@
       pl.w = size.w; pl.h = size.h;
       if (o.containerId) M.growToFit(p, pl.mapId, o.containerId);
       settle(p, pl);
+      if (o.containerId && o.fullWidth) applyFullWidth(p, pl.mapId, o.containerId);
     });
   }
 
@@ -286,7 +312,8 @@
     var base = c.kind === 'object' ? L.minSize(c.item) : { w: 100, h: 60 };
     M.containerChildren(p, pl.refId).forEach(function (k) {
       var q = M.placementOf(p, pl.mapId, k.id);
-      if (q) { base.w = Math.max(base.w, q.x + q.w + M.PAD - pl.x); base.h = Math.max(base.h, q.y + q.h + M.PAD - pl.y); }
+      var kc = M.findContainer(p, k.id);
+      if (q) { base.w = Math.max(base.w, (kc && kc.item.fullWidth ? L.minSize(kc.item).w + 2 * M.PAD : q.x + q.w + M.PAD - pl.x)); base.h = Math.max(base.h, q.y + q.h + M.PAD - pl.y); }
     });
     return base;
   }
@@ -317,6 +344,6 @@
     });
   }
 
-  NM.builder = { minPlacementSize: minPlacementSize, normalizeSizes: normalizeSizes, fitMinimum: fitMinimum, resolveDrop: resolveDrop, settle: settle, findDropContainer: findDropContainer, dropSlot: dropSlot, restack: restack, captureChain: captureChain, restoreChain: restoreChain, applyExtension: applyExtension, refitObject: refitObject, placeItem: placeItem, addGroupPlaced: addGroupPlaced, addObjectPlaced: addObjectPlaced, buildDemoProject: buildDemoProject };
+  NM.builder = { applyFullWidth: applyFullWidth, applyFullWidthFor: applyFullWidthFor, minPlacementSize: minPlacementSize, normalizeSizes: normalizeSizes, fitMinimum: fitMinimum, resolveDrop: resolveDrop, settle: settle, findDropContainer: findDropContainer, dropSlot: dropSlot, restack: restack, captureChain: captureChain, restoreChain: restoreChain, applyExtension: applyExtension, refitObject: refitObject, placeItem: placeItem, addGroupPlaced: addGroupPlaced, addObjectPlaced: addObjectPlaced, buildDemoProject: buildDemoProject };
   if (typeof module !== 'undefined' && module.exports) module.exports = NM.builder;
 })(typeof window !== 'undefined' ? window : globalThis);

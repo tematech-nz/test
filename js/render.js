@@ -93,6 +93,9 @@
       var tx = pl.x + (editing ? 22 : 6);
       var label = ref.name + (!it.isGroup && ref.type === 'rack' && ref.rackHeight ? ' (' + ref.rackHeight + 'U)' : '');
       x.push('<text x="' + num(tx) + '" y="' + num(pl.y + 14) + '" font-size="12" font-weight="bold" fill="#222" font-family="sans-serif" pointer-events="none">' + esc(trunc(label, Math.floor((pl.w - (tx - pl.x) - 4) / 6.5))) + '</text>');
+      if (!it.isGroup && ref.type === 'switch' && ref.portIsolation) {
+        x.push('<text x="' + num(pl.x + pl.w - 5) + '" y="' + num(pl.y + 13) + '" font-size="8" text-anchor="end" fill="#b71c1c" font-family="sans-serif" pointer-events="none">PORT ISOLATION</text>');
+      }
       if (!it.isGroup && (ref.type === 'router' || ref.type === 'internet') && ref.ipAddress) {
         x.push('<text x="' + num(pl.x + pl.w - 5) + '" y="' + num(pl.y + 14) + '" font-size="9" text-anchor="end" fill="#0d47a1" font-family="sans-serif" pointer-events="none">' + esc(ref.ipAddress) + '</text>');
       }
@@ -112,7 +115,7 @@
           });
         }
         (it.lay.groups || []).forEach(function (gp) {
-          x.push('<rect x="' + num(pl.x + gp.x) + '" y="' + num(pl.y + gp.y) + '" width="' + num(gp.w) + '" height="' + num(gp.h) + '" rx="3" fill="#ffffff" fill-opacity="0.7" stroke="' + (gp.side === 'rear' ? '#d9a35a' : '#cdb86a') + '" stroke-width="0.8" pointer-events="none"/>');
+          x.push('<rect x="' + num(pl.x + gp.x) + '" y="' + num(pl.y + gp.y) + '" width="' + num(gp.w) + '" height="' + num(gp.h) + '" rx="3" fill="#ffffff" fill-opacity="0.7" stroke="' + (gp.side === 'rear' ? '#d9a35a' : (gp.side === 'uplink' ? '#8e6bbf' : '#cdb86a')) + '" stroke-width="' + (gp.side === 'uplink' ? 1.4 : 0.8) + '" pointer-events="none"/>');
         });
         ref.ports.forEach(function (pt) {
           var r = it.lay.ports[pt.id]; if (!r) return;
@@ -122,6 +125,7 @@
           var use = idx.portUse[pt.id], mapped = idx.mapByPort[pt.id];
           var fill = use ? (use.kind === 'patch' ? '#bbdefb' : '#ffe0b2') : (mapped ? '#f5f5f5' : '#ffffff');
           if (!use && pt.role === 'wan') fill = '#fff3f1';
+          if (!use && pt.role === 'uplink') fill = '#ede7f6';
           var isHi = hl && hl.ports[pt.id], isSelPort = sel && sel.kind === 'port' && sel.id === pt.id, isPending = opts.pendingPortId === pt.id;
           if (isHi) fill = HI;
           var stroke = isPending ? '#d500f9' : (isSelPort ? SEL : '#444'), sw = isPending || isSelPort ? 2.5 : 1;
