@@ -36,10 +36,19 @@
   function buildGraph(p, opts) {
     opts = opts || {};
     var idx = M.buildIndex(p), nodes = {}, order = [], seen = {}, edges = [], dangling = [];
+    // a wall socket with a device plugged into it is just a pass-through of the cabling; one at the end of a lead from a panel is an endpoint
+    function pluggedSocket(o) {
+      return o.type === 'socket' && o.ports.some(function (pt) {
+        var u = pt.side !== 'rear' && idx.portUse[pt.id];
+        if (!(u && u.kind === 'patch' && idx.portObj[u.other] && !M.isTermination(idx.portObj[u.other]))) return false; // a device lead plugged into the outlet...
+        var m = idx.mapByPort[pt.id];
+        return !!(m && idx.portUse[m.other] && idx.portUse[m.other].kind === 'wire'); // ...whose rear carries installed cabling onward
+      });
+    }
     p.objects.forEach(function (o) {
-      if (PASSIVE[o.type]) return;
+      if (PASSIVE[o.type] || pluggedSocket(o)) return;
       nodes[o.id] = {
-        id: o.id, name: o.name, type: o.type, ip: o.ipAddress || '', nets: nodeNets(o),
+        id: o.id, name: o.name, type: o.type, label: M.typeLabel(o), ip: o.ipAddress || '', nets: nodeNets(o),
         transit: !TERMINAL[o.type] || (o.type === 'internet' && !!opts.viaInternet),
         isolated: o.type === 'switch' && !!o.portIsolation
       };
@@ -62,7 +71,7 @@
         tr.path.forEach(function (s) {
           if (s.type === 'patch') via.push(idx.cables[s.id].name);
           else if (s.type === 'wire') { var l = idx.wireLink[s.id], w = idx.wires[s.id]; via.push(l.name + ' w' + w.number); }
-          else if (s.type === 'port' && idx.portObj[s.id].type === 'patchpanel') {
+          else if (s.type === 'port' && M.isTermination(idx.portObj[s.id])) {
             var nm = idx.portObj[s.id].name;
             if (via[via.length - 1] !== nm && s.id !== pt.id && s.id !== last.id) via.push(nm);
           }

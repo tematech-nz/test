@@ -2,7 +2,7 @@
 (function (g) {
   'use strict';
   var NM = g.NetMap = g.NetMap || {};
-  if (typeof require === 'function') { if (!NM.model) require('./model.js'); if (!NM.layout) require('./layout.js'); }
+  if (typeof require === 'function') { if (!NM.model) require('./model.js'); if (!NM.layout) require('./layout.js'); if (!NM.icons) require('./icons.js'); }
   var M = NM.model, L = NM.layout;
 
   var STYLE = {
@@ -93,6 +93,10 @@
       var tx = pl.x + (editing ? 22 : 6);
       var label = ref.name + (!it.isGroup && ref.type === 'rack' && ref.rackHeight ? ' (' + ref.rackHeight + 'U)' : '');
       x.push('<text x="' + num(tx) + '" y="' + num(pl.y + 14) + '" font-size="12" font-weight="bold" fill="#222" font-family="sans-serif" pointer-events="none">' + esc(trunc(label, Math.floor((pl.w - (tx - pl.x) - 4) / 6.5))) + '</text>');
+      if (!it.isGroup && ref.type === 'generic' && ref.deviceKind && NM.icons) {
+        var isz = ref.ports.length ? 28 : 44;
+        x.push(NM.icons.svg(ref.deviceKind, num(pl.x + 6), num(ref.ports.length ? pl.y + 22 : pl.y + 20 + Math.max(0, (pl.h - 20 - isz) / 2)), isz));
+      }
       if (!it.isGroup && ref.type === 'switch' && ref.portIsolation) {
         x.push('<text x="' + num(pl.x + pl.w - 5) + '" y="' + num(pl.y + 13) + '" font-size="8" text-anchor="end" fill="#b71c1c" font-family="sans-serif" pointer-events="none">PORT ISOLATION</text>');
       }

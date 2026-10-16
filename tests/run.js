@@ -99,7 +99,7 @@ test('8. switch -> patch -> panel -> fixed wire -> panel -> patch -> wall socket
   const p = B.buildDemoProject();
   const t = T.tracePort(p, port(byName(p, 'Switch A'), 12).id);
   const seq = t.path.map(s => s.type);
-  assert.deepStrictEqual(seq, ['port', 'patch', 'port', 'internal', 'port', 'wire', 'port', 'internal', 'port', 'patch', 'port']);
+  assert.deepStrictEqual(seq, ['port', 'patch', 'port', 'internal', 'port', 'wire', 'port', 'internal', 'port', 'patch', 'port', 'internal', 'port']); // ends inside the socket: front jack, internal mapping, rear
   const lines = T.describe(p, t).map(x => x.text);
   assert.ok(/Switch A \/ 12/.test(lines[0]) || /WS-02 \/ 1/.test(lines[0]));
   assert.ok(lines.some(l => /Fixed link FL-001, wire 12/.test(l)));
@@ -849,6 +849,83 @@ test('rendering shows uplinks, shapes and the isolation badge', () => {
   const svg = R.svgDocument(p, mid);
   assert.ok(svg.indexOf('PORT ISOLATION') > 0 && svg.indexOf('#ede7f6') > 0 && svg.indexOf('#8e6bbf') > 0);
   assert.deepStrictEqual(overlapPairs(p), []);
+});
+
+console.log('Device icons and wall socket rear terminations');
+test('generic devices have a kind (pc, ap, ...) that names and draws them', () => {
+  const p = M.createProject('d'), mid = p.maps[0].id;
+  const pc1 = M.addObject(p, { type: 'generic', deviceKind: 'pc', portCount: 1 }), pc2 = M.addObject(p, { type: 'generic', deviceKind: 'pc', portCount: 1 });
+  const ap = B.addObjectPlaced(p, mid, { type: 'generic', deviceKind: 'ap', portCount: 1 }, 0, 0);
+  const other = M.addObject(p, { type: 'generic' });
+  assert.deepStrictEqual([pc1.name, pc2.name, ap.name, other.name], ['PC 1', 'PC 2', 'AP 1', 'Generic 1']);
+  assert.strictEqual(other.deviceKind, undefined);
+  assert.strictEqual(M.typeLabel(ap), 'Wi-Fi access point');
+  assert.strictEqual(M.typeLabel(other), 'Generic');
+  assert.ok(R.svgDocument(p, mid).indexOf('data-icon="ap"') > 0);
+  assert.ok(M.search(p, 'wi-fi').some(r => r.id === ap.id), 'searchable by device type');
+  M.setDeviceKind(p, ap.id, 'camera'); assert.strictEqual(ap.deviceKind, 'camera');
+  M.setDeviceKind(p, ap.id, 'other'); assert.strictEqual(ap.deviceKind, undefined);
+  assert.throws(() => M.setDeviceKind(p, ap.id, 'toaster'), /Unknown/);
+  assert.throws(() => M.setDeviceKind(p, M.addObject(p, { type: 'switch' }).id, 'pc'), /generic/);
+  M.DEVICE_KINDS.forEach(k => { if (k[0] !== 'other') assert.ok(NM.icons.svg(k[0], 0, 0, 24).indexOf('<g') === 0, k[0]); });
+});
+test('device icons get their own space; ports sit to the right of the icon', () => {
+  const p = M.createProject('d');
+  const withIcon = M.addObject(p, { type: 'generic', deviceKind: 'pc', portCount: 2 }), plain = M.addObject(p, { type: 'generic', portCount: 2 });
+  const L = NM.layout, s1 = L.defaultSize(withIcon), s0 = L.defaultSize(plain);
+  assert.ok(s1.w >= s0.w + 30 && s1.h >= 20 + 30);
+  const l1 = L.computeLayout(withIcon, s1.w, s1.h, {}), l0 = L.computeLayout(plain, s0.w, s0.h, {});
+  assert.ok(l1.ports[withIcon.ports[0].id].x >= 34, 'clear of the icon');
+  assert.ok(l1.ports[withIcon.ports[0].id].x > l0.ports[plain.ports[0].id].x);
+  const noPorts = M.addObject(p, { type: 'generic', deviceKind: 'ap', portCount: 0 });
+  assert.ok(L.minSize(noPorts).w >= 100);
+});
+test('wall sockets have rear terminations and take fixed links to patch panels', () => {
+  const p = M.createProject('s');
+  const ws = M.addObject(p, { type: 'socket', name: 'WS', portCount: 2 });
+  assert.deepStrictEqual(ws.ports.map(x => x.side + x.label), ['front1', 'front2', 'rear1', 'rear2']);
+  assert.strictEqual(p.internalMappings.length, 2, 'straight-through by default');
+  const pp = M.addObject(p, { type: 'patchpanel', name: 'PP', portCount: 24, straight: true });
+  const sw = M.addObject(p, { type: 'switch', name: 'SW', portCount: 8 });
+  const pc = M.addObject(p, { type: 'generic', name: 'PCx', deviceKind: 'pc', portCount: 1 });
+  const link = M.addFixedLink(p, { aObjectId: pp.id, bObjectId: ws.id, pairs: [[port(pp, 5, 'rear').id, port(ws, 1, 'rear').id]] });
+  assert.strictEqual(link.wires.length, 1);
+  assert.throws(() => M.addFixedLink(p, { aObjectId: pp.id, bObjectId: sw.id, wireCount: 1 }), /patch panels and wall sockets/);
+  M.addPatchCable(p, { aPortId: port(sw, 1).id, bPortId: port(pp, 5).id });
+  M.addPatchCable(p, { aPortId: pc.ports[0].id, bPortId: port(ws, 1).id });
+  assert.ok(M.validateProject(p).every(i => i.severity !== 'error'));
+  const t = T.tracePort(p, port(sw, 1).id);
+  assert.deepStrictEqual(t.path.map(s => s.type), ['port', 'patch', 'port', 'internal', 'port', 'wire', 'port', 'internal', 'port', 'patch', 'port']);
+  assert.ok(t.ends.some(e => /Terminates at PCx/.test(e.text)) && t.ends.some(e => /Terminates at SW/.test(e.text)));
+  // the outlet is pass-through in the graph: PC and switch are directly linked, WS is not a node
+  const g = NM.topology.buildGraph(p), names = g.order.map(id => g.nodes[id].name).sort();
+  assert.deepStrictEqual(names, ['PCx', 'SW']);
+  assert.strictEqual(g.links.length, 1);
+  assert.ok(/WS/.test(g.links[0].paths[0].via.join(' ')), 'the outlet shows in the cable path');
+  // an unplugged outlet is an endpoint node of its own
+  const p2 = M.createProject('s2');
+  const ws2 = M.addObject(p2, { type: 'socket', name: 'WS2', portCount: 1 }), pp2 = M.addObject(p2, { type: 'patchpanel', name: 'PP2', portCount: 4, straight: true }), sw2 = M.addObject(p2, { type: 'switch', name: 'SW2', portCount: 4 });
+  M.addFixedLink(p2, { aObjectId: pp2.id, bObjectId: ws2.id, pairs: [[port(pp2, 1, 'rear').id, port(ws2, 1, 'rear').id]] });
+  M.addPatchCable(p2, { aPortId: port(sw2, 1).id, bPortId: port(pp2, 1).id });
+  const g2 = NM.topology.buildGraph(p2);
+  assert.deepStrictEqual(g2.order.map(id => g2.nodes[id].name).sort(), ['SW2', 'WS2']);
+  assert.strictEqual(g2.links.length, 1);
+});
+test('shrinking a straight-through panel removes the mappings of removed ports; old files get socket rears on import', () => {
+  const p = M.createProject('s');
+  const pp = M.addObject(p, { type: 'patchpanel', portCount: 24, straight: true });
+  M.setPortCount(p, pp.id, 12);
+  assert.strictEqual(pp.ports.length, 24); assert.strictEqual(p.internalMappings.length, 12);
+  assert.ok(M.validateProject(p).every(i => i.severity !== 'error'));
+  const v1 = { schemaVersion: 1, id: 'prj_x', name: 'old', maps: [{ id: 'm', name: 'M' }], groups: [], objects: [{ id: 'o1', type: 'socket', name: 'WS', containerId: null, ports: [{ id: 'a', label: '1', side: 'front' }, { id: 'b', label: '2', side: 'front' }] }], placements: [], fixedLinks: [], patchCables: [], internalMappings: [], settings: {}, counters: { patch: 0, fixed: 0 } };
+  const r = M.importProject(JSON.stringify(v1));
+  assert.strictEqual(r.migratedFrom, 1);
+  assert.strictEqual(r.project.schemaVersion, 2);
+  const o = r.project.objects[0];
+  assert.deepStrictEqual(o.ports.map(x => x.side + x.label), ['front1', 'front2', 'rear1', 'rear2']);
+  assert.strictEqual(r.project.internalMappings.length, 2);
+  assert.strictEqual(r.issues.filter(i => i.severity === 'error').length, 0);
+  assert.strictEqual(M.importProject(JSON.stringify(r.project)).project.objects[0].ports.length, 4, 'idempotent');
 });
 
 console.log('\n' + passed + ' passed, ' + failed + ' failed');

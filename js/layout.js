@@ -6,7 +6,10 @@
 
   var SGAP = 8, LINEMAX = 24;
   if (typeof require === 'function' && !NM.model) require('./model.js');
-  var SECTIONED = { patchpanel: true, router: true };
+  var SECTIONED = { patchpanel: true, router: true, socket: true };
+  var ICONW = 34;
+  /* generic equipment drawn with a device icon keeps room for it on the left */
+  function iconW(obj) { return obj.type === 'generic' && obj.deviceKind ? ICONW : 0; }
   /* strip key of a port: front/rear on patch panels, wan/lan on routers */
   function keyOf(obj, p) { return obj.type === 'router' ? (p.role === 'wan' ? 'wan' : 'lan') : p.side; }
   function inSide(obj, side) { return obj.ports.filter(function (p) { return keyOf(obj, p) === side; }); }
@@ -101,17 +104,18 @@
   function defaultSize(obj) {
     if (obj.type === 'switch' && obj.ports.length) { var sp = switchSpec(obj); return { w: sp.w, h: sp.h }; }
     if (obj.type === 'rack') return { w: 340, h: 300 };
-    if (obj.type === 'generic' && !obj.ports.length) return { w: 120, h: 60 };
+    if (obj.type === 'generic' && !obj.ports.length) return { w: 120, h: obj.deviceKind ? 64 : 60 };
     var ks = sidesOf(obj), gs = ks.map(function (k) { return gridOf(obj, k); });
     var front = gs[0] || { rows: 0, cols: 0 }, rear = gs[1] || { rows: 0, cols: 0 };
     var cols = Math.max(front.cols, rear.cols, 4);
     var w = cols * cellFor(obj) + PADX * 2 + (SECTIONED[obj.type] ? 6 : 0);
-    if (obj.type === 'generic') w = Math.max(w, 100);
+    if (obj.type === 'generic') w = Math.max(w, 100) + iconW(obj);
+    if (obj.type === 'socket') w = Math.max(w, 96);
     if (usesSections(obj)) w += (Math.max(front.perRow || 1, rear.perRow || 1) - 1) * SGAP;
     if (obj.type === 'router') w = Math.max(w, 150);
     if (obj.type === 'internet') w = Math.max(w, 130);
     if (SECTIONED[obj.type]) return { w: w, h: panelHeight(obj, {}) };
-    return { w: w, h: HEADER + (front.rows + rear.rows) * (CELL + 2) + 8 };
+    return { w: w, h: HEADER + Math.max((front.rows + rear.rows) * (CELL + 2), iconW(obj) ? 30 : 0) + 8 };
   }
   function defaultGroupSize() { return { w: 420, h: 340 }; }
 
@@ -122,7 +126,7 @@
    */
   function minSize(obj) {
     if (obj.type === 'rack') return { w: 160, h: 80 };
-    if (!obj.ports.length) return { w: 80, h: 40 };
+    if (!obj.ports.length) return obj.deviceKind ? { w: 100, h: 56 } : { w: 80, h: 40 };
     return defaultSize(obj);
   }
 
@@ -186,13 +190,13 @@
     var rh = Math.max(CELL + 2, (h - HEADER - 8) / totalRows), y0 = HEADER + 2;
     sides.forEach(function (side, si) {
       if (usesSections(obj)) placeSections(side, inSide(obj, side), y0, w, rh, out.ports, grids[si], out.groups);
-      else placeGrid(obj, side, inSide(obj, side), 0, y0, w, rh, out.ports, false);
+      else placeGrid(obj, side, inSide(obj, side), iconW(obj), y0, w - iconW(obj), rh, out.ports, false);
       y0 += grids[si].rows * rh;
     });
     return out;
   }
   function layoutPorts(obj, w, h, collapsed) { return computeLayout(obj, w, h, collapsed).ports; }
 
-  NM.layout = { HEADER: HEADER, defaultSize: defaultSize, defaultGroupSize: defaultGroupSize, layoutPorts: layoutPorts, minSize: minSize, cellFor: cellFor, computeLayout: computeLayout, switchSpec: switchSpec, gridOf: gridOf, usesSections: usesSections, panelHeight: panelHeight, gridFor: gridFor };
+  NM.layout = { HEADER: HEADER, defaultSize: defaultSize, defaultGroupSize: defaultGroupSize, layoutPorts: layoutPorts, minSize: minSize, cellFor: cellFor, computeLayout: computeLayout, iconW: iconW, switchSpec: switchSpec, gridOf: gridOf, usesSections: usesSections, panelHeight: panelHeight, gridFor: gridFor };
   if (typeof module !== 'undefined' && module.exports) module.exports = NM.layout;
 })(typeof window !== 'undefined' ? window : globalThis);

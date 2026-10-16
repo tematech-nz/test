@@ -596,6 +596,42 @@ const ok = (m) => console.log('  ok   ' + m);
     for (let i = 0; i < 7; i++) await page.click('#btnUndo');
   });
 
+
+  await step('device icons: create a PC via the toolbar, switch it to an access point, see the icon', async () => {
+    await page.click('#toolbar button[data-add="generic"]');
+    await page.selectOption('#dlg select[name="deviceKind"]', 'pc');
+    await page.click('#dlg button[data-btn="ok"]');
+    await page.waitForTimeout(100);
+    const name = await page.evaluate(() => NetMap.app.S.p.objects.filter(o => o.deviceKind === 'pc').pop().name);
+    assert.ok(/^PC \d+$/.test(name), name);
+    assert.ok((await page.locator('#vp [data-icon="pc"]').count()) >= 1, 'PC icon drawn');
+    await page.selectOption('#detailsPane select[data-f="deviceKind"]', 'ap');
+    await page.waitForTimeout(100);
+    assert.ok((await page.locator('#vp [data-icon="ap"]').count()) >= 1, 'AP icon after changing the type');
+    await shot('device-icons');
+    await page.click('#btnUndo'); await page.click('#btnUndo');
+  });
+
+  await step('wall socket rear: fixed link between a patch panel and a wall socket from the UI', async () => {
+    await page.evaluate(() => NetMap.app.api.commit('socket link', (p) => {
+      const B = NetMap.builder, mid = p.maps[0].id;
+      B.addObjectPlaced(p, mid, { type: 'patchpanel', name: 'PP-L', portCount: 8, straight: true }, 5200, 40);
+      B.addObjectPlaced(p, mid, { type: 'socket', name: 'WS-L', portCount: 2 }, 5200, 300);
+    }));
+    await page.click('#toolbar button[data-act="newLink"]');
+    const opts = await page.$$eval('#dlg select[name="a"] option', (os) => os.map(o => o.textContent));
+    assert.ok(opts.some(o => /WS-L \(wall socket\)/.test(o)), opts.join('|'));
+    await page.selectOption('#dlg select[name="a"]', { label: 'PP-L' });
+    await page.selectOption('#dlg select[name="b"]', { label: 'WS-L (wall socket)' });
+    await page.fill('#dlg input[name="n"]', '2');
+    await page.click('#dlg button[data-btn="ok"]');
+    await page.waitForTimeout(150);
+    const link = await page.evaluate(() => { const S = NetMap.app.S, l = S.p.fixedLinks[S.p.fixedLinks.length - 1], idx = NetMap.model.buildIndex(S.p); return { n: l.wires.length, b: idx.objects[l.bObjectId].name, side: idx.ports[l.wires[0].bPortId].side }; });
+    assert.deepStrictEqual(link, { n: 2, b: 'WS-L', side: 'rear' });
+    assert.ok(/fixed link/i.test(await page.innerText('#detailsPane')));
+    await page.click('#btnUndo'); await page.click('#btnUndo');
+  });
+
   await step('autosave survives a refresh', async () => {
     await page.click('#btnMode'); // back to view mode flushes the save
     const name = await page.evaluate(() => NetMap.app.S.p.name);
@@ -613,7 +649,7 @@ const ok = (m) => console.log('  ok   ' + m);
     const [dl] = await Promise.all([page.waitForEvent('download'), page.click('#dlg button[data-btn="json"]')]);
     const file = await dl.path();
     const text = fs.readFileSync(file, 'utf8');
-    assert.ok(text.indexOf('\r') < 0 && text.indexOf('"schemaVersion": 1') > 0);
+    assert.ok(text.indexOf('\r') < 0 && text.indexOf('"schemaVersion": 2') > 0);
     await page.evaluate(() => NetMap.app.api.loadProject(NetMap.model.createProject('blank')));
     await page.click('#btnFile'); await page.click('#dlg button[data-btn="import"]').catch(() => {});
     await page.keyboard.press('Escape');

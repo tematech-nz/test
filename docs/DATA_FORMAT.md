@@ -1,4 +1,4 @@
-# NetMap data format (schema version 1)
+# NetMap data format (schema version 2)
 
 A project is one JSON object. All records have stable, unique string IDs (prefix + random hex, for example
 `obj_9f2c...`). Names, labels and coordinates are never used as identifiers, so renaming or moving something
@@ -24,6 +24,8 @@ cannot break a connection. Files use LF line endings and are written with 2-spac
 ```
 
 - `type` is one of `rack`, `patchpanel`, `switch`, `router`, `internet`, `socket`, `generic`.
+- Generic equipment may carry `deviceKind` (`pc`, `laptop`, `ap`, `camera`, `printer`, `phone`, `server`; omitted = other), which only
+  selects the icon and default name.
 - `containerId` points at a group, or at a rack (racks hold patch panels, switches and generic objects).
 - `internet` objects (ISP / upstream) have ordinary front ports and an optional `ipAddress` (public IP or circuit note).
 - Routers have an optional `ipAddress` and ports with `"role": "wan"|"lan"` (labels `W1..`, `L1..`) and an optional
@@ -33,6 +35,8 @@ cannot break a connection. Files use LF line endings and are written with 2-spac
   `align` (`center`|`right`), `uplinkSide` (`left`), `uplinkRows`, and `portIsolation` (true). Uplink ports are ports with
   `"role": "uplink"` (labels `U1..`), always listed after the access ports; `sectionSize` counts access ports only.
 - Any object inside a rack or group may carry `fullWidth: true` (stretch to the container's inner width).
+- Wall sockets, like patch panels, have `front` and `rear` ports with internal mappings (schema 2; files from schema 1 get rear
+  ports and straight-through mappings added when imported). Fixed links join patch panels and wall sockets.
 - Patch panels have `front` and `rear` ports and an optional `sectionSize` (ports per visual section; must divide the
   per-side port count, otherwise the automatic split is used). It is cosmetic and never affects connectivity. All other equipment has `front` ports only.
 - A **placement** is the visual position of a group or object on one map. The same record may have placements

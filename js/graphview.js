@@ -66,9 +66,9 @@
     graph.order.forEach(function (id) {
       var n = graph.nodes[id], P = pos[id], c = COLORS[n.type] || COLORS.generic;
       var faded = dim && !hiNode[id], isRoot = id === state.from, isTo = id === state.to;
-      var sub = M.TYPE_LABELS[n.type] + (n.isolated ? ' (isolated)' : '') + (n.ip ? '  ' + n.ip : '');
+      var sub = n.label + (n.isolated ? ' (isolated)' : '') + (n.ip ? '  ' + n.ip : '');
       var nets = n.nets.join(', ');
-      svg += '<g data-gnode="' + esc(id) + '" style="cursor:pointer"' + (faded ? ' opacity="0.25"' : '') + '><title>' + esc(n.name + ' (' + M.TYPE_LABELS[n.type] + ')' + (nets ? '\nNetworks: ' + nets : '') + (n.transit ? '' : '\nEndpoint: paths do not pass through') + (n.isolated ? '\nPort isolation: only uplink ports talk to access ports' : '')) + '</title>' +
+      svg += '<g data-gnode="' + esc(id) + '" style="cursor:pointer"' + (faded ? ' opacity="0.25"' : '') + '><title>' + esc(n.name + ' (' + n.label + ')' + (nets ? '\nNetworks: ' + nets : '') + (n.transit ? '' : '\nEndpoint: paths do not pass through') + (n.isolated ? '\nPort isolation: only uplink ports talk to access ports' : '')) + '</title>' +
         '<rect x="' + P.x + '" y="' + P.y + '" width="' + NW + '" height="' + NH + '" rx="' + (n.type === 'internet' ? 22 : 6) + '" fill="' + c[0] + '" stroke="' + (isRoot ? '#d32f2f' : (isTo ? '#6a1b9a' : c[1])) + '" stroke-width="' + (isRoot || isTo ? 3.5 : 1.5) + '"' + (n.transit ? '' : ' stroke-dasharray="6 3"') + '/>' +
         '<text x="' + (P.x + 8) + '" y="' + (P.y + 19) + '" font-size="13" font-weight="bold" fill="#111" font-family="sans-serif">' + esc(n.name.length > 22 ? n.name.slice(0, 21) + '~' : n.name) + '</text>' +
         '<text x="' + (P.x + 8) + '" y="' + (P.y + 33) + '" font-size="10" fill="#444" font-family="sans-serif">' + esc(sub.length > 30 ? sub.slice(0, 29) + '~' : sub) + '</text>' +
@@ -76,7 +76,7 @@
     });
     svg += '</svg>';
 
-    var opt = graph.order.map(function (id) { return [id, graph.nodes[id].name + ' (' + M.TYPE_LABELS[graph.nodes[id].type] + ')']; });
+    var opt = graph.order.map(function (id) { return [id, graph.nodes[id].name + ' (' + graph.nodes[id].label + ')']; });
     var sel = function (name, list, cur, empty) {
       return '<select data-g="' + name + '">' + (empty ? '<option value="">' + empty + '</option>' : '') + list.map(function (o) { return '<option value="' + esc(o[0]) + '"' + (o[0] === cur ? ' selected' : '') + '>' + esc(o[1]) + '</option>'; }).join('') + '</select>';
     };
@@ -102,7 +102,7 @@
       html += '<h3>Reachable from ' + esc(graph.nodes[state.from].name) + ' (' + (tree.order.length - 1) + ' device(s))</h3><div class="gv-tree">';
       tree.order.forEach(function (n) {
         html += '<div class="gv-tn" style="margin-left:' + (n.depth * 18) + 'px">' + (n.depth ? '&boxur; ' : '') + nameLink(n.id) +
-          ' <span class="tag">' + esc(M.TYPE_LABELS[graph.nodes[n.id].type]) + '</span>' + (n.link ? ' <span class="sub">via ' + esc(viaText(n.link)) + '</span>' : '') +
+          ' <span class="tag">' + esc(graph.nodes[n.id].label) + '</span>' + (n.link ? ' <span class="sub">via ' + esc(viaText(n.link)) + '</span>' : '') +
           (n.depth && !graph.nodes[n.id].transit ? ' <span class="sub">(endpoint)</span>' : '') + '</div>';
       });
       html += '</div>';

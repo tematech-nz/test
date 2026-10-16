@@ -41,6 +41,13 @@ Try it: File -> Load demo project (two rooms, a fixed link between racks, a wall
   devices on an isolated switch's access ports reach the uplink side but not each other directly. They can only meet by going
   up an uplink and back down (e.g. through a router, shown as a longer path through the switch twice); if nothing upstream turns
   the traffic around, they cannot reach each other at all. A U-turn on the same link is only allowed at a router.
+- **Device icons**: generic equipment has a "Device type" (PC / workstation, laptop, Wi-Fi access point, camera, printer, IP
+  phone, server, or other) that names it ("PC 1", "AP 1") and draws a small icon (original SVG artwork in `js/icons.js`,
+  works offline and in exports).
+- **Wall sockets** have a front jack and a rear termination per port, joined by an internal mapping (straight-through by
+  default, like a patch panel). The rear takes installed cabling: create a **fixed link between a patch panel and a wall
+  socket** (also via Ctrl+click port groups). A device plugged into the socket is traced through the outlet and the
+  panel to wherever the cabling leads; in the Graph view such an outlet is just part of the cable path.
 - **Routers** (`+ Router`): choose how many WAN and LAN ports (0-96 in total, changeable later) and an optional IP
   address; every port can have its own IP too. WAN and LAN ports sit in separate strips that fold with `^`.
   Routers cable like switches and are searchable by IP.
