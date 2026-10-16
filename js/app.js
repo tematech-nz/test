@@ -268,6 +268,7 @@
   const pointers = new Map();
   let gesture = null, pinch = null, rafPending = false;
   function scheduleRender() { if (!rafPending) { rafPending = true; requestAnimationFrame(() => { rafPending = false; renderCanvas(); }); } }
+  const EXTEND_ZONE = 60; // map units past a container's edge in which it keeps growing to hold a dragged item
   const snap = (v) => (S.p.settings.snapToGrid ? Math.round(v / S.p.settings.gridSize) * S.p.settings.gridSize : v);
 
   function bindCanvas() {
@@ -286,7 +287,7 @@
         if (!q) return;
         const kind = h.dataset.handle, start = toMap(e.clientX, e.clientY);
         const items = kind === 'move' ? M.placementGroup(S.p, q.id).map((x) => ({ q: x, ox: x.x, oy: x.y })) : [{ q: q, ow: q.w, oh: q.h }];
-        S.drag = { kind: kind, plId: q.id, start: start, snap: JSON.stringify(S.p), items: items, moved: false };
+        S.drag = { kind: kind, plId: q.id, start: start, snap: JSON.stringify(S.p), items: items, moved: false, chain: kind === 'move' ? B.captureChain(S.p, q.mapId, q.refId) : [] };
         return;
       }
       gesture = { x: e.clientX, y: e.clientY, vx: vpState().x, vy: vpState().y, target: e.target, moved: false };
@@ -314,6 +315,7 @@
           const p0 = d.items[0];
           dx = snap(p0.ox + dx) - p0.ox; dy = snap(p0.oy + dy) - p0.oy;
           d.items.forEach((it) => { it.q.x = it.ox + dx; it.q.y = it.oy + dy; });
+          B.applyExtension(S.p, d.items[0].q.mapId, d.chain, d.items[0].q, EXTEND_ZONE);
         } else {
           const it = d.items[0];
           it.q.w = Math.max(60, snap(it.ow + dx)); it.q.h = Math.max(40, snap(it.oh + dy));
@@ -344,11 +346,11 @@
     const d = S.drag; S.drag = null;
     if (!d.moved) return;
     S.undo.push({ label: d.kind === 'move' ? 'Move' : 'Resize', snap: d.snap }); S.redo = [];
-    if (d.kind === 'move') reassignContainer(d.plId);
+    if (d.kind === 'move') reassignContainer(d.plId, d);
     scheduleSave(); afterChange();
   }
   /* dropping an item with its centre inside another container changes containment (data only; connections untouched) */
-  function reassignContainer(plId) {
+  function reassignContainer(plId, d) {
     const pl = S.p.placements.find((x) => x.id === plId);
     if (!pl) return;
     const c = M.findContainer(S.p, pl.refId);
@@ -365,11 +367,12 @@
     const cur = c.kind === 'group' ? c.item.parentGroupId : c.item.containerId;
     const want = best ? best.refId : null;
     if (want === cur) { if (cur) M.growToFit(S.p, pl.mapId, cur); return; }
+    if (d) B.restoreChain(d.chain); // leaving the container: its temporary extension goes away
     try {
       M.setContainer(S.p, c.kind, c.id, want);
       if (want) M.growToFit(S.p, pl.mapId, want);
       toast(want ? 'Moved into ' + M.findContainer(S.p, want).item.name : 'Removed from container');
-    } catch (e) { toast(e.message + ' (position kept, containment unchanged)', true); }
+    } catch (e) { if (cur) M.growToFit(S.p, pl.mapId, cur); toast(e.message + ' (position kept, containment unchanged)', true); }
   }
 
   /* ---------------------------------------------------------------- rendering */

@@ -458,5 +458,39 @@ test('refitObject resizes placements after a section change', () => {
   assert.ok(R.svgDocument(p, p.maps[0].id).length > 100);
 });
 
+console.log('Container extension and selection highlight');
+test('dragging toward a container edge extends it live; dragging away hides the extension', () => {
+  const p = B.buildDemoProject(), mid = p.maps[0].id;
+  const sw = byName(p, 'Switch A'), rack = byName(p, 'Rack A');
+  const swPl = M.placementOf(p, mid, sw.id), rackPl = M.placementOf(p, mid, rack.id), grpPl = M.placementOf(p, mid, rack.containerId);
+  const orig = { rh: rackPl.h, gh: grpPl.h };
+  const chain = B.captureChain(p, mid, sw.id);
+  assert.strictEqual(chain.length, 2, 'rack then group');
+  const y0 = swPl.y;
+  swPl.y = rackPl.y + orig.rh - swPl.h / 2 + 20; // lower part pokes out of the rack, centre still inside the zone
+  assert.ok(B.applyExtension(p, mid, chain, swPl, 60));
+  assert.ok(rackPl.h > orig.rh && rackPl.y + rackPl.h >= swPl.y + swPl.h);
+  assert.ok(grpPl.y + grpPl.h >= rackPl.y + rackPl.h, 'ancestors extend as well');
+  swPl.y = rackPl.y + orig.rh + 200; // far outside
+  assert.ok(!B.applyExtension(p, mid, chain, swPl, 60));
+  assert.strictEqual(rackPl.h, orig.rh);
+  assert.strictEqual(grpPl.h, orig.gh);
+  swPl.y = y0; B.applyExtension(p, mid, chain, swPl, 60);
+  assert.strictEqual(rackPl.h, orig.rh, 'moving back inside leaves the container untouched');
+  assert.strictEqual(byName(p, 'Switch A').containerId, rack.id);
+});
+test('selected fixed link highlights its ports on both panels', () => {
+  const p = B.buildDemoProject();
+  const link = p.fixedLinks[0];
+  const a = R.renderMap(p, p.maps[0].id, { selection: { kind: 'link', id: link.id } });
+  const count = (svg) => (svg.content.match(/fill="#ffeb3b"/g) || []).length;
+  assert.strictEqual(count(a), 24, 'panel A side: 24 wires');
+  const b = R.renderMap(p, p.maps[1].id, { selection: { kind: 'link', id: link.id } });
+  assert.strictEqual(count(b), 24, 'panel B side');
+  const w = R.renderMap(p, p.maps[0].id, { selection: { kind: 'wire', id: link.wires[2].id } });
+  assert.strictEqual(count(w), 1);
+  assert.strictEqual(count(R.renderMap(p, p.maps[0].id, {})), 0);
+});
+
 console.log('\n' + passed + ' passed, ' + failed + ' failed');
 process.exit(failed ? 1 : 0);

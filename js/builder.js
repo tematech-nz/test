@@ -90,6 +90,37 @@
     });
   }
 
-  NM.builder = { refitObject: refitObject, placeItem: placeItem, addGroupPlaced: addGroupPlaced, addObjectPlaced: addObjectPlaced, buildDemoProject: buildDemoProject };
+  /*
+   * Live container extension while dragging an item toward the bottom/right edge of its container.
+   * captureChain() remembers the container and its ancestors at drag start; applyExtension() is called on every
+   * move: it first restores the originals, then grows the chain to hold the item only while the item's centre is
+   * within `ext` of the container's original box. Dragging further away therefore "hides" the extension again.
+   */
+  function captureChain(p, mapId, refId) {
+    var out = [], c = M.findContainer(p, refId), guard = 0;
+    if (!c) return out;
+    var par = M.parentOf(p, c.kind, c.id);
+    while (par && guard++ < 20) {
+      var q = M.placementOf(p, mapId, par.id);
+      if (q) out.push({ q: q, refId: par.id, ox: q.x, oy: q.y, ow: q.w, oh: q.h });
+      par = M.parentOf(p, par.kind, par.id);
+    }
+    return out;
+  }
+  function restoreChain(chain) {
+    chain.forEach(function (c) { c.q.x = c.ox; c.q.y = c.oy; c.q.w = c.ow; c.q.h = c.oh; });
+  }
+  function applyExtension(p, mapId, chain, itemPl, ext) {
+    restoreChain(chain);
+    if (!chain.length) return false;
+    var f = chain[0], cx = itemPl.x + itemPl.w / 2, cy = itemPl.y + itemPl.h / 2;
+    if (cx >= f.ox && cx <= f.ox + f.ow + ext && cy >= f.oy && cy <= f.oy + f.oh + ext) {
+      M.growToFit(p, mapId, f.refId);
+      return f.q.w !== f.ow || f.q.h !== f.oh;
+    }
+    return false;
+  }
+
+  NM.builder = { captureChain: captureChain, restoreChain: restoreChain, applyExtension: applyExtension, refitObject: refitObject, placeItem: placeItem, addGroupPlaced: addGroupPlaced, addObjectPlaced: addObjectPlaced, buildDemoProject: buildDemoProject };
   if (typeof module !== 'undefined' && module.exports) module.exports = NM.builder;
 })(typeof window !== 'undefined' ? window : globalThis);

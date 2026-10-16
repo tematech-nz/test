@@ -50,6 +50,10 @@ Try it: File -> Load demo project (two rooms, a fixed link between racks, a wall
   stored in the browser only, never in the project file, and exports always show everything.
   Patch panels have front and rear terminations. Front-to-rear internal mappings are explicit records
   (the "straight-through" option or per-port mapping writes them); tracing follows only documented mappings.
+- **Dragging into container edges**: drag an item toward the bottom or right edge of its group or rack and the container
+  grows live to hold it (up to about 60 units past the edge). Drag further and the extension disappears again; drop outside
+  or inside another container to move it there. Dropping inside the extension keeps the larger container.
+- **Selecting a fixed link, wire or patch cable** highlights its ports (yellow) on both ends, on whichever map they appear.
 - **Maps**: the same object can be shown on several maps ("Add existing here"); connections reference the shared
   object and port records. Trace results offer "open <map>" links to continue across maps.
 

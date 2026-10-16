@@ -262,6 +262,63 @@ const ok = (m) => console.log('  ok   ' + m);
     await page.click('#btnUndo'); await page.click('#btnUndo');
   });
 
+
+  await step('drag to the bottom of a container extends it; dragging out hides the extension and reassigns', async () => {
+    const ids = await page.evaluate(() => {
+      const B = NetMap.builder, p = NetMap.app.S.p;
+      let out;
+      NetMap.app.api.commit('ext test', (pp) => {
+        const g = B.addGroupPlaced(pp, pp.maps[0].id, { name: 'ExtG' }, 1200, 40);
+        const sw = B.addObjectPlaced(pp, pp.maps[0].id, { type: 'switch', name: 'ExtSw', portCount: 8, containerId: g.id });
+        out = { g: g.id, sw: sw.id };
+      });
+      return out;
+    });
+    await page.evaluate(() => NetMap.app.api.goTo('object', NetMap.app.S.p.objects.find(o => o.name === 'ExtSw').id, NetMap.app.S.p.maps[0].id));
+    const st = () => page.evaluate((i) => {
+      const S = NetMap.app.S, pl = (id) => S.p.placements.find(q => q.refId === id && q.mapId === S.mapId);
+      const sw = S.p.objects.find(o => o.id === i.sw), g = pl(i.g), s = pl(i.sw);
+      return { gh: g.h, gb: g.y + g.h, sb: s.y + s.h, cont: sw.containerId, zoom: NetMap.app.S.p.maps.find(m => m.id === S.mapId).viewport.zoom };
+    }, ids);
+    const s0 = await st();
+    const handle = page.locator('[data-handle="move"][data-pl="' + await page.evaluate((i) => NetMap.app.S.p.placements.find(q => q.refId === i.sw).id, ids) + '"]');
+    const box = await handle.boundingBox();
+    const gap = (s0.gb - s0.sb) * s0.zoom;
+    await page.mouse.move(box.x + 5, box.y + 5); await page.mouse.down();
+    await page.mouse.move(box.x + 5, box.y + 5 + gap + 25 * s0.zoom, { steps: 8 });
+    const mid = await st();
+    assert.ok(mid.gh > s0.gh, 'container grew while dragging: ' + JSON.stringify([s0, mid]));
+    assert.ok(mid.gb >= mid.sb, 'item fits inside the extended container');
+    await page.mouse.move(box.x + 5, box.y + 5 + gap + 400 * s0.zoom, { steps: 8 });
+    const far = await st();
+    assert.strictEqual(far.gh, s0.gh, 'extension hidden again when dragged further away');
+    await page.mouse.move(box.x + 5, box.y + 5 + gap + 25 * s0.zoom, { steps: 8 });
+    await page.mouse.up();
+    await page.waitForTimeout(100);
+    const kept = await st();
+    assert.ok(kept.gh > s0.gh && kept.cont === ids.g, 'dropped inside the extension: stays in the container');
+    await shot('container-extended');
+    // second drag: out of the container
+    const box2 = await page.locator('[data-handle="move"][data-pl="' + await page.evaluate((i) => NetMap.app.S.p.placements.find(q => q.refId === i.sw).id, ids) + '"]').boundingBox();
+    await page.mouse.move(box2.x + 5, box2.y + 5); await page.mouse.down();
+    await page.mouse.move(box2.x + 5, box2.y + 5 + 500 * s0.zoom, { steps: 8 });
+    await page.mouse.up();
+    await page.waitForTimeout(100);
+    const out = await st();
+    assert.strictEqual(out.cont, null, 'moved outside: container cleared');
+    assert.strictEqual(out.gh, kept.gh, 'old container keeps the size it had before this drag');
+    await page.click('#btnUndo'); await page.click('#btnUndo'); await page.click('#btnUndo');
+  });
+
+  await step('selecting a fixed link highlights its ports on both panels', async () => {
+    const lid = await page.evaluate(() => NetMap.app.S.p.fixedLinks[0].id);
+    await page.evaluate((id) => NetMap.app.api.select({ kind: 'link', id }), lid);
+    const n = await page.locator('#vp rect[data-kind="port"][fill="#ffeb3b"]').count();
+    assert.ok(n >= 24, 'highlighted ports on this map: ' + n);
+    await page.evaluate((id) => NetMap.app.api.goTo('link', id, NetMap.app.S.p.maps[1].id), lid);
+    assert.ok((await page.locator('#vp rect[data-kind="port"][fill="#ffeb3b"]').count()) >= 24, 'and on the other map');
+  });
+
   await step('autosave survives a refresh', async () => {
     await page.click('#btnMode'); // back to view mode flushes the save
     const name = await page.evaluate(() => NetMap.app.S.p.name);

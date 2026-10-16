@@ -65,6 +65,13 @@
     // effective box: collapsed patch-panel sections shrink the drawn height (view state only, never stored)
     var groupSet = {}, prevSet = {};
     (opts.groupPorts || []).forEach(function (id) { groupSet[id] = true; });
+    // ports of the selected fixed link / wire / patch cable are highlighted on both ends
+    var selPorts = {};
+    if (sel) {
+      if (sel.kind === 'link' && idx.links[sel.id]) idx.links[sel.id].wires.forEach(function (w) { if (w.aPortId) selPorts[w.aPortId] = true; if (w.bPortId) selPorts[w.bPortId] = true; });
+      else if (sel.kind === 'wire' && idx.wires[sel.id]) { var sw0 = idx.wires[sel.id]; if (sw0.aPortId) selPorts[sw0.aPortId] = true; if (sw0.bPortId) selPorts[sw0.bPortId] = true; }
+      else if (sel.kind === 'cable' && idx.cables[sel.id]) { selPorts[idx.cables[sel.id].aPortId] = true; selPorts[idx.cables[sel.id].bPortId] = true; }
+    }
     var prev = opts.preview || null;
     if (prev) prev.ids.forEach(function (id) { prevSet[id] = true; });
     items.forEach(function (it) {
@@ -121,6 +128,7 @@
           var isHi = hl && hl.ports[pt.id], isSelPort = sel && sel.kind === 'port' && sel.id === pt.id, isPending = opts.pendingPortId === pt.id;
           if (isHi) fill = HI;
           var stroke = isPending ? '#d500f9' : (isSelPort ? SEL : '#444'), sw = isPending || isSelPort ? 2.5 : 1;
+          if (selPorts[pt.id]) { fill = '#ffeb3b'; stroke = '#e65100'; sw = 2.5; }
           if (groupSet[pt.id]) { fill = '#e1bee7'; stroke = '#8e24aa'; sw = 2.5; }
           if (prevSet[pt.id]) { fill = prev.ok ? '#c8e6c9' : '#ffcdd2'; stroke = prev.ok ? '#2e7d32' : '#c62828'; sw = 2.5; }
           x.push('<g data-kind="port" data-id="' + esc(pt.id) + '"><title>' + esc(ref.name + ' / ' + pt.label + (pt.side === 'rear' ? ' (rear)' : '') + (pt.role ? ' (' + pt.role.toUpperCase() + ')' : '') + (pt.ip ? ' ' + pt.ip : '')) + '</title>' +
