@@ -35,6 +35,13 @@ Try it: File -> Load demo project (two rooms, a fixed link between racks, a wall
   is on "Auto (network colour)" (the default; pick a colour in the tool's list to override, and you can always change a single
   cable by hand). The port shows a colour bar. When you set or change the colour the app offers to **match the colours of the
   downstream cables that already exist**; "Recolour this network's cables" in the port properties does it on demand.
+- **IP addresses and network warnings**: IP fields accept plain IPv4 only (four numbers 0-255; a `/24` or IPv6 is refused with a
+  message). Routers have a LAN address (device IP, or per port) and optional per-port addresses. The app checks every layer-2
+  segment (devices joined through switches, patch panels, fixed links and cables) and raises a **Network warnings** alert (header
+  button, a red `!` on the routers, entries in the validation list) when: routers on one segment have **different subnets** (e.g.
+  192.168.5.1 next to 192.168.3.1), a router **LAN port has no address** while sharing a segment with a configured one, or the
+  **same address** is used twice. Several routers sharing a subnet with different addresses is fine; WAN ports without an address
+  (DHCP) and the Internet side are ignored. Connecting something that would create such a warning asks "Do you want to continue?".
 - **Cable colours**: pick white, grey, green, yellow, blue, orange, red or black from the list, or `Custom...` for an RGB
   picker. The patch cable tool has its own colour list for new cables. Cables are drawn with a thin dark outline so white and
   yellow stay visible.
@@ -69,7 +76,7 @@ Try it: File -> Load demo project (two rooms, a fixed link between racks, a wall
   (what can be reached, via which cables, how many hops, what is unreachable). Pick a target device to list every
   route to it, shortest first, with redundant paths highlighted. Switches and routers pass traffic through; Internet,
   wall sockets and generic devices are endpoints unless you tick "Allow paths through Internet". Subnets
-  are shown on devices that have IPs with a prefix (e.g. 192.168.1.1/24). Click a device or link to jump to it on the map.
+  are shown on devices that have IP addresses (IP addresses are plain IPv4 such as 192.168.1.1 with no /prefix, and the subnet is assumed to be the /24 for now). Click a device or link to jump to it on the map.
   It is theoretical physical reachability: no routing, VLAN or firewall rules are modelled.
 - **Quick fixed link from ports** (edit mode, mouse): Ctrl+click free rear ports on one patch panel to group them
   (Shift+Ctrl+click extends a range). Move the pointer over another panel: the same number of rear ports, starting

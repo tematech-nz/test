@@ -1,4 +1,4 @@
-# NetMap data format (schema version 2)
+# NetMap data format (schema version 3)
 
 A project is one JSON object. All records have stable, unique string IDs (prefix + random hex, for example
 `obj_9f2c...`). Names, labels and coordinates are never used as identifiers, so renaming or moving something
@@ -29,7 +29,7 @@ cannot break a connection. Files use LF line endings and are written with 2-spac
 - `containerId` points at a group, or at a rack (racks hold patch panels, switches and generic objects).
 - `internet` objects (ISP / upstream) have ordinary front ports and an optional `ipAddress` (public IP or circuit note).
 - Routers have an optional `ipAddress` and ports with `"role": "wan"|"lan"` (labels `W1..`, `L1..`) and an optional
-  per-port `"ip"`. IPs are free text (IPv4 with optional /prefix, or IPv6); invalid values produce validation warnings.
+  per-port `"ip"`. IPs are plain IPv4 strings without a prefix (schema 3 strips a `/nn` from older files); the subnet used for network warnings is assumed to be the /24. Invalid values produce validation warnings.
 - Switches may carry (all optional, omitted = default): `sectionSize` (ports per section; omitted = plain rows),
   `sectionRows` (rows per section, default 1), `portOrder` (`rows`|`columns`, default `columns` when sectionRows > 1),
   `align` (`center`|`right`), `uplinkSide` (`left`), `uplinkRows`, and `portIsolation` (true). Uplink ports are ports with

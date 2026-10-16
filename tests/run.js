@@ -290,10 +290,10 @@ test('collapsing a panel section shrinks it and anchors cables to the strip', ()
 console.log('Router');
 test('router has configurable WAN/LAN ports and IP addresses', () => {
   const p = M.createProject('r');
-  const r = M.addObject(p, { type: 'router', name: 'Edge', wanPorts: 2, lanPorts: 6, ipAddress: '192.168.1.1/24' });
+  const r = M.addObject(p, { type: 'router', name: 'Edge', wanPorts: 2, lanPorts: 6, ipAddress: '192.168.1.1' });
   assert.strictEqual(r.ports.length, 8);
   assert.deepStrictEqual(r.ports.slice(0, 3).map(x => x.role + ':' + x.label), ['wan:W1', 'wan:W2', 'lan:L1']);
-  assert.strictEqual(r.ipAddress, '192.168.1.1/24');
+  assert.strictEqual(r.ipAddress, '192.168.1.1');
   M.setRouterPorts(p, r.id, 1, 15);
   assert.strictEqual(r.ports.filter(x => x.role === 'wan').length, 1);
   assert.strictEqual(r.ports.filter(x => x.role === 'lan').length, 15);
@@ -319,10 +319,16 @@ test('IP validation warns, search finds routers and ports by IP', () => {
   assert.ok(M.search(p, '10.0.0.1').some(x => x.kind === 'object'));
   assert.ok(M.search(p, '203.0.113').some(x => x.kind === 'port'));
   assert.strictEqual(M.validateProject(p).filter(i => i.code === 'BAD_IP').length, 0);
-  r.ports[1].ip = '300.1.1.1'; r.ipAddress = 'not-an-ip';
+  r.ports[1].ip = '300.1.1.1'; r.ipAddress = '10.0.0.1/8';
   assert.strictEqual(M.validateProject(p).filter(i => i.code === 'BAD_IP').length, 2);
-  ['10.0.0.1', '10.0.0.0/8', 'fe80::1', '2001:db8::1/64', ''].forEach(v => assert.ok(M.isValidIp(v), v));
-  ['1.2.3', '1.2.3.4/33', 'abc', '256.1.1.1'].forEach(v => assert.ok(!M.isValidIp(v), v));
+  ['10.0.0.1', '192.168.100.254', '0.0.0.0', ''].forEach(v => assert.ok(M.isValidIp(v), v));
+  ['1.2.3', '1.2.3.4/24', '10.0.0.0/8', 'fe80::1', 'abc', '256.1.1.1', '1.2.3.4.5', '1.2.3.-4', ' 1.2.3 '].forEach(v => assert.ok(!M.isValidIp(v), v));
+  assert.throws(() => M.setDeviceIp(p, r.id, '192.168.1.1/24'), /IPv4/);
+  assert.throws(() => M.setPortIp(p, r.ports[0].id, '999.1.1.1'), /IPv4/);
+  assert.throws(() => M.addObject(p, { type: 'router', ipAddress: '10.0.0.1/8' }), /IPv4/);
+  assert.strictEqual(p.objects.length, 1, 'rejected creation leaves nothing behind');
+  M.setPortIp(p, r.ports[0].id, ' 10.1.1.1 '); assert.strictEqual(r.ports[0].ip, '10.1.1.1');
+  M.setDeviceIp(p, r.id, ''); assert.strictEqual(r.ipAddress, '');
 });
 test('router layout has WAN and LAN strips; export shows them', () => {
   const p = M.createProject('r');
@@ -340,8 +346,8 @@ function buildNet() {
   const p = M.createProject('net');
   const o = (type, name, extra) => M.addObject(p, Object.assign({ type: type, name: name }, extra || {}));
   const inet = o('internet', 'INTERNET', { portCount: 2, ipAddress: '203.0.113.1' });
-  const r1 = o('router', 'R1', { wanPorts: 1, lanPorts: 2, ipAddress: '192.168.1.1/24' });
-  const r2 = o('router', 'R2', { wanPorts: 1, lanPorts: 2, ipAddress: '10.9.0.1/16' });
+  const r1 = o('router', 'R1', { wanPorts: 1, lanPorts: 2, ipAddress: '192.168.1.1' });
+  const r2 = o('router', 'R2', { wanPorts: 1, lanPorts: 2, ipAddress: '10.9.0.1' });
   const s1 = o('switch', 'S1', { portCount: 8 }), s2 = o('switch', 'S2', { portCount: 8 });
   const ppA = o('patchpanel', 'PPA', { portCount: 4, straight: true }), ppB = o('patchpanel', 'PPB', { portCount: 4, straight: true });
   const ws = o('socket', 'WS', { portCount: 1 }), gen = o('generic', 'Lonely', { portCount: 1 });
@@ -359,10 +365,11 @@ function buildNet() {
 }
 test('subnetOf', () => {
   const TP = NM.topology;
-  assert.strictEqual(TP.subnetOf('192.168.1.77/24'), '192.168.1.0/24');
-  assert.strictEqual(TP.subnetOf('10.9.200.1/16'), '10.9.0.0/16');
-  assert.strictEqual(TP.subnetOf('10.0.0.1'), null);
-  assert.strictEqual(TP.subnetOf('1.2.3.4/40'), null);
+  assert.strictEqual(TP.subnetOf('192.168.1.77'), '192.168.1.0/24', 'no prefixes: the subnet is assumed to be the /24');
+  assert.strictEqual(TP.subnetOf('10.9.200.1'), '10.9.200.0/24');
+  assert.strictEqual(TP.subnetOf('10.0.0.1/8'), null);
+  assert.strictEqual(TP.subnetOf('300.1.1.1'), null);
+  assert.strictEqual(TP.subnetOf(''), null);
 });
 test('passive panels and fixed links collapse into device-to-device links', () => {
   const n = buildNet(), g = NM.topology.buildGraph(n.p);
@@ -920,7 +927,7 @@ test('shrinking a straight-through panel removes the mappings of removed ports; 
   const v1 = { schemaVersion: 1, id: 'prj_x', name: 'old', maps: [{ id: 'm', name: 'M' }], groups: [], objects: [{ id: 'o1', type: 'socket', name: 'WS', containerId: null, ports: [{ id: 'a', label: '1', side: 'front' }, { id: 'b', label: '2', side: 'front' }] }], placements: [], fixedLinks: [], patchCables: [], internalMappings: [], settings: {}, counters: { patch: 0, fixed: 0 } };
   const r = M.importProject(JSON.stringify(v1));
   assert.strictEqual(r.migratedFrom, 1);
-  assert.strictEqual(r.project.schemaVersion, 2);
+  assert.strictEqual(r.project.schemaVersion, M.SCHEMA_VERSION);
   const o = r.project.objects[0];
   assert.deepStrictEqual(o.ports.map(x => x.side + x.label), ['front1', 'front2', 'rear1', 'rear2']);
   assert.strictEqual(r.project.internalMappings.length, 2);
@@ -991,6 +998,69 @@ test('network colour is drawn on the router port', () => {
   n.r.ports.find(x => x.label === 'L1').networkColor = '#d62728';
   const svg = R.renderMap(p, mid, {}).content;
   assert.ok(svg.indexOf('fill="#d62728" stroke="#333"') > 0);
+});
+
+console.log('Network segment checks');
+function segNet(extra) {
+  const p = M.createProject('seg');
+  const mk = (n, ip, lan) => M.addObject(p, { type: 'router', name: n, wanPorts: 1, lanPorts: lan || 2, ipAddress: ip });
+  const sw = M.addObject(p, { type: 'switch', name: 'S', portCount: 8 });
+  return { p, sw, mk, L: (o, n) => o.ports.find(x => x.label === n).id, cab: (a, b) => M.addPatchCable(p, { aPortId: a, bPortId: b }) };
+}
+const codes = (p) => NM.topology.networkIssues(p).map(i => i.code).sort();
+test('different subnets on one segment are flagged; same subnet with different addresses is fine', () => {
+  const { p, sw, mk, L, cab } = segNet();
+  const r1 = mk('R1', '192.168.5.1'), r2 = mk('R2', '192.168.3.1');
+  cab(L(r1, 'L1'), sw.ports[0].id);
+  assert.deepStrictEqual(codes(p), [], 'a single router on a segment is nothing to check');
+  cab(L(r2, 'L1'), sw.ports[1].id);
+  const issues = NM.topology.networkIssues(p);
+  assert.deepStrictEqual(issues.map(i => i.code), ['SUBNET_MISMATCH']);
+  assert.ok(/192\.168\.5\.0\/24/.test(issues[0].message) && /192\.168\.3\.0\/24/.test(issues[0].message));
+  assert.deepStrictEqual(issues[0].objectIds.sort(), [r1.id, r2.id].sort());
+  r2.ipAddress = '192.168.5.2'; // same subnet, different address: two routers sharing a LAN is fine
+  assert.deepStrictEqual(codes(p), []);
+  r2.ipAddress = '192.168.5.1'; // same address twice
+  assert.deepStrictEqual(codes(p), ['DUPLICATE_IP']);
+});
+test('a LAN port without an address next to a configured router is flagged; WAN ports and lone routers are not', () => {
+  const { p, sw, mk, L, cab } = segNet();
+  const r1 = mk('R1', '192.168.5.1'), r2 = mk('R2', '');
+  cab(L(r1, 'L1'), sw.ports[0].id); cab(L(r2, 'L1'), sw.ports[1].id);
+  const u = NM.topology.networkIssues(p);
+  assert.deepStrictEqual(u.map(i => i.code), ['UNCONFIGURED_LAN']);
+  assert.strictEqual(u[0].target.kind, 'port');
+  assert.ok(/R2 \/ L1/.test(u[0].message));
+  // a per-port address overrides the router address
+  r2.ports.find(x => x.label === 'L1').ip = '192.168.5.9';
+  assert.deepStrictEqual(codes(p), []);
+  // a WAN port without an address on that segment is ignored (DHCP)
+  const r3 = mk('R3', '10.0.0.1');
+  cab(L(r3, 'W1'), sw.ports[2].id);
+  assert.deepStrictEqual(codes(p), [], 'unconfigured WAN joins fine');
+  r3.ports.find(x => x.label === 'W1').ip = '10.0.0.5'; // a configured WAN in another subnet is a mismatch
+  assert.deepStrictEqual(codes(p), ['SUBNET_MISMATCH']);
+});
+test('segments follow switches, patch panels and fixed links; router-to-router cables and Internet are handled', () => {
+  const { p, sw, mk, L, cab } = segNet();
+  const pa = M.addObject(p, { type: 'patchpanel', name: 'PA', portCount: 4, straight: true }), pb = M.addObject(p, { type: 'patchpanel', name: 'PB', portCount: 4, straight: true });
+  M.addFixedLink(p, { aObjectId: pa.id, bObjectId: pb.id, wireCount: 1, mapping: 'sequential' });
+  const front = (o, n) => o.ports.find(x => x.side === 'front' && x.label === n).id;
+  const r1 = mk('R1', '192.168.5.1'), r2 = mk('R2', '192.168.3.1');
+  cab(L(r1, 'L1'), front(pa, '1'));
+  cab(front(pb, '1'), sw.ports[0].id);
+  cab(sw.ports[1].id, L(r2, 'L1'));
+  assert.deepStrictEqual(codes(p), ['SUBNET_MISMATCH'], 'joined through a panel, a fixed link and a switch');
+  // direct router-to-router cable
+  const q = segNet(), a = q.mk('A', '10.1.1.1'), b = q.mk('B', '10.2.2.1');
+  q.cab(q.L(a, 'L1'), q.L(b, 'L1'));
+  assert.deepStrictEqual(codes(q.p), ['SUBNET_MISMATCH']);
+  // Internet side is never checked
+  const w = segNet(), ra = w.mk('RA', '10.1.1.1'), rb = w.mk('RB', '10.2.2.1'), net = M.addObject(w.p, { type: 'internet', portCount: 2 });
+  w.cab(w.L(ra, 'W1'), net.ports[0].id); w.cab(w.L(rb, 'W1'), net.ports[1].id);
+  assert.deepStrictEqual(codes(w.p), []);
+  // ports from a graph view / validation pass
+  assert.ok(NM.topology.segments(p).some(s => s.ports.length === 2));
 });
 
 console.log('\n' + passed + ' passed, ' + failed + ' failed');

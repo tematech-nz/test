@@ -3,7 +3,7 @@
   'use strict';
   var NM = g.NetMap = g.NetMap || {};
 
-  var SCHEMA_VERSION = 2;
+  var SCHEMA_VERSION = 3;
   /* equipment that terminates installed (fixed) cabling on a rear side and presents front jacks */
   var TERMINATIONS = { patchpanel: true, socket: true };
   function isTermination(o) { return !!(o && TERMINATIONS[o.type]); }
@@ -362,7 +362,10 @@
       location: o.location || '', description: o.description || '',
       containerId: o.containerId || null, ports: o.type === 'router' ? routerPorts(wan, lan) : makePorts(o.type, n)
     };
-    if (o.type === 'router' || o.type === 'internet') obj.ipAddress = o.ipAddress || '';
+    if (o.type === 'router' || o.type === 'internet') {
+      if (!isValidIp(o.ipAddress)) throw new Error(IP_ERROR);
+      obj.ipAddress = String(o.ipAddress || '').trim();
+    }
     if (kind) obj.deviceKind = kind;
     if (o.type === 'rack') obj.rackHeight = o.rackHeight || 42;
     p.objects.push(obj);
@@ -684,13 +687,25 @@
     if (kind === 'group') removeGroupCore(p, id); else removeObjectCore(p, id);
   }
 
-  /* accepts IPv4 (optionally /prefix), or anything with ':' that looks like IPv6; empty is fine */
+  /* plain IPv4 only: four numbers 0-255 (no /prefix, no IPv6 for now); empty is fine */
+  var IP_ERROR = 'Not a valid IPv4 address: use four numbers 0-255 such as 192.168.1.1 (no /prefix)';
   function isValidIp(s) {
-    s = String(s || '').trim();
+    s = String(s == null ? '' : s).trim();
     if (!s) return true;
-    var m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})(?:\/(\d{1,2}))?$/.exec(s);
-    if (m) return [m[1], m[2], m[3], m[4]].every(function (x) { return +x <= 255; }) && (m[5] === undefined || +m[5] <= 32);
-    return /^[0-9a-fA-F:.]+(?:\/\d{1,3})?$/.test(s) && s.indexOf(':') >= 0;
+    var m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(s);
+    return !!m && [m[1], m[2], m[3], m[4]].every(function (x) { return +x <= 255 && String(+x) === x.replace(/^0+(?=\d)/, ''); });
+  }
+  function setDeviceIp(p, objectId, ip) {
+    var o = buildIndex(p).objects[objectId];
+    if (!o || (o.type !== 'router' && o.type !== 'internet')) throw new Error('IP addresses apply to routers and the Internet object');
+    if (!isValidIp(ip)) throw new Error(IP_ERROR);
+    o.ipAddress = String(ip || '').trim();
+  }
+  function setPortIp(p, portId, ip) {
+    var idx = buildIndex(p), o = idx.portObj[portId];
+    if (!o || (o.type !== 'router' && o.type !== 'internet')) throw new Error('IP addresses apply to router and Internet ports');
+    if (!isValidIp(ip)) throw new Error(IP_ERROR);
+    idx.ports[portId].ip = String(ip || '').trim();
   }
 
   /* ---------- search ---------- */
@@ -836,6 +851,16 @@
     d.schemaVersion = 2;
     return d;
   };
+  /* v3: IP addresses are plain IPv4 now; drop any /prefix that earlier versions allowed */
+  MIGRATIONS[2] = function (d) {
+    function strip(ip) { return /^\d{1,3}(\.\d{1,3}){3}\/\d{1,2}$/.test(String(ip || '')) ? String(ip).split('/')[0] : ip; }
+    d.objects.forEach(function (o) {
+      if (o.ipAddress) o.ipAddress = strip(o.ipAddress);
+      (o.ports || []).forEach(function (pt) { if (pt.ip) pt.ip = strip(pt.ip); });
+    });
+    d.schemaVersion = 3;
+    return d;
+  };
   function migrate(data) {
     if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('Not a NetMap project file');
     var d = clone(data), v = d.schemaVersion || 0, from = v;
@@ -866,7 +891,7 @@
     findContainer: findContainer, groupOf: groupOf, parentOf: parentOf, containerChildren: containerChildren, descendants: descendants,
     addPlacement: addPlacement, placementOf: placementOf, placementGroup: placementGroup, movePlacement: movePlacement,
     growToFit: growToFit, mapsFor: mapsFor, addGroup: addGroup, addObject: addObject, setContainer: setContainer,
-    setPortCount: setPortCount, setDeviceKind: setDeviceKind, isTermination: isTermination, DEVICE_KINDS: DEVICE_KINDS, deviceKindInfo: deviceKindInfo, typeLabel: typeLabel, accessPorts: accessPorts, validSectionRows: validSectionRows, setUplinkPorts: setUplinkPorts, setSwitchLayout: setSwitchLayout, setFullWidth: setFullWidth, setSectionSize: setSectionSize, validSectionSizes: validSectionSizes, defaultSectionSize: defaultSectionSize, effectiveSectionSize: effectiveSectionSize, setRouterPorts: setRouterPorts, isValidIp: isValidIp, canConnectPatch: canConnectPatch, addPatchCable: addPatchCable,
+    setPortCount: setPortCount, setDeviceIp: setDeviceIp, setPortIp: setPortIp, IP_ERROR: IP_ERROR, setDeviceKind: setDeviceKind, isTermination: isTermination, DEVICE_KINDS: DEVICE_KINDS, deviceKindInfo: deviceKindInfo, typeLabel: typeLabel, accessPorts: accessPorts, validSectionRows: validSectionRows, setUplinkPorts: setUplinkPorts, setSwitchLayout: setSwitchLayout, setFullWidth: setFullWidth, setSectionSize: setSectionSize, validSectionSizes: validSectionSizes, defaultSectionSize: defaultSectionSize, effectiveSectionSize: effectiveSectionSize, setRouterPorts: setRouterPorts, isValidIp: isValidIp, canConnectPatch: canConnectPatch, addPatchCable: addPatchCable,
     updatePatchCable: updatePatchCable, deletePatchCable: deletePatchCable, addInternalMapping: addInternalMapping,
     removeInternalMapping: removeInternalMapping, autoMapPanel: autoMapPanel, rearPorts: rearPorts,
     sequentialPorts: sequentialPorts, addFixedLink: addFixedLink, updateLinkMeta: updateLinkMeta,

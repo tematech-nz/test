@@ -224,7 +224,7 @@ const ok = (m) => console.log('  ok   ' + m);
     await page.evaluate(() => NetMap.app.api.commit('internet', (p) => {
       const M = NetMap.model, B = NetMap.builder;
       const inet = B.addObjectPlaced(p, p.maps[0].id, { type: 'internet', name: 'INTERNET', ipAddress: '203.0.113.1' }, 900, 40);
-      const r = B.addObjectPlaced(p, p.maps[0].id, { type: 'router', name: 'Edge', wanPorts: 1, lanPorts: 2, ipAddress: '192.168.1.1/24' }, 900, 140);
+      const r = B.addObjectPlaced(p, p.maps[0].id, { type: 'router', name: 'Edge', wanPorts: 1, lanPorts: 2, ipAddress: '192.168.1.1' }, 900, 140);
       const sw = p.objects.find(o => o.name === 'Switch A');
       M.addPatchCable(p, { aPortId: inet.ports[0].id, bPortId: r.ports[0].id });
       M.addPatchCable(p, { aPortId: r.ports[1].id, bPortId: sw.ports.find(x => x.label === '5').id });
@@ -753,6 +753,76 @@ const ok = (m) => console.log('  ok   ' + m);
     await page.evaluate(() => { NetMap.app.S.tool = null; });
   });
 
+
+  await step('IPv4 only: bad addresses are rejected in the form and in the properties', async () => {
+    await page.click('#toolbar button[data-add="router"]');
+    await page.fill('#dlg input[name="name"]', 'BadIpR');
+    await page.fill('#dlg input[name="ipAddress"]', '192.168.1.1/24');
+    await page.click('#dlg button[data-btn="ok"]');
+    assert.ok(await page.evaluate(() => document.getElementById('dlg').open), 'dialog stays open');
+    assert.ok(/IPv4/.test(await page.innerText('#dlg .form-err')));
+    await page.fill('#dlg input[name="ipAddress"]', '192.168.1.1');
+    await page.click('#dlg button[data-btn="ok"]');
+    await page.waitForTimeout(100);
+    assert.strictEqual(await page.evaluate(() => NetMap.app.S.p.objects.find(o => o.name === 'BadIpR').ipAddress), '192.168.1.1');
+    await page.fill('#detailsPane input[data-f="ipAddress"]', '10.0.0.1/8');
+    await page.keyboard.press('Tab');
+    await page.waitForTimeout(100);
+    assert.strictEqual(await page.evaluate(() => NetMap.app.S.p.objects.find(o => o.name === 'BadIpR').ipAddress), '192.168.1.1', 'unchanged');
+    assert.ok(/IPv4/.test(await page.innerText('#toast')));
+    assert.strictEqual(await page.inputValue('#detailsPane input[data-f="ipAddress"]'), '192.168.1.1', 'field restored');
+    await page.fill('#detailsPane input[data-f="ipAddress"]', '172.16.0.1');
+    await page.keyboard.press('Tab');
+    assert.strictEqual(await page.evaluate(() => NetMap.app.S.p.objects.find(o => o.name === 'BadIpR').ipAddress), '172.16.0.1');
+    await page.click('#btnUndo'); await page.click('#btnUndo');
+  });
+
+  await step('network warnings: joining different subnets asks first, then flags the routers', async () => {
+    const ids = await page.evaluate(() => {
+      let out;
+      NetMap.app.api.commit('subnets', (p) => {
+        const B = NetMap.builder, M = NetMap.model, mid = p.maps[0].id;
+        const r1 = B.addObjectPlaced(p, mid, { type: 'router', name: 'SubR1', wanPorts: 1, lanPorts: 2, ipAddress: '192.168.5.1' }, 8000, 40);
+        const r2 = B.addObjectPlaced(p, mid, { type: 'router', name: 'SubR2', wanPorts: 1, lanPorts: 2, ipAddress: '192.168.3.1' }, 8300, 40);
+        const s = B.addObjectPlaced(p, mid, { type: 'switch', name: 'SubS', portCount: 4 }, 8100, 260);
+        M.addPatchCable(p, { aPortId: r1.ports.find(x => x.label === 'L1').id, bPortId: s.ports[0].id });
+        out = { l2: r2.ports.find(x => x.label === 'L1').id, s2: s.ports[1].id, r2: r2.id };
+      });
+      NetMap.app.api.goTo('object', out.r2, NetMap.app.S.p.maps[0].id);
+      return out;
+    });
+    const port = (id) => page.locator('#vp rect[data-kind="port"][data-id="' + id + '"]');
+    const count = () => page.evaluate(() => NetMap.app.S.p.patchCables.length);
+    assert.ok(await page.isHidden('#btnAlerts'), 'no warning yet');
+    const c0 = await count();
+    await page.click('#toolbar button[data-act="patchTool"]');
+    await port(ids.l2).click({ force: true }); await port(ids.s2).click({ force: true });
+    await page.waitForSelector('#dlg[open]');
+    const txt = await page.innerText('#dlg');
+    assert.ok(/Network:/.test(txt) && /192\.168\.5\.0\/24/.test(txt) && /192\.168\.3\.0\/24/.test(txt) && /Do you want to continue/.test(txt), txt);
+    await page.click('#dlg button[data-btn="no"]');
+    assert.strictEqual(await count(), c0, 'declined');
+    await port(ids.l2).click({ force: true }); await port(ids.s2).click({ force: true });
+    await page.waitForSelector('#dlg[open]');
+    await page.click('#dlg button[data-btn="yes"]');
+    await page.waitForTimeout(150);
+    assert.strictEqual(await count(), c0 + 1);
+    await page.keyboard.press('Escape');
+    assert.ok(await page.isVisible('#btnAlerts') && /Network warnings \(1\)/.test(await page.innerText('#btnAlerts')));
+    assert.ok((await page.locator('#vp g[pointer-events="none"] circle[fill="#d32f2f"]').count()) >= 2, 'alert badges on both routers');
+    await shot('network-warning');
+    await page.click('#btnAlerts');
+    assert.ok(/Different subnets share one network segment/.test(await page.innerText('#issueList')));
+    // fixing the address clears it
+    await page.evaluate((id) => NetMap.app.api.select({ kind: 'object', id }), ids.r2);
+    await page.fill('#detailsPane input[data-f="ipAddress"]', '192.168.5.2');
+    await page.keyboard.press('Tab');
+    await page.waitForTimeout(100);
+    assert.ok(await page.isHidden('#btnAlerts'), 'same subnet, different address: fine');
+    for (let i = 0; i < 4; i++) await page.click('#btnUndo');
+    await page.evaluate(() => { NetMap.app.S.tool = null; });
+  });
+
   await step('autosave survives a refresh', async () => {
     await page.click('#btnMode'); // back to view mode flushes the save
     const name = await page.evaluate(() => NetMap.app.S.p.name);
@@ -770,7 +840,7 @@ const ok = (m) => console.log('  ok   ' + m);
     const [dl] = await Promise.all([page.waitForEvent('download'), page.click('#dlg button[data-btn="json"]')]);
     const file = await dl.path();
     const text = fs.readFileSync(file, 'utf8');
-    assert.ok(text.indexOf('\r') < 0 && text.indexOf('"schemaVersion": 2') > 0);
+    assert.ok(text.indexOf('\r') < 0 && text.indexOf('"schemaVersion": 3') > 0);
     await page.evaluate(() => NetMap.app.api.loadProject(NetMap.model.createProject('blank')));
     await page.click('#btnFile'); await page.click('#dlg button[data-btn="import"]').catch(() => {});
     await page.keyboard.press('Escape');

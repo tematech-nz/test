@@ -97,6 +97,9 @@
         var isz = ref.ports.length ? 28 : 44;
         x.push(NM.icons.svg(ref.deviceKind, num(pl.x + 6), num(ref.ports.length ? pl.y + 22 : pl.y + 20 + Math.max(0, (pl.h - 20 - isz) / 2)), isz));
       }
+      if (opts.alerts && opts.alerts[ref.id]) {
+        x.push('<g pointer-events="none"><title>' + esc(opts.alerts[ref.id]) + '</title><circle cx="' + num(pl.x + pl.w - 2) + '" cy="' + num(pl.y + 2) + '" r="8" fill="#d32f2f" stroke="#fff" stroke-width="1.5"/><text x="' + num(pl.x + pl.w - 2) + '" y="' + num(pl.y + 6) + '" font-size="12" font-weight="bold" text-anchor="middle" fill="#fff" font-family="sans-serif">!</text></g>');
+      }
       if (!it.isGroup && ref.type === 'switch' && ref.portIsolation) {
         x.push('<text x="' + num(pl.x + pl.w - 5) + '" y="' + num(pl.y + 13) + '" font-size="8" text-anchor="end" fill="#b71c1c" font-family="sans-serif" pointer-events="none">PORT ISOLATION</text>');
       }

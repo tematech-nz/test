@@ -11,7 +11,7 @@
     undo: [], redo: [], unsaved: false, saveErr: null, savedAt: null, lastExport: null,
     drag: null, geo: null, query: '', showIssues: false, issues: [],
     collapsed: {}, pgroup: null, hoverPort: null, preview: null, drop: null, cableColor: 'auto', customColorFor: null, ring: null,
-    view: 'map', graph: { from: '', to: '', via: false }
+    rev: 0, netRev: -1, netCache: [], view: 'map', graph: { from: '', to: '', via: false }
   };
   NM.app = { S: S, M: M }; // exposed for tests
 
@@ -73,6 +73,7 @@
     catch (e) { S.p = JSON.parse(snap); toast(e.message, true); renderAll(); return false; }
     S.undo.push({ label: label, snap: snap }); if (S.undo.length > 100) S.undo.shift();
     S.redo = [];
+    S.rev++;
     scheduleSave(); afterChange();
     return r === undefined ? true : r;
   }
@@ -80,7 +81,7 @@
     const e = from.pop();
     if (!e) return;
     to.push({ label: e.label, snap: JSON.stringify(S.p) });
-    S.p = JSON.parse(e.snap);
+    S.p = JSON.parse(e.snap); S.rev++;
     toast((from === S.undo ? 'Undid: ' : 'Redid: ') + e.label);
     scheduleSave(); afterChange();
   }
@@ -103,7 +104,7 @@
       const ok = { port: idx.ports, cable: idx.cables, link: idx.links, wire: idx.wires }[t.kind];
       S.trace = ok && ok[t.id] ? T.traceTarget(S.p, t) : null;
     }
-    S.issues = S.showIssues ? M.validateProject(S.p) : S.issues;
+    S.issues = S.showIssues ? allIssues() : S.issues;
     renderAll();
   }
 
@@ -183,6 +184,11 @@
   function cancelTool() { if (S.tool) { S.tool = null; renderAll(); } }
 
   /* ports of the cable end being reconnected are circled (hover over "Reconnect end A/B" or while the tool is active) */
+  function netAlertMap() {
+    const m = {};
+    netIssues().forEach((i) => (i.objectIds || []).forEach((id) => { m[id] = (m[id] ? m[id] + '\n' : '') + i.message; }));
+    return m;
+  }
   function ringPorts() {
     if (S.tool && S.tool.type === 'reconnect') { const c = S.p.patchCables.find((x) => x.id === S.tool.cableId); return c ? [S.tool.end === 'a' ? c.aPortId : c.bPortId] : []; }
     return S.ring ? [S.ring] : [];
@@ -193,7 +199,32 @@
     if (!oa || !ob) return null;
     const ga = M.groupOf(S.p, oa.id), gb = M.groupOf(S.p, ob.id);
     if (!ga || !gb || ga.id === gb.id) return null;
-    return '<p><b>' + esc(oa.name) + '</b> is in group <b>' + esc(ga.name) + '</b> and <b>' + esc(ob.name) + '</b> is in group <b>' + esc(gb.name) + '</b>.</p><p>A patch cable normally stays inside one group. Do you want to continue?</p>';
+    return '<p><b>' + esc(oa.name) + '</b> is in group <b>' + esc(ga.name) + '</b> and <b>' + esc(ob.name) + '</b> is in group <b>' + esc(gb.name) + '</b>. A patch cable normally stays inside one group.</p>';
+  }
+  /* network problems (see topology.networkIssues) memoised per project revision */
+  function netIssues() {
+    if (S.netRev !== S.rev) { S.netCache = NM.topology.networkIssues(S.p); S.netRev = S.rev; }
+    return S.netCache;
+  }
+  const allIssues = () => M.validateProject(S.p).concat(netIssues());
+  /* issues a prospective change would introduce (computed on a copy of the project) */
+  function newNetworkIssues(mutate) {
+    const trial = M.clone(S.p);
+    try { mutate(trial); } catch (e) { return []; }
+    const before = netIssues().map((i) => i.message);
+    return NM.topology.networkIssues(trial).filter((i) => before.indexOf(i.message) < 0);
+  }
+  /* html describing everything worth a second look before connecting aPortId to bPortId (cableId: the cable being reconnected) */
+  function connectionWarnings(aPortId, bPortId, cableId) {
+    const parts = [];
+    const cg = crossGroupWarning(aPortId, bPortId);
+    if (cg) parts.push(cg);
+    const ni = newNetworkIssues((trial) => {
+      if (cableId) M.updatePatchCable(trial, cableId, { aPortId: aPortId, bPortId: bPortId });
+      else M.addPatchCable(trial, { aPortId: aPortId, bPortId: bPortId });
+    });
+    ni.forEach((i) => parts.push('<p class="err-text"><b>Network:</b> ' + esc(i.message) + '</p>'));
+    return parts.length ? parts.join('') + '<p>Do you want to continue?</p>' : null;
   }
   /*
    * 'W' / "Patch cable from here": with a free port selected, start a one-shot wire from it (the tool ends after the
@@ -280,7 +311,7 @@
       }
       const a = S.tool.pending;
       if (a === id) { S.tool.pending = null; renderAll(); return; }
-      const tool = S.tool, warn = crossGroupWarning(a, id);
+      const tool = S.tool, warn = connectionWarnings(a, id);
       const make = () => {
         // 'auto': the colour of the network the cable extends from (router port network colour), else the default blue
         const color = S.cableColor === 'auto' ? (NM.topology.networkColorFor(S.p, [a, id]) || '#1f77b4') : S.cableColor;
@@ -289,16 +320,16 @@
         if (tool.once) S.tool = null; // one-shot wire: leave the tool, the new cable stays selected for colour/type edits
         if (cable) { toast('Added ' + cable.name + (tool.once ? ' - adjust colour and type in the panel' : '')); S.sel = { kind: 'cable', id: cable.id }; showTab('details'); openRight(); renderAll(); } else renderAll();
       };
-      if (warn) confirmDlg('Connect across groups?', warn, 'Connect anyway').then((ok) => { if (ok) make(); else { tool.pending = null; renderAll(); } });
+      if (warn) confirmDlg('Check this connection', warn, 'Connect anyway').then((ok) => { if (ok) make(); else { tool.pending = null; renderAll(); } });
       else make();
       return;
     }
     if (S.tool && S.tool.type === 'reconnect') {
       if (kind !== 'port') { toast('Tap a port to reconnect to, or press Esc', true); return; }
       const t = S.tool, cab = S.p.patchCables.find((c) => c.id === t.cableId);
-      const other = cab && (t.end === 'a' ? cab.bPortId : cab.aPortId), warn = other && crossGroupWarning(id, other);
+      const other = cab && (t.end === 'a' ? cab.bPortId : cab.aPortId), warn = other && connectionWarnings(t.end === 'a' ? id : other, t.end === 'a' ? other : id, t.cableId);
       const go = () => { S.tool = null; commit('Reconnect patch cable', (p) => M.updatePatchCable(p, t.cableId, t.end === 'a' ? { aPortId: id } : { bPortId: id })); };
-      if (warn) confirmDlg('Connect across groups?', warn, 'Reconnect anyway').then((ok) => { if (ok) go(); });
+      if (warn) confirmDlg('Check this connection', warn, 'Reconnect anyway').then((ok) => { if (ok) go(); });
       else go();
       return;
     }
@@ -441,6 +472,8 @@
     $('projTitle').textContent = S.p.name;
     $('mapSelect').innerHTML = opts(S.p.maps.map((m) => [m.id, m.name]), S.mapId);
     $('btnMode').textContent = isEdit() ? 'Done editing' : 'Edit';
+    const na = netIssues(), ab = $('btnAlerts');
+    ab.hidden = !na.length; ab.textContent = 'Network warnings (' + na.length + ')'; ab.title = na.slice(0, 5).map((i) => i.message).join('\n');
     $('btnUndo').disabled = !S.undo.length; $('btnRedo').disabled = !S.redo.length;
     $('btnUndo').title = S.undo.length ? 'Undo: ' + S.undo[S.undo.length - 1].label : 'Nothing to undo';
     setStatus();
@@ -449,7 +482,7 @@
     const map = curMap();
     const r = R.renderMap(S.p, map.id, {
       mode: S.mode, selection: S.sel, highlight: S.trace && S.trace.highlight,
-      pendingPortId: S.tool && S.tool.pending, collapsed: S.collapsed, drop: S.drop, ringPorts: ringPorts(),
+      pendingPortId: S.tool && S.tool.pending, collapsed: S.collapsed, drop: S.drop, alerts: netAlertMap(), ringPorts: ringPorts(),
       groupPorts: S.pgroup ? S.pgroup.ids : null, preview: S.preview
     });
     S.geo = r;
@@ -847,7 +880,7 @@
       onButton: (k, c) => c.close(k === 'yes')
     }).then((v) => !!v);
   }
-  function formDlg(title, fields, okLabel, intro) {
+  function formDlg(title, fields, okLabel, intro, validate) {
     function body() {
       return (intro || '') + fields.map((f) => {
         let c;
@@ -867,6 +900,12 @@
           const el = c.root.querySelector('[name="' + f.k + '"]');
           out[f.k] = f.type === 'check' ? el.checked : f.type === 'number' ? parseInt(el.value, 10) : el.value;
         });
+        const err = validate && validate(out);
+        if (err) {
+          let box = c.root.querySelector('.form-err');
+          if (!box) { box = document.createElement('div'); box.className = 'msg-box err-text form-err'; c.root.querySelector('.db').prepend(box); }
+          box.textContent = err; return;
+        }
         c.close(out);
       }
     });
@@ -894,7 +933,7 @@
     if (type === 'router') {
       fields.push({ k: 'wanPorts', label: 'WAN ports', type: 'number', v: 1, min: 0, max: 96 });
       fields.push({ k: 'lanPorts', label: 'LAN ports', type: 'number', v: 4, min: 0, max: 96 });
-      fields.push({ k: 'ipAddress', label: 'IP address', v: '', hint: 'Optional, e.g. 192.168.1.1 or 192.168.1.1/24. Each port can also have its own IP later.' });
+      fields.push({ k: 'ipAddress', label: 'IP address', v: '', hint: 'Optional IPv4 address, e.g. 192.168.1.1 (no /prefix; the subnet is assumed to be the /24). Each port can also have its own IP later.' });
     }
     if (type === 'internet') {
       fields[0].v = 'INTERNET'; fields[0].hint = 'The ISP / upstream network. Cable its ports to your router WAN ports.';
@@ -914,7 +953,7 @@
     if (type === 'switch') fields.push({ k: 'portIsolation', label: 'Port isolation', type: 'check', v: false, hint: 'Access ports can only talk to uplinks, not to each other.' });
     if (type === 'patchpanel' || type === 'socket') fields.push({ k: 'straight', label: 'Front N <-> rear N', type: 'check', v: true, hint: 'Documents a straight-through internal mapping. Untick if this panel is not wired that way.' });
     fields.push({ k: 'container', label: 'Inside', type: 'select', opts: containerOptions(isGroup ? 'group' : 'object', type, null), v: defaultContainer(type) });
-    const v = await formDlg('New ' + (isGroup ? 'group' : M.TYPE_LABELS[type]), fields, 'Create');
+    const v = await formDlg('New ' + (isGroup ? 'group' : M.TYPE_LABELS[type]), fields, 'Create', '', (vals) => (vals.ipAddress && !M.isValidIp(vals.ipAddress) ? M.IP_ERROR : null));
     if (!v) return;
     const pos = viewCentre(), mid = curMap().id;
     const r = commit('Create ' + type, (p) => {
@@ -1103,13 +1142,14 @@
     } else if (f === 'color') S.customColorFor = null;
     const sel = S.sel; if (!sel && !t) return;
     const netPort = f === 'pnet' && val ? (t || (sel && sel.id)) : null;
+    const beforeNet = netIssues().map((i) => i.message);
     const ok = commit('Edit ' + f, (p) => {
       const idx = M.buildIndex(p);
       if (f === 'pnet') { const pt = idx.ports[t || sel.id]; if (pt) { if (val) pt.networkColor = val; else delete pt.networkColor; } return; }
       if (f === 'pdesc') { const pt = idx.ports[t || sel.id]; if (pt) { if (val.trim()) pt.description = val.trim(); else delete pt.description; } return; }
       if (f === 'plabel' || f === 'ptype' || f === 'pspeed' || f === 'pmedia' || f === 'pip') {
         const pt = idx.ports[t || sel.id]; if (!pt) return;
-        if (f === 'pip' && !M.isValidIp(val)) toast('That does not look like a valid IP address (kept as typed)', true);
+        if (f === 'pip') { M.setPortIp(p, pt.id, val); return; }
         if (f === 'plabel') { pt.label = val; B.fitMinimum(p, idx.portObj[pt.id].id); } else pt[{ ptype: 'portType', pspeed: 'speed', pmedia: 'media', pip: 'ip' }[f]] = val.trim();
         return;
       }
@@ -1128,13 +1168,13 @@
           M.mapsFor(p, sel.kind, sel.id).forEach((m) => { if (val) M.growToFit(p, m, val); });
         } else if (f === 'rackHeight') c.item.rackHeight = parseInt(val, 10) || null;
         else {
-          if (f === 'ipAddress' && !M.isValidIp(val)) toast('That does not look like a valid IP address (kept as typed)', true);
-          c.item[f] = f === 'ipAddress' ? val.trim() : val;
+          if (f === 'ipAddress') M.setDeviceIp(p, sel.id, val); else c.item[f] = val;
         }
       } else if (sel.kind === 'cable') M.updatePatchCable(p, sel.id, { [f]: val });
       else if (sel.kind === 'link') M.updateLinkMeta(p, sel.id, { [f]: val });
     });
     if (ok && netPort) offerMatchNetworkColor(netPort);
+    if (ok && (f === 'pip' || f === 'ipAddress')) { const fresh = netIssues().filter((i) => beforeNet.indexOf(i.message) < 0); if (fresh.length) toast('Network warning: ' + fresh[0].message, true); }
   }
 
   /* after a router port gets a network colour: offer to recolour the cables that already extend from it */
@@ -1201,7 +1241,7 @@
   function loadProject(p) {
     const fixed = B.normalizeSizes(p);
     if (fixed) setTimeout(() => toast('Enlarged ' + fixed + ' item(s) that were too small to read', false), 100);
-    S.p = p; S.mapId = p.maps[0].id; S.sel = null; S.trace = null; S.tool = null; S.undo = []; S.redo = []; S.issues = []; S.showIssues = false;
+    S.rev++; S.p = p; S.mapId = p.maps[0].id; S.sel = null; S.trace = null; S.tool = null; S.undo = []; S.redo = []; S.issues = []; S.showIssues = false;
     saveNow(); renderAll();
     if (p.placements.some((q) => q.mapId === S.mapId)) fitMap();
   }
@@ -1226,7 +1266,7 @@
     else if (choice === 'help') showHelp();
   }
   function runValidate() {
-    S.issues = M.validateProject(S.p); S.showIssues = true; renderLeft(); openLeft();
+    S.issues = allIssues(); S.showIssues = true; renderLeft(); openLeft();
     const n = S.issues.filter((i) => i.severity !== 'info').length;
     toast(n ? n + ' problem(s) found' : 'No errors or warnings');
   }
@@ -1256,6 +1296,7 @@
     $('btnMode').onclick = () => setMode(isEdit() ? 'view' : 'edit');
     $('btnUndo').onclick = undo; $('btnRedo').onclick = redo;
     $('btnFile').onclick = fileMenu;
+    $('btnAlerts').onclick = runValidate;
     $('btnGraph').onclick = () => setView(S.view === 'graph' ? 'map' : 'graph');
     $('graphView').addEventListener('change', (e) => {
       const k = e.target.dataset.g; if (!k) return;
