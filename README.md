@@ -117,6 +117,9 @@ Try it: File -> Load demo project (two rooms, a fixed link between racks, a wall
   devices up freely) and, for items already in the rack, it only appears at a seam between two items that are stuck together.
   A magnet drop inserts at the line and pushes what is below it down - it never re-flows the rest of the rack, and it only
   aligns the item to the left edge when the rack really is a left-aligned stack.
+- **Folded sections and stacking**: the layout uses an item's drawn height, so you can drop an item right under one whose Front/Rear
+  section is folded. In edit mode, items stacked directly under an item (touching it, or one grid step away) follow it down or up
+  when it is unfolded or folded, together with what is stacked under them in turn (one undo step).
 - **Copy / paste**: select an item in edit mode and press **Ctrl+C**, then **Ctrl+V** (or use **Copy / duplicate** in the details
   panel): the copy follows the pointer and a click drops it (Ctrl+click for more). The copy is named `Name (Copy N)` and gets the same
   settings: ports and labels, sections, port groups, internal mappings, colours. Racks and groups are copied with everything inside.

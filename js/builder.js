@@ -28,7 +28,10 @@
     p.objects.forEach(function (o) { m[o.id] = o.containerId || null; });
     return m;
   }
-  function overlaps(a, b) { return a.x < b.x + b.w + GAP && b.x < a.x + a.w + GAP && a.y < b.y + b.h + GAP && b.y < a.y + a.h + GAP; }
+  /* drawn height of a placement: equipment with folded sections is shorter than its stored box (the app supplies the fold state) */
+  var effH = function (q) { return q.h; };
+  function setHeightFn(fn) { effH = fn || function (q) { return q.h; }; }
+  function overlaps(a, b) { var ah = effH(a), bh = effH(b); return a.x < b.x + b.w + GAP && b.x < a.x + a.w + GAP && a.y < b.y + bh + GAP && b.y < a.y + ah + GAP; }
   function siblingsOf(p, pm, pl) {
     return p.placements.filter(function (q) {
       return q.mapId === pl.mapId && q.id !== pl.id && Object.prototype.hasOwnProperty.call(pm, q.refId) && pm[q.refId] === pm[pl.refId];
@@ -41,12 +44,12 @@
   function nearestFree(p, pm, pl, sibs) {
     var b = boundsFor(p, pm, pl), best = null;
     function free(x, y) {
-      var r = { x: x, y: y, w: pl.w, h: pl.h };
+      var r = { id: pl.id, refId: pl.refId, mapId: pl.mapId, x: x, y: y, w: pl.w, h: pl.h };
       return x >= b.minX && y >= b.minY && !sibs.some(function (s) { return overlaps(r, s); });
     }
     sibs.forEach(function (o) {
       [pl.x, gridUp(p, o.x + o.w + GAP), gridDown(p, o.x - pl.w - GAP)].forEach(function (x) {
-        [pl.y, gridUp(p, o.y + o.h + GAP), gridDown(p, o.y - pl.h - GAP)].forEach(function (y) {
+        [pl.y, gridUp(p, o.y + effH(o) + GAP), gridDown(p, o.y - effH(pl) - GAP)].forEach(function (y) {
           if (x === pl.x && y === pl.y) return;
           if (!free(x, y)) return;
           var d = Math.abs(x - pl.x) + Math.abs(y - pl.y);
@@ -55,7 +58,7 @@
       });
     });
     if (!best) { // boxed in: go below the lowest sibling
-      var low = sibs.reduce(function (m, s) { return Math.max(m, s.y + s.h); }, 0);
+      var low = sibs.reduce(function (m, s) { return Math.max(m, s.y + effH(s)); }, 0);
       best = { dx: Math.max(b.minX, pl.x) - pl.x, dy: gridUp(p, low + GAP) - pl.y };
     }
     return best;
@@ -110,7 +113,7 @@
       siblingsOf(p, pm, pl).forEach(function (s) {
         if (!overlaps(pl, s)) return;
         var ox = gridUp(p, Math.min(pl.x + pl.w, s.x + s.w) - Math.max(pl.x, s.x) + GAP);
-        var oy = gridUp(p, Math.min(pl.y + pl.h, s.y + s.h) - Math.max(pl.y, s.y) + GAP);
+        var oy = gridUp(p, Math.min(pl.y + effH(pl), s.y + effH(s)) - Math.max(pl.y, s.y) + GAP);
         var dx = 0, dy = 0;
         if (ox <= oy) { dx = (s.x + s.w / 2 >= pl.x + pl.w / 2) ? ox : -ox; if (s.x + dx < bd.minX) dx = ox; }
         else { dy = (s.y + s.h / 2 >= pl.y + pl.h / 2) ? oy : -oy; if (s.y + dy < bd.minY) dy = oy; }
@@ -118,6 +121,34 @@
         queue.push(s);
       });
     }
+  }
+  /*
+   * Magnet: items stacked directly under an item (touching it, or one grid step away) follow it when its drawn height changes
+   * (folding or unfolding sections), together with whatever is stacked under them in turn.
+   */
+  function stackedBelow(p, pl, oldH) {
+    var pm = parentMap(p), tol = Math.max(gridStep(p), 8) + 2, out = [], seen = {}, queue = [{ x: pl.x, w: pl.w, bottom: pl.y + oldH }];
+    seen[pl.id] = true;
+    var sibs = siblingsOf(p, pm, pl);
+    while (queue.length) {
+      var cur = queue.shift();
+      sibs.forEach(function (s) {
+        if (seen[s.id] || !(s.x < cur.x + cur.w && cur.x < s.x + s.w)) return;
+        var gap = s.y - cur.bottom;
+        if (gap < -2 || gap > tol) return;
+        seen[s.id] = true; out.push(s);
+        queue.push({ x: s.x, w: s.w, bottom: s.y + effH(s) });
+      });
+    }
+    return out;
+  }
+  function followFold(p, pl, oldH, newH) {
+    var moved = stackedBelow(p, pl, oldH), g = gridStep(p), d = newH - oldH;
+    d = d > 0 ? gridUp(p, d) : -Math.floor(-d / g + 1e-9) * g;
+    if (!moved.length || !d) return moved.length ? moved : [];
+    moved.forEach(function (s) { M.movePlacement(p, s.id, 0, d, true); });
+    moved.concat([pl]).forEach(function (s) { settle(p, s); });
+    return moved;
   }
   /* returns true when the item had to slide away from something it overlapped */
   function resolveDrop(p, plId) {
@@ -504,6 +535,6 @@
     return m[1] + n;
   }
 
-  NM.builder = { containerAt: containerAt, placeNewAt: placeNewAt, copyClip: copyClip, pasteClipAt: pasteClipAt, copyName: copyName, nextName: nextName, applyFullWidth: applyFullWidth, applyFullWidthFor: applyFullWidthFor, minPlacementSize: minPlacementSize, normalizeSizes: normalizeSizes, alignToGrid: alignToGrid, fitMinimum: fitMinimum, resolveDrop: resolveDrop, settle: settle, findDropContainer: findDropContainer, dropSlot: dropSlot, restack: restack, captureChain: captureChain, restoreChain: restoreChain, applyExtension: applyExtension, refitObject: refitObject, placeItem: placeItem, addGroupPlaced: addGroupPlaced, addObjectPlaced: addObjectPlaced, buildDemoProject: buildDemoProject };
+  NM.builder = { containerAt: containerAt, placeNewAt: placeNewAt, copyClip: copyClip, pasteClipAt: pasteClipAt, copyName: copyName, nextName: nextName, applyFullWidth: applyFullWidth, applyFullWidthFor: applyFullWidthFor, minPlacementSize: minPlacementSize, normalizeSizes: normalizeSizes, setHeightFn: setHeightFn, stackedBelow: stackedBelow, followFold: followFold, alignToGrid: alignToGrid, fitMinimum: fitMinimum, resolveDrop: resolveDrop, settle: settle, findDropContainer: findDropContainer, dropSlot: dropSlot, restack: restack, captureChain: captureChain, restoreChain: restoreChain, applyExtension: applyExtension, refitObject: refitObject, placeItem: placeItem, addGroupPlaced: addGroupPlaced, addObjectPlaced: addObjectPlaced, buildDemoProject: buildDemoProject };
   if (typeof module !== 'undefined' && module.exports) module.exports = NM.builder;
 })(typeof window !== 'undefined' ? window : globalThis);

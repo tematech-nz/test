@@ -14,7 +14,7 @@
     collapsed: {}, pgroup: null, hoverPort: null, preview: null, drop: null, cableColor: 'auto', customColorFor: null, ring: null,
     fileDirty: false, newVersion: null, updateHidden: false, place: null, rev: 0, netRev: -1, netCache: [], view: 'map', graph: { from: '', to: '', via: false }
   };
-  NM.app = { S: S, M: M, commit: (l, f) => commit(l, f) }; // exposed for tests
+  NM.app = { S: S, M: M, commit: (l, f) => commit(l, f), toggleCollapse: (id, side) => toggleCollapse(id, side) }; // exposed for tests
 
   /* ---------------------------------------------------------------- utils */
   let toastT = null;
@@ -64,11 +64,28 @@
 
   /* collapsed patch-panel sections are view state: kept in this browser, never in the project file */
   function loadCollapsed() { try { S.collapsed = JSON.parse(localStorage.getItem(KEY_COLL) || '{}') || {}; } catch (e) { S.collapsed = {}; } }
+  /* drawn height of a placement: folded sections make equipment shorter than its stored box */
+  function drawnHeight(pl) {
+    const coll = pl.id && S.collapsed && S.collapsed[pl.id];
+    if (!coll || !pl.refId) return pl.h;
+    const c = M.findContainer(S.p, pl.refId);
+    if (!c || c.kind !== 'object' || !c.item.ports.length || !Object.keys(coll).some((k) => coll[k])) return pl.h;
+    const mn = L.minSizeAt(c.item, pl.w);
+    return L.computeLayout(c.item, Math.max(pl.w, mn.w), Math.max(pl.h, mn.h), coll).h;
+  }
+  B.setHeightFn(drawnHeight);
   function toggleCollapse(plId, side) {
+    const pl = S.p.placements.find((q) => q.id === plId), oldH = pl ? drawnHeight(pl) : 0;
     const c = S.collapsed[plId] = S.collapsed[plId] || {};
     c[side] = !c[side];
     if (!c.front && !c.rear) delete S.collapsed[plId];
     try { localStorage.setItem(KEY_COLL, JSON.stringify(S.collapsed)); } catch (e) { /* ignore */ }
+    // magnet: whatever is stacked right under follows when this one folds or unfolds (edit mode only; view mode never changes the project)
+    if (pl && isEdit() && Math.abs(drawnHeight(pl) - oldH) > 0.5 && B.stackedBelow(S.p, pl, oldH).length) {
+      const newH = drawnHeight(pl);
+      commit('Fold / unfold (items below follow)', (p) => { B.followFold(p, p.placements.find((q) => q.id === plId), oldH, newH); });
+      return;
+    }
     renderCanvas();
   }
 
@@ -418,6 +435,7 @@
     });
     cv.addEventListener('pointerleave', () => { if (S.place) $('ghost').style.display = 'none'; });
     cv.addEventListener('pointermove', (e) => {
+      if (S.drag && e.pointerType === 'mouse' && e.buttons === 0) { finishDrag(); return; } // the button was released elsewhere (e.g. after Alt+Tab)
       if (S.place && !pointers.size) { moveGhost(e); return; }
       if (S.pgroup && isEdit() && !pointers.size) {
         const pe = e.target.closest ? e.target.closest('[data-kind="port"]') : null;

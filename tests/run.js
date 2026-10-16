@@ -1268,6 +1268,27 @@ console.log('Placing new items');
 test('nextName counts up: trailing numbers keep their width, plain names get a 2', () => {
   assert.deepStrictEqual(['PC 1', 'AP-07', 'Switch', 'Rack 9', 'x99'].map(B.nextName), ['PC 2', 'AP-08', 'Switch 2', 'Rack 10', 'x100']);
 });
+test('folded sections: stacked items follow when the one above folds or unfolds; dropping under a folded item is not pushed away', () => {
+  const p = M.createProject('f'), mid = p.maps[0].id, L = NM.layout;
+  const a = B.addObjectPlaced(p, mid, { type: 'patchpanel', name: 'A', portCount: 16, straight: true }, 100, 100);
+  const pa = M.placementOf(p, mid, a.id), fullH = pa.h;
+  const folded = {};
+  B.setHeightFn((q) => (q.id && folded[q.id] ? q.h - 60 : q.h));
+  try {
+    folded[pa.id] = true; // A is drawn 60 shorter
+    const b = B.placeNewAt(p, mid, 'object', { type: 'patchpanel', name: 'B', portCount: 16, straight: true }, 100, pa.y + fullH - 60);
+    assert.strictEqual(b.placement.y, pa.y + fullH - 60, 'dropped right under the folded item, not moved away');
+    const c = B.placeNewAt(p, mid, 'object', { type: 'patchpanel', name: 'C', portCount: 16, straight: true }, 100, b.placement.y + b.placement.h);
+    delete folded[pa.id]; // unfold A (was folded: B and C follow down)
+    const moved = B.followFold(p, pa, fullH - 60, fullH);
+    assert.deepStrictEqual(moved.map(q => q.id).sort(), [b.placement.id, c.placement.id].sort(), 'B and C are stacked under A');
+    assert.ok(b.placement.y >= pa.y + fullH && c.placement.y >= b.placement.y + b.placement.h, 'nothing overlaps after unfolding');
+    assert.deepStrictEqual(overlapPairs(p), []);
+    // an item far away is not attached
+    const far = B.placeNewAt(p, mid, 'object', { type: 'patchpanel', name: 'F', portCount: 16, straight: true }, 100, 1200);
+    assert.strictEqual(B.stackedBelow(p, pa, fullH).filter(q => q.id === far.placement.id).length, 0);
+  } finally { B.setHeightFn(null); }
+});
 test('copy / paste: settings and contents are copied with "(Copy N)" names; connections and IPs are not', () => {
   const p = M.createProject('c'), mid = p.maps[0].id;
   const rack = B.addObjectPlaced(p, mid, { type: 'rack', name: 'Rack A' }, 0, 0);

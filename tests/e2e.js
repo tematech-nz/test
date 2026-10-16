@@ -265,6 +265,31 @@ const ok = (m) => console.log('  ok   ' + m);
   });
 
 
+  await step('folding a panel moves the one stacked under it (magnet) and unfolding moves it back', async () => {
+    const ids = await page.evaluate(() => {
+      const A = NetMap.app, B = NetMap.builder, M = NetMap.model, out = {};
+      A.commit('fold test setup', (p) => {
+        const mid = A.S.mapId;
+        const a = B.addObjectPlaced(p, mid, { type: 'patchpanel', name: 'FoldTop', portCount: 16, straight: true }, 3000, 3000);
+        const pa = M.placementOf(p, mid, a.id);
+        const b = B.addObjectPlaced(p, mid, { type: 'patchpanel', name: 'FoldBelow', portCount: 16, straight: true }, 3000, pa.y + pa.h);
+        out.a = pa.id; out.b = M.placementOf(p, mid, b.id).id;
+      });
+      return out;
+    });
+    const yB = () => page.evaluate((i) => NetMap.app.S.p.placements.find(q => q.id === i.b).y, ids);
+    const y0 = await yB(), a0 = await page.evaluate((i) => { const q = NetMap.app.S.p.placements.find(x => x.id === i.a); return q.y + q.h; }, ids);
+    assert.ok(y0 >= a0 && y0 - a0 <= 22, 'stacked right under');
+    await page.evaluate((i) => NetMap.app.toggleCollapse(i.a, 'rear'), ids);
+    const y1 = await yB();
+    assert.ok(y1 < y0 - 10, 'the lower panel followed up when the one above folded: ' + y0 + ' -> ' + y1);
+    await page.evaluate((i) => NetMap.app.toggleCollapse(i.a, 'rear'), ids);
+    const y2 = await yB();
+    assert.ok(y2 >= a0, 'and made room again when it unfolded: ' + y2 + ' vs ' + a0);
+    assert.deepStrictEqual(await page.evaluate(() => NetMap.app.S.p.placements.length > 0 && 0), 0);
+    for (let i = 0; i < 3; i++) await page.click('#btnUndo');
+  });
+
   await step('router: create with WAN/LAN ports and IP via the toolbar', async () => {
     await page.click('#toolbar button[data-add="router"]');
     await page.fill('#dlg input[name="name"]', 'Edge GW');
