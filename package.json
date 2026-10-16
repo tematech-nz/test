@@ -1,0 +1,11 @@
+{
+  "name": "netmap",
+  "version": "1.0.0",
+  "description": "Offline physical network cabling documentation and tracing tool",
+  "private": true,
+  "scripts": {
+    "test": "node tests/run.js",
+    "serve": "node tools/serve.js"
+  },
+  "license": "Apache-2.0"
+}
