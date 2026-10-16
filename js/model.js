@@ -104,6 +104,17 @@
     for (var j = 0; j < p.objects.length; j++) if (p.objects[j].id === id) return { kind: 'object', id: id, item: p.objects[j] };
     return null;
   }
+  /* nearest group an object sits in (directly or through a rack); null when it is not in any group */
+  function groupOf(p, objectId) {
+    var c = findContainer(p, objectId), guard = 0;
+    while (c && guard++ < 20) {
+      var par = findContainer(p, c.kind === 'group' ? c.item.parentGroupId : c.item.containerId);
+      if (!par) return null;
+      if (par.kind === 'group') return par.item;
+      c = par;
+    }
+    return null;
+  }
   function parentOf(p, kind, id) {
     var c = findContainer(p, id);
     if (!c) return null;
@@ -227,8 +238,9 @@
   }
   function setSectionSize(p, objectId, size) {
     var o = buildIndex(p).objects[objectId];
-    if (!o || o.type !== 'patchpanel') throw new Error('Sections apply to patch panels');
+    if (!o || (o.type !== 'patchpanel' && o.type !== 'switch')) throw new Error('Sections apply to patch panels and switches');
     var n = o.ports.filter(function (x) { return x.side === 'front'; }).length;
+    if (o.type === 'switch' && !size) { delete o.sectionSize; return; } // switches default to plain rows
     if (!(size >= 1) || size !== Math.floor(size) || n % size !== 0) {
       throw new Error('Sections must be equal: ' + n + ' ports cannot be split into sections of ' + size + ' (valid: ' + validSectionSizes(n).join(', ') + ')');
     }
@@ -280,7 +292,7 @@
     if (o.type === 'router' || o.type === 'internet') obj.ipAddress = o.ipAddress || '';
     if (o.type === 'rack') obj.rackHeight = o.rackHeight || 42;
     p.objects.push(obj);
-    if (o.type === 'patchpanel' && o.sectionSize) {
+    if ((o.type === 'patchpanel' || o.type === 'switch') && o.sectionSize) {
       var sz = o.sectionSize;
       if (!(sz >= 1) || sz !== Math.floor(sz) || n % sz !== 0) { p.objects.pop(); throw new Error('Sections must be equal: ' + n + ' ports cannot be split into sections of ' + sz + ' (valid: ' + validSectionSizes(n).join(', ') + ')'); }
       obj.sectionSize = sz;
@@ -323,7 +335,10 @@
     if (o.type === 'patchpanel') {
       adjust('front'); adjust('rear');
       if (o.sectionSize && n % o.sectionSize !== 0) delete o.sectionSize;
-    } else adjust('front');
+    } else {
+      adjust('front');
+      if (o.sectionSize && n % o.sectionSize !== 0) delete o.sectionSize;
+    }
     o.ports.sort(function (a, b) { return (a.side === b.side ? 0 : (a.side === 'front' ? -1 : 1)); });
   }
 
@@ -749,7 +764,7 @@
     SCHEMA_VERSION: SCHEMA_VERSION, CABLE_COLORS: CABLE_COLORS, OBJECT_TYPES: OBJECT_TYPES, TYPE_LABELS: TYPE_LABELS,
     CABLE_STATUS: CABLE_STATUS, WIRE_STATUS: WIRE_STATUS, LINK_STATUS: LINK_STATUS, PAD: PAD, HEADER: HEADER,
     uid: uid, clone: clone, createProject: createProject, buildIndex: buildIndex, portName: portName, wireName: wireName,
-    findContainer: findContainer, parentOf: parentOf, containerChildren: containerChildren, descendants: descendants,
+    findContainer: findContainer, groupOf: groupOf, parentOf: parentOf, containerChildren: containerChildren, descendants: descendants,
     addPlacement: addPlacement, placementOf: placementOf, placementGroup: placementGroup, movePlacement: movePlacement,
     growToFit: growToFit, mapsFor: mapsFor, addGroup: addGroup, addObject: addObject, setContainer: setContainer,
     setPortCount: setPortCount, setSectionSize: setSectionSize, validSectionSizes: validSectionSizes, defaultSectionSize: defaultSectionSize, effectiveSectionSize: effectiveSectionSize, setRouterPorts: setRouterPorts, isValidIp: isValidIp, canConnectPatch: canConnectPatch, addPatchCable: addPatchCable,

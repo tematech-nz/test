@@ -22,6 +22,9 @@ Try it: File -> Load demo project (two rooms, a fixed link between racks, a wall
   Objects move only by their dark drag handle (top-left); selecting never moves anything.
 - **Groups** organise equipment and can nest. Moving a group moves its contents visually; deleting one asks whether
   to keep or delete the contents. Groups never imply connectivity.
+- **Safety nets for patch cables**: connecting two ports that are in different groups asks "Do you want to continue?"
+  first (racks in the same group connect freely, and ports outside any group are never questioned). Hovering "Reconnect end A/B"
+  circles the cable end that would move, and action buttons have tooltips explaining what they do.
 - **Cable colours**: pick white, grey, green, yellow, blue, orange, red or black from the list, or `Custom...` for an RGB
   picker. The patch cable tool has its own colour list for new cables. Cables are drawn with a thin dark outline so white and
   yellow stay visible.
@@ -29,6 +32,8 @@ Try it: File -> Load demo project (two rooms, a fixed link between racks, a wall
 - **Fixed links**: installed cabling between two patch panels with N numbered wires, each mapped rear port to rear port.
   Mapping is never assumed; "sequential" is an explicit choice. Endpoints and wires change only through
   "Edit installed wiring", which shows a review of every added, deleted or changed wire before applying (one undo step).
+- **Switch sections**: switches use plain rows by default; in edit mode (or when creating one) choose "N per section" in the
+  properties to get equal sections in one line like patch panels (e.g. 3 x 8 for 24 ports), or "None" to go back.
 - **Routers** (`+ Router`): choose how many WAN and LAN ports (0-96 in total, changeable later) and an optional IP
   address; every port can have its own IP too. WAN and LAN ports sit in separate strips that fold with `^`.
   Routers cable like switches and are searchable by IP.
@@ -56,11 +61,16 @@ Try it: File -> Load demo project (two rooms, a fixed link between racks, a wall
 - **Dragging into container edges**: drag an item toward the bottom or right edge of its group or rack and the container
   grows live to hold it (up to about 60 units past the edge). Drag further and the extension disappears again; drop outside
   or inside another container to move it there. Dropping inside the extension keeps the larger container.
-- **Rack stacking**: while you drag equipment over a rack, the rack is outlined green and a green line shows where it will
-  attach (between its neighbours). On drop the rack's equipment is re-stacked top to bottom with it at that position.
+- **Rack stacking**: dragging equipment from outside into a rack outlines the rack in green and shows a line where it will attach;
+  on drop the rack's equipment is re-stacked with it at that position. Moving equipment around inside its own rack is free: the
+  magnet only applies at a seam between two items that are stuck together, so you can insert an item between them (the line
+  shows where) or place it anywhere else without snapping.
 - **No overlaps**: items inside the same container (or at the top level of a map) never overlap. A dropped, newly placed or
   resized item slides to the nearest free spot; containers grow to hold what is inside and push neighbouring
   containers away (with their contents), cascading outward.
+- **Fixed link layering**: a fixed link is drawn behind every group, rack and device it does not start or end in, so it no
+  longer cuts across unrelated equipment; it shows over its own endpoint groups, racks and panels and over empty canvas.
+  Select the link (or trace it) to see its full length on top.
 - **Selecting a fixed link, wire or patch cable** highlights its ports (yellow) on both ends, on whichever map they appear.
 - **Maps**: the same object can be shown on several maps ("Add existing here"); connections reference the shared
   object and port records. Trace results offer "open <map>" links to continue across maps.

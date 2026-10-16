@@ -502,7 +502,7 @@ test('dropSlot finds the insertion line between rack neighbours; restack attache
   // drag Extra up so its centre sits between PP-A and Switch A
   const drag = pl(extra);
   drag.y = (pl(pp).y + pl(pp).h + pl(sw).y) / 2 - drag.h / 2;
-  const slot = B.dropSlot(p, drag);
+  const slot = B.dropSlot(p, drag, rack.id);
   assert.strictEqual(slot.containerId, rack.id);
   assert.strictEqual(slot.index, 1);
   const gapMid = (pl(pp).y + pl(pp).h + pl(sw).y) / 2;
@@ -513,8 +513,13 @@ test('dropSlot finds the insertion line between rack neighbours; restack attache
   assert.ok([pp, extra, sw].every(o => pl(o).x === pl(rack).x + M.PAD), 'aligned in the rack');
   assert.ok(pl(rack).y + pl(rack).h >= pl(sw).y + pl(sw).h, 'rack still contains everything');
   // dragged above everything -> index 0; far below the last item inside the rack -> last
+  // dragged from elsewhere: the magnet works at the ends too; inside its own rack only seams between stuck items magnetise
   drag.y = pl(rack).y;
-  assert.strictEqual(B.dropSlot(p, drag).index, 0);
+  assert.strictEqual(B.dropSlot(p, drag, null).index, 0);
+  assert.strictEqual(B.dropSlot(p, drag, rack.id), null, 'free placement in its own rack away from a seam');
+  drag.y = pl(rack).y + pl(rack).h - drag.h;
+  assert.strictEqual(B.dropSlot(p, drag, null).index, 2, 'from outside: after the last item');
+  assert.strictEqual(B.dropSlot(p, drag, rack.id), null);
   assert.strictEqual(M.findContainer(p, extra.id).item.containerId, rack.id);
 });
 test('no snapping for groups or when dragging a rack', () => {
@@ -525,7 +530,7 @@ test('no snapping for groups or when dragging a rack', () => {
   assert.strictEqual(B.dropSlot(p, standalone), null, 'outside every rack');
   const g = M.placementOf(p, mid, p.groups[0].id);
   standalone.x = g.x + g.w - standalone.w - 2; standalone.y = g.y + g.h - standalone.h - 2;
-  assert.ok(!B.dropSlot(p, standalone) || M.findContainer(p, B.dropSlot(p, standalone).containerId).item.type === 'rack');
+  assert.ok(!B.dropSlot(p, standalone, null) || M.findContainer(p, B.dropSlot(p, standalone).containerId).item.type === 'rack');
   const svg = R.renderMap(p, mid, { drop: { containerId: byName(p, 'Rack A').id, line: { x: 0, y: 0, w: 50 } } }).content;
   assert.ok(svg.indexOf('data-drop="line"') > 0 && svg.indexOf('#00c853') > 0);
 });
@@ -614,6 +619,106 @@ test('predefined cable colours and outline keep every colour visible', () => {
   p.patchCables[0].color = '#ffffff';
   const svg = R.renderMap(p, p.maps[0].id, {}).content;
   assert.ok(svg.indexOf('stroke="#ffffff" stroke-width="2.4"') > 0 && svg.indexOf('stroke="#37474f" stroke-width="4"') > 0);
+});
+
+test('groupOf: nearest group through racks; null outside groups', () => {
+  const p = B.buildDemoProject();
+  assert.strictEqual(M.groupOf(p, byName(p, 'Switch A').id).name, 'Server room');
+  assert.strictEqual(M.groupOf(p, byName(p, 'PP-B').id).name, 'Office');
+  assert.strictEqual(M.groupOf(p, byName(p, 'PP-Standalone').id), null);
+  assert.strictEqual(M.groupOf(p, byName(p, 'Rack A').id).name, 'Server room');
+});
+test('port ring is drawn for hovered cable ends', () => {
+  const p = B.buildDemoProject(), c = p.patchCables[0];
+  const svg = R.renderMap(p, p.maps[0].id, { ringPorts: [c.aPortId] }).content;
+  assert.ok(svg.indexOf('data-ring="' + c.aPortId + '"') > 0 && svg.indexOf('#d500f9') > 0);
+});
+
+console.log('Minimum sizes');
+test('port labels set a minimum size; longer labels need wider cells', () => {
+  const p = M.createProject('m');
+  const o = M.addObject(p, { type: 'patchpanel', portCount: 24 });
+  const small = NM.layout.minSize(o);
+  o.ports[0].label = 'LONGLABEL'; // 9 chars
+  assert.ok(NM.layout.minSize(o).w > small.w);
+  assert.strictEqual(NM.layout.minSize(o).w, NM.layout.defaultSize(o).w);
+  assert.ok(NM.layout.cellFor(M.addObject(p, { type: 'switch', portCount: 8 })) >= 18);
+});
+test('rendering never draws equipment smaller than its minimum', () => {
+  const p = M.createProject('m'), mid = p.maps[0].id;
+  const o = B.addObjectPlaced(p, mid, { type: 'patchpanel', name: 'Tiny', portCount: 24 }, 0, 0);
+  const pl = M.placementOf(p, mid, o.id), mn = NM.layout.minSize(o);
+  pl.w = 40; pl.h = 20; // hand-edited / old file
+  const r = R.renderMap(p, mid, {});
+  const g = r.portGeo[o.ports[0].id];
+  assert.ok(g.w >= 16 && g.h >= 16, 'ports stay readable: ' + g.w + 'x' + g.h);
+  const last = r.portGeo[o.ports[23].id];
+  assert.ok(last.x + last.w <= pl.x + mn.w, 'all ports inside the minimum box');
+});
+test('normalizeSizes repairs old projects and keeps the layout overlap-free', () => {
+  const p = B.buildDemoProject();
+  p.placements.forEach(pl => { if (pl.refType === 'object') { const o = p.objects.find(x => x.id === pl.refId); if (o.ports.length) { pl.w = 60; pl.h = 30; } } });
+  const fixed = B.normalizeSizes(p);
+  assert.ok(fixed >= 5, 'fixed ' + fixed);
+  p.placements.forEach(pl => {
+    const o = p.objects.find(x => x.id === pl.refId);
+    if (o && o.ports.length) { const mn = NM.layout.minSize(o); assert.ok(pl.w >= mn.w && pl.h >= mn.h, o.name); }
+  });
+  assert.deepStrictEqual(overlapPairs(p), []);
+  assert.strictEqual(B.normalizeSizes(p), 0, 'idempotent');
+});
+test('minPlacementSize keeps containers around their contents; editing a label grows the panel', () => {
+  const p = B.buildDemoProject(), mid = p.maps[0].id;
+  const rack = byName(p, 'Rack A'), rp = M.placementOf(p, mid, rack.id);
+  const mn = B.minPlacementSize(p, rp);
+  const children = M.containerChildren(p, rack.id).map(c => M.placementOf(p, mid, c.id));
+  assert.ok(mn.w >= Math.max(...children.map(c => c.x + c.w)) + M.PAD - rp.x);
+  assert.ok(mn.h >= Math.max(...children.map(c => c.y + c.h)) + M.PAD - rp.y);
+  const pp = byName(p, 'PP-A'), pl = M.placementOf(p, mid, pp.id), w0 = pl.w;
+  pp.ports[0].label = 'VERYLONGLABEL'; B.fitMinimum(p, pp.id);
+  assert.ok(pl.w > w0);
+  assert.deepStrictEqual(overlapPairs(p), []);
+});
+
+test('switches can opt in to equal sections; plain rows stay the default', () => {
+  const p = M.createProject('sw');
+  const sw = M.addObject(p, { type: 'switch', portCount: 24 });
+  const L = NM.layout, sz0 = L.defaultSize(sw);
+  assert.strictEqual(L.usesSections(sw), false);
+  const ys0 = new Set(sw.ports.map(x => Math.round(L.computeLayout(sw, sz0.w, sz0.h, {}).ports[x.id].y)));
+  assert.strictEqual(ys0.size, 2, 'default: two rows of 12');
+  assert.throws(() => M.setSectionSize(p, sw.id, 7), /equal/);
+  M.setSectionSize(p, sw.id, 8);
+  const sz = L.defaultSize(sw), lay = L.computeLayout(sw, sz.w, sz.h, {});
+  assert.strictEqual(new Set(sw.ports.map(x => Math.round(lay.ports[x.id].y))).size, 1, '3 x 8 in one line');
+  assert.strictEqual(lay.groups.length, 3);
+  M.setSectionSize(p, sw.id, 0);
+  assert.strictEqual(sw.sectionSize, undefined);
+  assert.throws(() => M.addObject(p, { type: 'switch', portCount: 24, sectionSize: 5 }), /equal/);
+  const sw2 = M.addObject(p, { type: 'switch', portCount: 16, sectionSize: 8 });
+  M.setPortCount(p, sw2.id, 12);
+  assert.strictEqual(sw2.sectionSize, undefined, 'stale split dropped');
+});
+
+console.log('Link layering');
+test('fixed links hide behind unrelated containers and show in full when selected or traced', () => {
+  const p = M.createProject('z'), mid = p.maps[0].id;
+  const gL = B.addGroupPlaced(p, mid, { name: 'GL' }, 0, 0), gR = B.addGroupPlaced(p, mid, { name: 'GR' }, 900, 0);
+  const gM = B.addGroupPlaced(p, mid, { name: 'GMID' }, 440, 0);
+  const a = B.addObjectPlaced(p, mid, { type: 'patchpanel', name: 'A', portCount: 8, containerId: gL.id });
+  const b = B.addObjectPlaced(p, mid, { type: 'patchpanel', name: 'B', portCount: 8, containerId: gR.id });
+  const rackM = B.addObjectPlaced(p, mid, { type: 'rack', name: 'RM', containerId: gM.id });
+  const link = M.addFixedLink(p, { aObjectId: a.id, bObjectId: b.id, wireCount: 2, mapping: 'sequential' });
+  const holes = (svg) => { const m = /<clipPath id="lc_[^"]+"><path clip-rule="evenodd" d="([^"]+)"/.exec(svg); return m ? m[1].split('M').length - 2 : -1; };
+  const plain = R.renderMap(p, mid, {}).content;
+  assert.strictEqual(holes(plain), 1, 'only the unrelated GMID box is cut out (its rack is inside it; GL/GR are endpoint groups)');
+  const pm = M.placementOf(p, mid, gM.id);
+  assert.ok(plain.indexOf('M' + pm.x + ' ' + pm.y + 'h' + pm.w) > 0, 'hole is the GMID box');
+  assert.ok(plain.indexOf('clip-path="url(#lc_' + link.id + ')"') > 0);
+  assert.strictEqual(R.renderMap(p, mid, { selection: { kind: 'link', id: link.id } }).content.indexOf('lc_' + link.id), -1, 'selected: full length');
+  const traced = T.traceTarget(p, { kind: 'link', id: link.id });
+  assert.strictEqual(R.renderMap(p, mid, { highlight: traced.highlight }).content.indexOf('lc_' + link.id), -1, 'traced: full length');
+  assert.ok(rackM);
 });
 
 console.log('\n' + passed + ' passed, ' + failed + ' failed');

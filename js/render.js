@@ -64,14 +64,18 @@
       else if (sel.kind === 'wire' && idx.wires[sel.id]) { var sw0 = idx.wires[sel.id]; if (sw0.aPortId) selPorts[sw0.aPortId] = true; if (sw0.bPortId) selPorts[sw0.bPortId] = true; }
       else if (sel.kind === 'cable' && idx.cables[sel.id]) { selPorts[idx.cables[sel.id].aPortId] = true; selPorts[idx.cables[sel.id].bPortId] = true; }
     }
+    var ringSet = {};
+    (opts.ringPorts || []).forEach(function (id) { ringSet[id] = true; });
     var prev = opts.preview || null;
     if (prev) prev.ids.forEach(function (id) { prevSet[id] = true; });
     items.forEach(function (it) {
       var pl = it.pl, coll = (!exporting && !it.isGroup && opts.collapsed && opts.collapsed[pl.id]) || null;
       it.coll = coll;
-      it.lay = !it.isGroup && it.ref.ports.length ? L.computeLayout(it.ref, pl.w, pl.h, coll) : null;
-      var anyColl = coll && (coll.front || coll.rear);
-      it.box = { x: pl.x, y: pl.y, w: pl.w, h: it.lay && anyColl ? it.lay.h : pl.h, id: pl.id };
+      // never draw equipment below the size where its port labels are readable (old or hand-edited files)
+      var mn = it.isGroup ? { w: 0, h: 0 } : L.minSize(it.ref), bw = Math.max(pl.w, mn.w), bh = Math.max(pl.h, mn.h);
+      it.lay = !it.isGroup && it.ref.ports.length ? L.computeLayout(it.ref, bw, bh, coll) : null;
+      var anyColl = coll && Object.keys(coll).some(function (k) { return coll[k]; });
+      it.box = { x: pl.x, y: pl.y, w: bw, h: it.lay && anyColl ? it.lay.h : bh, id: pl.id };
       byRef[pl.refId] = it.box;
     });
 
@@ -168,6 +172,26 @@
       var y = Math.max.apply(null, rects.map(function (r) { return r.y + r.h; })) + 5;
       return { x: (x0 + x1) / 2, y: y, bar: [x0, x1, y], ticks: rects.map(function (r) { return [r.x + r.w / 2, r.y + r.h, y]; }), hidden: rects.every(function (r) { return r.hidden; }) };
     }
+    // A fixed link is drawn "behind" every container/equipment it does not start or end in: only the parts over
+    // its own endpoints' groups, racks and panels (or empty canvas) show. Selecting it or tracing it shows its full length.
+    var parentOfRef = {};
+    p.groups.forEach(function (g0) { parentOfRef[g0.id] = g0.parentGroupId || null; });
+    p.objects.forEach(function (o0) { parentOfRef[o0.id] = o0.containerId || null; });
+    function hiddenBehind(l) {
+      var related = {};
+      [l.aObjectId, l.bObjectId].forEach(function (id) {
+        var cur = id, guard = 0;
+        while (cur && guard++ < 20) { related[cur] = true; cur = parentOfRef[cur]; }
+      });
+      var holes = items.filter(function (it) {
+        var par = parentOfRef[it.pl.refId];
+        return !related[it.pl.refId] && (!par || related[par] || !byRef[par]);
+      }).map(function (it) { return it.box; });
+      if (!holes.length) return '';
+      var d = 'M-100000 -100000H100000V100000H-100000Z';
+      holes.forEach(function (b) { d += 'M' + num(b.x) + ' ' + num(b.y) + 'h' + num(b.w) + 'v' + num(b.h) + 'h' + num(-b.w) + 'z'; });
+      return '<clipPath id="lc_' + esc(l.id) + '"><path clip-rule="evenodd" d="' + d + '"/></clipPath>';
+    }
     p.fixedLinks.forEach(function (l) {
       var A = byRef[l.aObjectId], B = byRef[l.bObjectId];
       if (!A && !B) return;
@@ -175,7 +199,8 @@
       var isHi = hl && (hl.links[l.id]);
       var dim = hl && !isHi;
       var label = l.name + ' x' + l.wires.length;
-      var o = '<g data-kind="link" data-id="' + esc(l.id) + '"' + (dim ? ' opacity="0.15"' : '') + '>';
+      var clip = isSel || isHi ? '' : hiddenBehind(l);
+      var o = (clip ? '<defs>' + clip + '</defs>' : '') + '<g data-kind="link" data-id="' + esc(l.id) + '"' + (dim ? ' opacity="0.15"' : '') + (clip ? ' clip-path="url(#lc_' + esc(l.id) + ')"' : '') + '>';
       var anchors = [], d, mx, my;
       var aA = linkAnchor(l, l.aObjectId), aB = linkAnchor(l, l.bObjectId);
       if (aA && aB) {
@@ -246,6 +271,13 @@
       cableParts.push(o);
     });
 
+    Object.keys(ringSet).forEach(function (pid) {
+      var gp = portGeo[pid];
+      if (!gp) return;
+      var cx = gp.x + gp.w / 2, cy = gp.y + gp.h / 2, rr = Math.max(gp.w, gp.h) / 2 + 6;
+      cableParts.push('<g data-ring="' + esc(pid) + '" pointer-events="none"><circle cx="' + num(cx) + '" cy="' + num(cy) + '" r="' + num(rr) + '" fill="none" stroke="#d500f9" stroke-width="3"/>' +
+        '<circle cx="' + num(cx) + '" cy="' + num(cy) + '" r="' + num(rr + 4) + '" fill="none" stroke="#d500f9" stroke-width="1.5" stroke-dasharray="3 3"/></g>');
+    });
     if (opts.drop && opts.drop.line) {
       var ln = opts.drop.line;
       cableParts.push('<g data-drop="line" pointer-events="none"><path d="M' + num(ln.x) + ' ' + num(ln.y) + 'h' + num(ln.w) + '" stroke="#00c853" stroke-width="4" stroke-linecap="round"/>' +

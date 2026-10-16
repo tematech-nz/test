@@ -10,7 +10,7 @@
     p: null, mapId: null, mode: 'view', sel: null, trace: null, tool: null,
     undo: [], redo: [], unsaved: false, saveErr: null, savedAt: null, lastExport: null,
     drag: null, geo: null, query: '', showIssues: false, issues: [],
-    collapsed: {}, pgroup: null, hoverPort: null, preview: null, drop: null, cableColor: '#1f77b4', customColorFor: null,
+    collapsed: {}, pgroup: null, hoverPort: null, preview: null, drop: null, cableColor: '#1f77b4', customColorFor: null, ring: null,
     view: 'map', graph: { from: '', to: '', via: false }
   };
   NM.app = { S: S, M: M }; // exposed for tests
@@ -182,6 +182,19 @@
   function setTool(t) { S.tool = t; renderAll(); }
   function cancelTool() { if (S.tool) { S.tool = null; renderAll(); } }
 
+  /* ports of the cable end being reconnected are circled (hover over "Reconnect end A/B" or while the tool is active) */
+  function ringPorts() {
+    if (S.tool && S.tool.type === 'reconnect') { const c = S.p.patchCables.find((x) => x.id === S.tool.cableId); return c ? [S.tool.end === 'a' ? c.aPortId : c.bPortId] : []; }
+    return S.ring ? [S.ring] : [];
+  }
+  /* returns a confirmation text when the two ports are in different groups (both must be in a group) */
+  function crossGroupWarning(aPortId, bPortId) {
+    const idx = M.buildIndex(S.p), oa = idx.portObj[aPortId], ob = idx.portObj[bPortId];
+    if (!oa || !ob) return null;
+    const ga = M.groupOf(S.p, oa.id), gb = M.groupOf(S.p, ob.id);
+    if (!ga || !gb || ga.id === gb.id) return null;
+    return '<p><b>' + esc(oa.name) + '</b> is in group <b>' + esc(ga.name) + '</b> and <b>' + esc(ob.name) + '</b> is in group <b>' + esc(gb.name) + '</b>.</p><p>A patch cable normally stays inside one group. Do you want to continue?</p>';
+  }
   function clearPgroup() { S.pgroup = null; S.hoverPort = null; S.preview = null; }
 
   /* Ctrl+click builds a group of free rear ports on one patch panel (Shift extends a range) */
@@ -249,15 +262,23 @@
       }
       const a = S.tool.pending;
       if (a === id) { S.tool.pending = null; renderAll(); return; }
-      const cable = commit('Add patch cable', (p) => M.addPatchCable(p, { aPortId: a, bPortId: id, color: S.cableColor, cableType: S.tool.cableType }));
-      S.tool.pending = null;
-      if (cable) { toast('Added ' + cable.name); S.sel = { kind: 'cable', id: cable.id }; renderAll(); }
+      const tool = S.tool, warn = crossGroupWarning(a, id);
+      const make = () => {
+        const cable = commit('Add patch cable', (p) => M.addPatchCable(p, { aPortId: a, bPortId: id, color: S.cableColor, cableType: tool.cableType }));
+        tool.pending = null;
+        if (cable) { toast('Added ' + cable.name); S.sel = { kind: 'cable', id: cable.id }; renderAll(); } else renderAll();
+      };
+      if (warn) confirmDlg('Connect across groups?', warn, 'Connect anyway').then((ok) => { if (ok) make(); else { tool.pending = null; renderAll(); } });
+      else make();
       return;
     }
     if (S.tool && S.tool.type === 'reconnect') {
       if (kind !== 'port') { toast('Tap a port to reconnect to, or press Esc', true); return; }
-      const t = S.tool; S.tool = null;
-      commit('Reconnect patch cable', (p) => M.updatePatchCable(p, t.cableId, t.end === 'a' ? { aPortId: id } : { bPortId: id }));
+      const t = S.tool, cab = S.p.patchCables.find((c) => c.id === t.cableId);
+      const other = cab && (t.end === 'a' ? cab.bPortId : cab.aPortId), warn = other && crossGroupWarning(id, other);
+      const go = () => { S.tool = null; commit('Reconnect patch cable', (p) => M.updatePatchCable(p, t.cableId, t.end === 'a' ? { aPortId: id } : { bPortId: id })); };
+      if (warn) confirmDlg('Connect across groups?', warn, 'Reconnect anyway').then((ok) => { if (ok) go(); });
+      else go();
       return;
     }
     if (!el) { S.sel = null; closeRight(); renderAll(); return; }
@@ -287,7 +308,7 @@
         if (!q) return;
         const kind = h.dataset.handle, start = toMap(e.clientX, e.clientY);
         const items = kind === 'move' ? M.placementGroup(S.p, q.id).map((x) => ({ q: x, ox: x.x, oy: x.y })) : [{ q: q, ow: q.w, oh: q.h }];
-        S.drag = { kind: kind, plId: q.id, start: start, snap: JSON.stringify(S.p), items: items, moved: false, chain: kind === 'move' ? B.captureChain(S.p, q.mapId, q.refId) : [] };
+        S.drag = { kind: kind, plId: q.id, start: start, snap: JSON.stringify(S.p), items: items, moved: false, chain: kind === 'move' ? B.captureChain(S.p, q.mapId, q.refId) : [], from: (() => { const c = M.findContainer(S.p, q.refId); return c ? (c.kind === 'group' ? c.item.parentGroupId : c.item.containerId) : null; })() };
         return;
       }
       gesture = { x: e.clientX, y: e.clientY, vx: vpState().x, vy: vpState().y, target: e.target, moved: false };
@@ -316,10 +337,11 @@
           dx = snap(p0.ox + dx) - p0.ox; dy = snap(p0.oy + dy) - p0.oy;
           d.items.forEach((it) => { it.q.x = it.ox + dx; it.q.y = it.oy + dy; });
           B.applyExtension(S.p, d.items[0].q.mapId, d.chain, d.items[0].q, EXTEND_ZONE);
-          S.drop = B.dropSlot(S.p, d.items[0].q);
+          S.drop = B.dropSlot(S.p, d.items[0].q, d.from);
         } else {
           const it = d.items[0];
-          it.q.w = Math.max(60, snap(it.ow + dx)); it.q.h = Math.max(40, snap(it.oh + dy));
+          const mn = B.minPlacementSize(S.p, it.q);
+          it.q.w = Math.max(mn.w, snap(it.ow + dx)); it.q.h = Math.max(mn.h, snap(it.oh + dy));
         }
         scheduleRender(); return;
       }
@@ -406,7 +428,7 @@
     const map = curMap();
     const r = R.renderMap(S.p, map.id, {
       mode: S.mode, selection: S.sel, highlight: S.trace && S.trace.highlight,
-      pendingPortId: S.tool && S.tool.pending, collapsed: S.collapsed, drop: S.drop,
+      pendingPortId: S.tool && S.tool.pending, collapsed: S.collapsed, drop: S.drop, ringPorts: ringPorts(),
       groupPorts: S.pgroup ? S.pgroup.ids : null, preview: S.preview
     });
     S.geo = r;
@@ -435,12 +457,12 @@
     const pc = S.tool && S.tool.type === 'patch';
     tb.innerHTML =
       ['group:Group', 'rack:Rack', 'patchpanel:Patch panel', 'switch:Switch', 'router:Router', 'internet:Internet / ISP', 'socket:Wall socket', 'generic:Generic'].map((s) => {
-        const a = s.split(':'); return '<button data-add="' + a[0] + '">+ ' + a[1] + '</button>';
+        const a = s.split(':'); return '<button data-add="' + a[0] + '" title="Create a new ' + a[1].toLowerCase() + ' on this map">+ ' + a[1] + '</button>';
       }).join('') + '<span class="sep"></span>' +
-      '<button data-act="patchTool" class="' + (pc ? 'active' : '') + '">Patch cable tool</button>' +
+      '<button data-act="patchTool" title="' + esc(TIPS.patchTool) + '" class="' + (pc ? 'active' : '') + '">Patch cable tool</button>' +
       (pc ? ' <span class="cable-colour">' + colorPicker('toolPreset', 'toolColor', S.cableColor, '__tool') + '</span>' : '') +
-      '<button data-act="newLink">+ Fixed link</button>' +
-      '<button data-act="addMapItems">Add existing here...</button>';
+      '<button data-act="newLink" title="' + esc(TIPS.newLink) + '">+ Fixed link</button>' +
+      '<button data-act="addMapItems" title="' + esc(TIPS.addMapItems) + '">Add existing here...</button>';
   }
 
   /* ---- left drawer ---- */
@@ -501,7 +523,7 @@
     const preset = M.CABLE_COLORS.find((c) => c[1].toLowerCase() === String(value).toLowerCase());
     const custom = !preset || S.customColorFor === ownerId;
     const o = M.CABLE_COLORS.map((c) => [c[1], c[0]]).concat([['custom', 'Custom...']]);
-    return '<span class="swatch" style="background:' + esc(value) + '"></span> <select data-f="' + presetField + '">' + opts(o, custom ? 'custom' : preset[1]) + '</select>' +
+    return '<span class="swatch" role="button" data-act="customColor" data-owner="' + esc(ownerId) + '" title="Click to choose any colour" style="background:' + esc(value) + '"></span> <select data-f="' + presetField + '">' + opts(o, custom ? 'custom' : preset[1]) + '</select>' +
       (custom ? ' <input type="color" data-f="' + colorField + '" value="' + esc(value) + '" title="Custom colour">' : '');
   }
   function fld(label, html) { return '<div class="field"><label>' + label + '</label><div>' + html + '</div></div>'; }
@@ -510,7 +532,32 @@
     return fld(label, '<input type="text" data-f="' + f + '"' + (t ? ' data-t="' + esc(t) + '"' : '') + ' value="' + esc(val) + '" ' + (extra || '') + '>');
   }
   const lnk = (kind, id, text) => '<a class="lnk" data-act="select" data-kind="' + kind + '" data-id="' + esc(id) + '">' + esc(text) + '</a>';
-  const btn = (act, label, extra, cls) => '<button data-act="' + act + '" ' + (extra || '') + ' class="' + (cls || '') + '">' + esc(label) + '</button>';
+  /* tooltips for action buttons, keyed by data-act (reconnect also by end) */
+  const TIPS = {
+    trace: 'Highlight the complete physical path through this item, across patch panels, fixed links and maps',
+    'reconnect:a': 'Move end A of this patch cable to a different port: click this, then click the new port on the map. The circled port is the end that moves.',
+    'reconnect:b': 'Move end B of this patch cable to a different port: click this, then click the new port on the map. The circled port is the end that moves.',
+    deleteSel: 'Delete the selected item (you will be asked to confirm and shown what else is removed)',
+    deleteCable: 'Remove this patch cable; both ports become free',
+    editWiring: 'Change installed wiring: endpoints, wire mappings, add or delete wires. Changes are reviewed before they are applied.',
+    automap: 'Document a straight-through panel: map every unmapped front port N to rear port N',
+    newLinkFrom: 'Create a fixed link (installed multi-wire cable) from this patch panel to another one',
+    mapPort: 'Document which port on the other side of the panel this one is physically wired to',
+    unmap: 'Remove the documented front-to-rear mapping of this port',
+    applyPortCount: 'Set the number of ports (ports in use cannot be removed)',
+    applyRouterPorts: 'Set the number of WAN and LAN ports (ports in use cannot be removed)',
+    addToMap: 'Show this item on the current map (the same record, not a copy)',
+    removeFromMap: 'Hide this item from the current map only; the equipment and its connections stay in the project',
+    startPatchFrom: 'Start a patch cable at this port: then click the other port on the map',
+    clearTrace: 'Remove the trace highlight and return to the normal map',
+    fitTrace: 'Zoom the map to the parts of the trace that are on this map',
+    patchTool: 'Draw patch cables: click one port, then another. Esc stops.',
+    newLink: 'Create a fixed link between two patch panels',
+    addMapItems: 'Show equipment that exists in the project but is not drawn on this map',
+    help: 'How NetMap works'
+  };
+  const tipFor = (act, extra) => { const m = /data-end="(\w)"/.exec(extra || ''); return (m && TIPS[act + ':' + m[1]]) || TIPS[act] || ''; };
+  const btn = (act, label, extra, cls) => '<button data-act="' + act + '" ' + (extra || '') + ' class="' + (cls || '') + '"' + (tipFor(act, extra) ? ' title="' + esc(tipFor(act, extra)) + '"' : '') + '>' + esc(label) + '</button>';
 
   function renderRight() {
     const pane = $('detailsPane');
@@ -532,7 +579,12 @@
       if (g.id === selfId || (forKind === 'group' && M.descendants(S.p, selfId).some((d) => d.id === g.id))) return;
       out.push([g.id, 'Group: ' + g.name]);
     });
-    if (forKind === 'object' && forType !== 'rack') S.p.objects.filter((o) => o.type === 'rack').forEach((r) => out.push([r.id, 'Rack: ' + r.name]));
+    if (forKind === 'object' && forType !== 'rack') S.p.objects.filter((o) => o.type === 'rack').forEach((r) => {
+      // label racks with their top-level container (e.g. "NAD: Rack 1"); standalone racks keep "Rack: name"
+      let top = M.parentOf(S.p, 'object', r.id), guard = 0;
+      while (top && guard++ < 20) { const up = M.parentOf(S.p, top.kind, top.id); if (!up) break; top = up; }
+      out.push([r.id, (top ? top.item.name : 'Rack') + ': ' + r.name]);
+    });
     return out;
   }
   function mapsLine(kind, id) {
@@ -579,6 +631,11 @@
       const per = o.type === 'patchpanel' ? o.ports.length / 2 : o.ports.length;
       const used = o.ports.filter((p) => idx.portUse[p.id]).length;
       h += '<h3>Ports (' + per + (o.type === 'patchpanel' ? ' front + ' + per + ' rear' : '') + ', ' + used + ' cabled)</h3>';
+    }
+    if (o.type === 'switch' && o.ports.length) {
+      const per = o.ports.length, cur = o.sectionSize > 0 && per % o.sectionSize === 0 ? o.sectionSize : 0;
+      h += isEdit() ? fld('Sections', '<select data-f="sectionSize">' + opts([[0, 'None (plain rows)']].concat(M.validSectionSizes(per).map((d) => [d, d + ' per section (' + per / d + ' x ' + d + ')'])), cur) + '</select><div class="sub">Equal sections only.</div>') :
+        fld('Sections', cur ? per / cur + ' x ' + cur : 'none');
     }
     if (o.type === 'patchpanel') {
       const per = o.ports.length / 2, cur = M.effectiveSectionSize(o, per);
@@ -798,6 +855,7 @@
     if (type === 'generic') fields.push({ k: 'portCount', label: 'Ports', type: 'number', v: 0, min: 0, max: 96 });
     if (type === 'rack') fields.push({ k: 'rackHeight', label: 'Height (U)', type: 'number', v: 42, min: 1, max: 60 });
     if (type === 'patchpanel') fields.push({ k: 'sectionSize', label: 'Ports per section', type: 'number', v: '', min: 1, max: 96, hint: 'Leave empty for automatic (24 -> 3 x 8, 12 -> 2 x 6, 16 -> 2 x 8). Must divide the port count evenly.' });
+    if (type === 'switch') fields.push({ k: 'sectionSize', label: 'Ports per section', type: 'number', v: '', min: 1, max: 96, hint: 'Optional, e.g. 8 for 3 x 8 on a 24-port switch. Leave empty for plain rows. Must divide the port count evenly.' });
     if (type === 'patchpanel') fields.push({ k: 'straight', label: 'Front N <-> rear N', type: 'check', v: true, hint: 'Documents a straight-through internal mapping. Untick if this panel is not wired that way.' });
     fields.push({ k: 'container', label: 'Inside', type: 'select', opts: containerOptions(isGroup ? 'group' : 'object', type, null), v: defaultContainer(type) });
     const v = await formDlg('New ' + (isGroup ? 'group' : M.TYPE_LABELS[type]), fields, 'Create');
@@ -806,7 +864,7 @@
     const r = commit('Create ' + type, (p) => {
       if (isGroup) return B.addGroupPlaced(p, mid, { name: v.name || undefined, parentGroupId: v.container || null }, pos.x, pos.y).id;
       const portCount = v.portCount != null ? parseInt(v.portCount, 10) : undefined;
-      return B.addObjectPlaced(p, mid, { type: type, name: v.name || undefined, portCount: portCount, rackHeight: v.rackHeight, straight: v.straight, wanPorts: v.wanPorts, lanPorts: v.lanPorts, sectionSize: type === 'patchpanel' && v.sectionSize > 0 ? v.sectionSize : undefined, ipAddress: v.ipAddress, containerId: v.container || null }, pos.x, pos.y).id;
+      return B.addObjectPlaced(p, mid, { type: type, name: v.name || undefined, portCount: portCount, rackHeight: v.rackHeight, straight: v.straight, wanPorts: v.wanPorts, lanPorts: v.lanPorts, sectionSize: (type === 'patchpanel' || type === 'switch') && v.sectionSize > 0 ? v.sectionSize : undefined, ipAddress: v.ipAddress, containerId: v.container || null }, pos.x, pos.y).id;
     });
     if (r && r !== true) { S.sel = { kind: isGroup ? 'group' : 'object', id: r }; renderAll(); openRight(); }
   }
@@ -989,7 +1047,7 @@
       if (f === 'plabel' || f === 'ptype' || f === 'pspeed' || f === 'pmedia' || f === 'pip') {
         const pt = idx.ports[t || sel.id]; if (!pt) return;
         if (f === 'pip' && !M.isValidIp(val)) toast('That does not look like a valid IP address (kept as typed)', true);
-        if (f === 'plabel') pt.label = val; else pt[{ ptype: 'portType', pspeed: 'speed', pmedia: 'media', pip: 'ip' }[f]] = val.trim();
+        if (f === 'plabel') { pt.label = val; B.fitMinimum(p, idx.portObj[pt.id].id); } else pt[{ ptype: 'portType', pspeed: 'speed', pmedia: 'media', pip: 'ip' }[f]] = val.trim();
         return;
       }
       if (f === 'wstatus') { M.updateWireStatus(p, t, val); return; }
@@ -1059,6 +1117,8 @@
     toast('Imported ' + res.project.name);
   }
   function loadProject(p) {
+    const fixed = B.normalizeSizes(p);
+    if (fixed) setTimeout(() => toast('Enlarged ' + fixed + ' item(s) that were too small to read', false), 100);
     S.p = p; S.mapId = p.maps[0].id; S.sel = null; S.trace = null; S.tool = null; S.undo = []; S.redo = []; S.issues = []; S.showIssues = false;
     saveNow(); renderAll();
     if (p.placements.some((q) => q.mapId === S.mapId)) fitMap();
@@ -1161,6 +1221,13 @@
         case 'removeFromMap': commit('Remove from map', (p) => { p.placements = p.placements.filter((q) => !(q.mapId === curMap().id && q.refId === d.id)); }); break;
         case 'deleteSel': deleteSelection(); break;
         case 'deleteCable': { S.sel = { kind: 'cable', id: d.id }; deleteSelection(); break; }
+        case 'customColor': {
+          S.customColorFor = d.owner;
+          if (d.owner === '__tool') renderToolbar(); else renderRight();
+          const pick = document.querySelector(d.owner === '__tool' ? '#toolbar input[type="color"]' : '#detailsPane input[type="color"]');
+          if (pick) { try { pick.showPicker(); } catch (_) { pick.click(); } }
+          break;
+        }
         case 'applyPortCount': { const n = parseInt($('pcInput').value, 10), id = S.sel.id; commit('Set port count', (p) => { M.setPortCount(p, id, n); B.refitObject(p, id); }); break; }
         case 'applyRouterPorts': { const id = S.sel.id, w = parseInt($('wanInput').value, 10), l = parseInt($('lanInput').value, 10); commit('Set router ports', (p) => M.setRouterPorts(p, id, w, l)); break; }
         case 'presetPorts': { const id = S.sel.id, n = parseInt(d.n, 10); commit('Set port count', (p) => { M.setPortCount(p, id, n); B.refitObject(p, id); }); break; }
@@ -1181,6 +1248,18 @@
         default: break;
       }
     });
+    // hovering "Reconnect end A/B" circles the port that would move
+    document.addEventListener('mouseover', (e) => {
+      const b = e.target.closest && e.target.closest('button[data-act="reconnect"]');
+      if (!b || S.sel?.kind !== 'cable') return;
+      const c = S.p.patchCables.find((x) => x.id === S.sel.id);
+      const pid = c && (b.dataset.end === 'a' ? c.aPortId : c.bPortId);
+      if (pid && S.ring !== pid) { S.ring = pid; renderCanvas(); }
+    });
+    document.addEventListener('mouseout', (e) => {
+      const b = e.target.closest && e.target.closest('button[data-act="reconnect"]');
+      if (b && S.ring) { S.ring = null; renderCanvas(); }
+    });
     document.addEventListener('keydown', (e) => {
       if ($('dlg').open) return;
       const typing = /INPUT|SELECT|TEXTAREA/.test((e.target.tagName || ''));
@@ -1197,6 +1276,7 @@
   function init() {
     try { S.lastExport = localStorage.getItem(KEY_EXPORT); } catch (_) { S.lastExport = null; }
     S.p = loadSaved() || M.createProject('Untitled project');
+    if (B.normalizeSizes(S.p)) saveNow();
     S.mapId = S.p.maps[0].id;
     loadCollapsed();
     bindUi(); bindCanvas();
