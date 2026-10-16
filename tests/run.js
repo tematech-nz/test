@@ -1292,6 +1292,18 @@ test('copy placed right under an item in a rack sits there, not at the next item
   assert.strictEqual(three.q.y, y3, 'the item further down did not move');
   assert.deepStrictEqual(overlapPairs(p), []);
 });
+test('graph: a route through a wall socket is one path, not a forward and a reversed copy', () => {
+  const p = M.createProject('x');
+  const sw = M.addObject(p, { type: 'switch', name: 'S4', portCount: 8 });
+  const pp = M.addObject(p, { type: 'patchpanel', name: 'PP', portCount: 8, straight: true });
+  const ws = M.addObject(p, { type: 'socket', name: 'Desk', portCount: 8, straight: true });
+  const side = (o, s, n) => o.ports.find(x => x.side === s && x.label === n).id;
+  M.addFixedLink(p, { aObjectId: pp.id, bObjectId: ws.id, wireCount: 1, pairs: [[side(pp, 'rear', '2'), side(ws, 'rear', '2')]] });
+  M.addPatchCable(p, { aPortId: sw.ports[1].id, bPortId: side(pp, 'front', '2') });
+  const g = NM.topology.buildGraph(p, {});
+  assert.strictEqual(g.links.length, 1);
+  assert.strictEqual(g.links[0].paths.length, 1, 'one physical route');
+});
 test('folded sections: stacked items follow when the one above folds or unfolds; dropping under a folded item is not pushed away', () => {
   const p = M.createProject('f'), mid = p.maps[0].id, L = NM.layout;
   const a = B.addObjectPlaced(p, mid, { type: 'patchpanel', name: 'A', portCount: 16, straight: true }, 100, 100);

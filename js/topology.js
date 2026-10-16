@@ -60,7 +60,9 @@
         var far = idx.portObj[last.id];
         if (!far || far.id === nid) return;
         if (!nodes[far.id]) { if (PASSIVE[far.type]) dangling.push({ portId: pt.id, objectId: nid, endsAt: far.id }); return; }
-        var key = [pt.id, last.id].sort().join('|');
+        // one physical path is found from both ends (and, through a wall socket, even from its front jack): key it by the cables and wires it uses
+        var segs = tr.path.filter(function (s) { return s.type === 'patch' || s.type === 'wire'; }).map(function (s) { return s.id; }).sort();
+        var key = segs.length ? segs.join('|') : [pt.id, last.id].sort().join('|');
         if (seen[key]) return;
         seen[key] = true;
         var via = [];
