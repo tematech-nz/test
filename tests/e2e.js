@@ -823,6 +823,34 @@ const ok = (m) => console.log('  ok   ' + m);
     await page.evaluate(() => { NetMap.app.S.tool = null; });
   });
 
+
+  await step('addresses for generic devices and managed switches from the UI', async () => {
+    await page.click('#toolbar button[data-add="generic"]');
+    await page.selectOption('#dlg select[name="deviceKind"]', 'pc');
+    await page.fill('#dlg input[name="portCount"]', '2');
+    await page.fill('#dlg input[name="ipAddress"]', '999.1.1.1');
+    await page.click('#dlg button[data-btn="ok"]');
+    assert.ok(/IPv4/.test(await page.innerText('#dlg .form-err')), 'bad address refused');
+    await page.fill('#dlg input[name="ipAddress"]', '');
+    await page.click('#dlg button[data-btn="ok"]');
+    await page.waitForTimeout(100);
+    const inputs = page.locator('#detailsPane input[data-f="pip"]');
+    assert.strictEqual(await inputs.count(), 2, 'one address field per port');
+    await inputs.nth(0).fill('192.168.3.240'); await page.keyboard.press('Tab');
+    await page.locator('#detailsPane input[data-f="pip"]').nth(1).fill('192.168.4.5'); await page.keyboard.press('Tab');
+    const ips = await page.evaluate(() => { const o = NetMap.app.S.p.objects.filter(x => x.deviceKind === 'pc').pop(); return o.ports.map(p => p.ip); });
+    assert.deepStrictEqual(ips, ['192.168.3.240', '192.168.4.5']);
+    assert.ok((await page.innerHTML('#vp')).indexOf('PC') > 0);
+    // managed switch
+    await page.evaluate((id) => NetMap.app.api.select({ kind: 'object', id }), await page.evaluate(() => NetMap.app.S.p.objects.find(o => o.name === 'Switch A').id));
+    assert.ok(/Management IP/.test(await page.innerText('#detailsPane')));
+    await page.fill('#detailsPane input[data-f="ipAddress"]', '192.168.1.2');
+    await page.keyboard.press('Tab');
+    assert.strictEqual(await page.evaluate(() => NetMap.app.S.p.objects.find(o => o.name === 'Switch A').ipAddress), '192.168.1.2');
+    assert.ok((await page.innerHTML('#vp')).indexOf('192.168.1.2') > 0, 'drawn in the switch header');
+    for (let i = 0; i < 5; i++) await page.click('#btnUndo');
+  });
+
   await step('autosave survives a refresh', async () => {
     await page.click('#btnMode'); // back to view mode flushes the save
     const name = await page.evaluate(() => NetMap.app.S.p.name);

@@ -103,8 +103,8 @@
       if (!it.isGroup && ref.type === 'switch' && ref.portIsolation) {
         x.push('<text x="' + num(pl.x + pl.w - 5) + '" y="' + num(pl.y + 13) + '" font-size="8" text-anchor="end" fill="#b71c1c" font-family="sans-serif" pointer-events="none">PORT ISOLATION</text>');
       }
-      if (!it.isGroup && (ref.type === 'router' || ref.type === 'internet') && ref.ipAddress) {
-        x.push('<text x="' + num(pl.x + pl.w - 5) + '" y="' + num(pl.y + 14) + '" font-size="9" text-anchor="end" fill="#0d47a1" font-family="sans-serif" pointer-events="none">' + esc(ref.ipAddress) + '</text>');
+      if (!it.isGroup && M.hasDeviceIp(ref) && ref.ipAddress) {
+        x.push('<text x="' + num(pl.x + pl.w - (ref.portIsolation ? 82 : 5)) + '" y="' + num(pl.y + 14) + '" font-size="9" text-anchor="end" fill="#0d47a1" font-family="sans-serif" pointer-events="none">' + esc(ref.ipAddress) + '</text>');
       }
       if (it.lay) {
         if (it.lay.sections.length) {

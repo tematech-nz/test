@@ -1063,5 +1063,70 @@ test('segments follow switches, patch panels and fixed links; router-to-router c
   assert.ok(NM.topology.segments(p).some(s => s.ports.length === 2));
 });
 
+console.log('Devices with addresses and managed switches');
+test('multi-homed devices keep their networks apart; devices and managed switches take part in subnet checks', () => {
+  const { p, sw, mk, L, cab } = segNet();
+  const sw2 = M.addObject(p, { type: 'switch', name: 'S2', portCount: 8 });
+  const r1 = mk('R1', '192.168.3.1'), r2 = mk('R2', '192.168.4.1');
+  cab(L(r1, 'L1'), sw.ports[0].id); cab(L(r2, 'L1'), sw2.ports[0].id);
+  const pc = M.addObject(p, { type: 'generic', name: 'PC2NIC', deviceKind: 'pc', portCount: 2 });
+  pc.ports[0].ip = '192.168.3.240'; pc.ports[1].ip = '192.168.4.5';
+  cab(pc.ports[0].id, sw.ports[1].id); cab(pc.ports[1].id, sw2.ports[1].id);
+  assert.deepStrictEqual(codes(p), [], 'a PC with a NIC in each network is fine');
+  const g = NM.topology.buildGraph(p);
+  const TP = NM.topology, tree = TP.reachTree(g, r1.id);
+  assert.strictEqual(tree.depth[pc.id], 2, 'R1 -> S -> PC');
+  assert.strictEqual(tree.depth[r2.id], undefined, 'the PC does not route between its networks');
+  assert.strictEqual(TP.allPaths(g, r1.id, r2.id).length, 0);
+  assert.deepStrictEqual(g.nodes[pc.id].nets.sort(), ['192.168.3.0/24', '192.168.4.0/24']);
+  assert.ok(/192\.168\.3\.240, 192\.168\.4\.5/.test(g.nodes[pc.id].ip));
+  // a device on the wrong subnet for its switch is flagged
+  pc.ports[0].ip = '192.168.9.7';
+  const bad = NM.topology.networkIssues(p);
+  assert.deepStrictEqual(bad.map(i => i.code), ['SUBNET_MISMATCH']);
+  assert.ok(/PC2NIC \/ 1 192\.168\.9\.7/.test(bad[0].message));
+  pc.ports[0].ip = '192.168.3.1'; // same address as the router
+  assert.deepStrictEqual(codes(p), ['DUPLICATE_IP']);
+  pc.ports[0].ip = '';
+  assert.deepStrictEqual(codes(p), [], 'an unaddressed device (DHCP) is not an error');
+});
+test('single-port generic devices use the device address; managed switches have a management address', () => {
+  const { p, sw, mk, L, cab } = segNet();
+  const r1 = mk('R1', '192.168.5.1');
+  cab(L(r1, 'L1'), sw.ports[0].id);
+  const nvr = M.addObject(p, { type: 'generic', name: 'NVR', portCount: 1, ipAddress: '192.168.5.20' });
+  cab(nvr.ports[0].id, sw.ports[1].id);
+  assert.strictEqual(NM.topology.effectiveIp(nvr, nvr.ports[0]), '192.168.5.20');
+  assert.deepStrictEqual(codes(p), []);
+  M.setDeviceIp(p, sw.id, '192.168.5.2');
+  assert.strictEqual(sw.ipAddress, '192.168.5.2');
+  assert.deepStrictEqual(codes(p), [], 'management address in the same subnet');
+  M.setDeviceIp(p, sw.id, '10.10.10.2');
+  const iss = NM.topology.networkIssues(p);
+  assert.deepStrictEqual(iss.map(i => i.code), ['SUBNET_MISMATCH']);
+  assert.ok(/S \/ management 10\.10\.10\.2/.test(iss[0].message));
+  assert.ok(iss[0].objectIds.indexOf(sw.id) >= 0);
+  // management addresses count across chained switches, and duplicates are caught
+  const s2 = M.addObject(p, { type: 'switch', name: 'S2', portCount: 4, ipAddress: '192.168.5.20' });
+  cab(sw.ports[5].id, s2.ports[0].id);
+  M.setDeviceIp(p, sw.id, '192.168.5.2');
+  assert.deepStrictEqual(codes(p), ['DUPLICATE_IP'], 'S2 management address equals the NVR address');
+  assert.throws(() => M.setDeviceIp(p, sw.id, '192.168.5.2/24'), /IPv4/);
+  assert.throws(() => M.setPortIp(p, sw.ports[0].id, '1.2.3.4'), /no IP/, 'switch ports have no per-port address');
+  assert.ok(M.search(p, '192.168.5.20').some(r => r.id === nvr.id));
+  const html = NM.graphview.render(p, { from: r1.id, to: '', via: false });
+  assert.ok(/192\.168\.5\.2/.test(html));
+  assert.ok(R.svgDocument(p, p.maps[0].id).length > 0);
+});
+test('device addresses are drawn and checked for validity', () => {
+  const p = M.createProject('i'), mid = p.maps[0].id;
+  const sw = B.addObjectPlaced(p, mid, { type: 'switch', name: 'Managed', portCount: 8, ipAddress: '192.168.1.2', portIsolation: true }, 0, 0);
+  const svg = R.svgDocument(p, mid);
+  assert.ok(svg.indexOf('192.168.1.2') > 0 && svg.indexOf('PORT ISOLATION') > 0);
+  assert.throws(() => M.addObject(p, { type: 'generic', ipAddress: '1.2.3' }), /IPv4/);
+  sw.ipAddress = '300.1.1.1';
+  assert.ok(M.validateProject(p).some(i => i.code === 'BAD_IP'));
+});
+
 console.log('\n' + passed + ' passed, ' + failed + ' failed');
 process.exit(failed ? 1 : 0);

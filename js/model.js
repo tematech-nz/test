@@ -362,7 +362,7 @@
       location: o.location || '', description: o.description || '',
       containerId: o.containerId || null, ports: o.type === 'router' ? routerPorts(wan, lan) : makePorts(o.type, n)
     };
-    if (o.type === 'router' || o.type === 'internet') {
+    if (o.type === 'router' || o.type === 'internet' || (hasDeviceIp(o) && o.ipAddress)) {
       if (!isValidIp(o.ipAddress)) throw new Error(IP_ERROR);
       obj.ipAddress = String(o.ipAddress || '').trim();
     }
@@ -688,6 +688,9 @@
   }
 
   /* plain IPv4 only: four numbers 0-255 (no /prefix, no IPv6 for now); empty is fine */
+  /* device-level address: routers (LAN), switches (management / web interface), generic devices, Internet; per-port addresses: routers, generic devices, Internet */
+  function hasDeviceIp(o) { return !!o && (o.type === 'router' || o.type === 'internet' || o.type === 'switch' || o.type === 'generic'); }
+  function hasPortIp(o) { return !!o && (o.type === 'router' || o.type === 'internet' || o.type === 'generic'); }
   var IP_ERROR = 'Not a valid IPv4 address: use four numbers 0-255 such as 192.168.1.1 (no /prefix)';
   function isValidIp(s) {
     s = String(s == null ? '' : s).trim();
@@ -697,13 +700,13 @@
   }
   function setDeviceIp(p, objectId, ip) {
     var o = buildIndex(p).objects[objectId];
-    if (!o || (o.type !== 'router' && o.type !== 'internet')) throw new Error('IP addresses apply to routers and the Internet object');
+    if (!o || !hasDeviceIp(o)) throw new Error('This equipment has no IP address (routers, switches, generic devices and the Internet object do)');
     if (!isValidIp(ip)) throw new Error(IP_ERROR);
     o.ipAddress = String(ip || '').trim();
   }
   function setPortIp(p, portId, ip) {
     var idx = buildIndex(p), o = idx.portObj[portId];
-    if (!o || (o.type !== 'router' && o.type !== 'internet')) throw new Error('IP addresses apply to router and Internet ports');
+    if (!o || !hasPortIp(o)) throw new Error('Ports of this equipment have no IP address (routers, generic devices and the Internet object do)');
     if (!isValidIp(ip)) throw new Error(IP_ERROR);
     idx.ports[portId].ip = String(ip || '').trim();
   }
@@ -891,7 +894,7 @@
     findContainer: findContainer, groupOf: groupOf, parentOf: parentOf, containerChildren: containerChildren, descendants: descendants,
     addPlacement: addPlacement, placementOf: placementOf, placementGroup: placementGroup, movePlacement: movePlacement,
     growToFit: growToFit, mapsFor: mapsFor, addGroup: addGroup, addObject: addObject, setContainer: setContainer,
-    setPortCount: setPortCount, setDeviceIp: setDeviceIp, setPortIp: setPortIp, IP_ERROR: IP_ERROR, setDeviceKind: setDeviceKind, isTermination: isTermination, DEVICE_KINDS: DEVICE_KINDS, deviceKindInfo: deviceKindInfo, typeLabel: typeLabel, accessPorts: accessPorts, validSectionRows: validSectionRows, setUplinkPorts: setUplinkPorts, setSwitchLayout: setSwitchLayout, setFullWidth: setFullWidth, setSectionSize: setSectionSize, validSectionSizes: validSectionSizes, defaultSectionSize: defaultSectionSize, effectiveSectionSize: effectiveSectionSize, setRouterPorts: setRouterPorts, isValidIp: isValidIp, canConnectPatch: canConnectPatch, addPatchCable: addPatchCable,
+    setPortCount: setPortCount, hasDeviceIp: hasDeviceIp, hasPortIp: hasPortIp, setDeviceIp: setDeviceIp, setPortIp: setPortIp, IP_ERROR: IP_ERROR, setDeviceKind: setDeviceKind, isTermination: isTermination, DEVICE_KINDS: DEVICE_KINDS, deviceKindInfo: deviceKindInfo, typeLabel: typeLabel, accessPorts: accessPorts, validSectionRows: validSectionRows, setUplinkPorts: setUplinkPorts, setSwitchLayout: setSwitchLayout, setFullWidth: setFullWidth, setSectionSize: setSectionSize, validSectionSizes: validSectionSizes, defaultSectionSize: defaultSectionSize, effectiveSectionSize: effectiveSectionSize, setRouterPorts: setRouterPorts, isValidIp: isValidIp, canConnectPatch: canConnectPatch, addPatchCable: addPatchCable,
     updatePatchCable: updatePatchCable, deletePatchCable: deletePatchCable, addInternalMapping: addInternalMapping,
     removeInternalMapping: removeInternalMapping, autoMapPanel: autoMapPanel, rearPorts: rearPorts,
     sequentialPorts: sequentialPorts, addFixedLink: addFixedLink, updateLinkMeta: updateLinkMeta,

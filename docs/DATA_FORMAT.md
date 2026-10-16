@@ -37,6 +37,8 @@ cannot break a connection. Files use LF line endings and are written with 2-spac
 - Any object inside a rack or group may carry `fullWidth: true` (stretch to the container's inner width).
 - Wall sockets, like patch panels, have `front` and `rear` ports with internal mappings (schema 2; files from schema 1 get rear
   ports and straight-through mappings added when imported). Fixed links join patch panels and wall sockets.
+- Generic devices and switches may carry `ipAddress` (devices: used for a single-port device, per-port `ip` otherwise; switches: the
+  management / web interface address). A segment is a set of devices joined by switches; routers and generic devices never bridge.
 - Router ports may carry `networkColor` (hex), the default colour for patch cables extending from them.
 - Any port may carry an optional `description` (free text label shown on hover and in descriptions); `label` is the number
   drawn on the port's face.

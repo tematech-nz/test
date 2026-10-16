@@ -42,6 +42,12 @@ Try it: File -> Load demo project (two rooms, a fixed link between racks, a wall
   192.168.5.1 next to 192.168.3.1), a router **LAN port has no address** while sharing a segment with a configured one, or the
   **same address** is used twice. Several routers sharing a subnet with different addresses is fine; WAN ports without an address
   (DHCP) and the Internet side are ignored. Connecting something that would create such a warning asks "Do you want to continue?".
+- **Addresses on any device**: generic devices (a one-port NVR, a PC with two NICs...) take an IP address too: a device address
+  for a single-port device, or one address per port (192.168.3.240 on port 1, 192.168.4.5 on port 2). A device never joins its
+  networks together - the Graph view treats it as an endpoint, so no path leads from one NIC's network to the other. **Managed
+  switches** have a **Management IP** (the web interface address) which belongs to the switch's own network segment, not to any
+  port. Devices and switch management addresses take part in the subnet checks (different subnet, duplicate address); devices
+  without an address (DHCP) are ignored. VLANs are not modelled, so a deliberate VLAN split on one switch will show as a warning.
 - **Cable colours**: pick white, grey, green, yellow, blue, orange, red or black from the list, or `Custom...` for an RGB
   picker. The patch cable tool has its own colour list for new cables. Cables are drawn with a thin dark outline so white and
   yellow stay visible.

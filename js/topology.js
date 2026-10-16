@@ -43,7 +43,7 @@
     p.objects.forEach(function (o) {
       if (PASSIVE[o.type] || pluggedSocket(o)) return;
       nodes[o.id] = {
-        id: o.id, name: o.name, type: o.type, label: M.typeLabel(o), ip: o.ipAddress || '', nets: nodeNets(o),
+        id: o.id, name: o.name, type: o.type, label: M.typeLabel(o), ip: o.ipAddress || o.ports.map(function (pt) { return pt.ip; }).filter(Boolean).join(', '), nets: nodeNets(o),
         transit: !TERMINAL[o.type] || (o.type === 'internet' && !!opts.viaInternet),
         isolated: o.type === 'switch' && !!o.portIsolation
       };
@@ -230,44 +230,65 @@
    * (different host addresses); otherwise we warn: different subnets joined, a LAN port without an address next to a
    * configured one, or the same address twice. WAN ports without an address are ignored (DHCP).
    */
+  /*
+   * Address a port answers to. Routers: the port's own, else (LAN ports) the router address. Generic devices: the port's own, else
+   * the device address when it has a single port. Switches have a management address only (see below), no per-port ones.
+   */
   function effectiveIp(o, pt) {
-    var ip = pt.ip || (pt.role === 'lan' ? o.ipAddress : '') || '';
+    var ip = pt.ip || '';
+    if (!ip && o.type === 'router' && pt.role === 'lan') ip = o.ipAddress || '';
+    if (!ip && o.type === 'generic' && o.ports.length === 1) ip = o.ipAddress || '';
     return String(ip).trim();
   }
-  function hostOf(ip) { return String(ip).split('/')[0].toLowerCase(); }
+  function hostOf(ip) { return String(ip).toLowerCase(); }
+
+  /*
+   * Layer-2 domains. Switches bridge: switches joined by cables, panels and fixed links form one domain. Routers and
+   * generic devices do NOT bridge: a PC with two NICs sits in two domains without joining them. A cable between two
+   * non-switch devices is its own two-member segment. Members are the addressed ports of routers and generic devices plus the
+   * management address of each switch (web interface).
+   */
   function segments(p, graph) {
     graph = graph || buildGraph(p);
     var idx = M.buildIndex(p), parent = {};
     function find(x) { while (parent[x] !== undefined && parent[x] !== x) x = parent[x]; return x; }
-    function union(a, b) { var ra = find(a), rb = find(b); if (parent[ra] === undefined) parent[ra] = ra; if (parent[rb] === undefined) parent[rb] = rb; if (ra !== rb) parent[ra] = rb; }
-    graph.order.forEach(function (id) { if (graph.nodes[id].type !== 'router') { parent[id] = id; } });
-    graph.links.forEach(function (l) {
-      if (graph.nodes[l.a].type !== 'router' && graph.nodes[l.b].type !== 'router') union(l.a, l.b);
-    });
+    function union(a, b) { var ra = find(a), rb = find(b); if (ra !== rb) parent[ra] = rb; }
+    graph.order.forEach(function (id) { if (graph.nodes[id].type === 'switch') parent[id] = id; });
+    graph.links.forEach(function (l) { if (graph.nodes[l.a].type === 'switch' && graph.nodes[l.b].type === 'switch') union(l.a, l.b); });
     var segs = {};
-    function seg(key) { return segs[key] = segs[key] || { key: key, ports: [], nodes: {}, hasInternet: false }; }
+    function seg(key) { return segs[key] = segs[key] || { key: key, ports: [], hasInternet: false }; }
     function addPort(s, portId) {
       var pt = idx.ports[portId], o = idx.portObj[portId];
-      if (!pt || o.type !== 'router' || s.ports.some(function (x) { return x.portId === portId; })) return;
+      if (!pt || !o) return;
+      if (o.type === 'internet') { s.hasInternet = true; return; }
+      if (o.type !== 'router' && o.type !== 'generic') return;
+      if (s.ports.some(function (x) { return x.portId === portId; })) return;
       var ip = effectiveIp(o, pt);
-      s.ports.push({ portId: portId, objId: o.id, name: o.name, label: pt.label, role: pt.role || 'lan', ip: ip, subnet: NM.topology.subnetOf(ip) });
+      s.ports.push({ portId: portId, objId: o.id, name: o.name, label: pt.label, role: o.type === 'router' ? (pt.role || 'lan') : 'device', ip: ip, subnet: NM.topology.subnetOf(ip) });
     }
     graph.links.forEach(function (l) {
-      var A = graph.nodes[l.a], B = graph.nodes[l.b];
-      if (A.type === 'router' && B.type === 'router') {
-        l.paths.forEach(function (e) { var s = seg('rr:' + [e.aPortId, e.bPortId].sort().join('|')); addPort(s, e.aPortId); addPort(s, e.bPortId); });
-      } else if (A.type === 'router' || B.type === 'router') {
-        var rn = A.type === 'router' ? l.a : l.b, other = rn === l.a ? l.b : l.a, s = seg('c:' + find(other));
-        s.nodes[other] = true; if (graph.nodes[other].type === 'internet') s.hasInternet = true;
-        l.paths.forEach(function (e) { addPort(s, e.a === rn ? e.aPortId : e.bPortId); });
+      var A = graph.nodes[l.a], B = graph.nodes[l.b], aSw = A.type === 'switch', bSw = B.type === 'switch';
+      if (aSw && bSw) return;
+      if (!aSw && !bSw) {
+        l.paths.forEach(function (e) { var s = seg('p:' + [e.aPortId, e.bPortId].sort().join('|')); addPort(s, e.aPortId); addPort(s, e.bPortId); });
       } else {
-        var s2 = segs['c:' + find(l.a)];
-        if (s2) { s2.nodes[l.a] = true; s2.nodes[l.b] = true; }
+        var swId = aSw ? l.a : l.b, other = aSw ? l.b : l.a, s2 = seg('c:' + find(swId));
+        l.paths.forEach(function (e) { addPort(s2, e.a === other ? e.aPortId : e.bPortId); });
       }
+    });
+    graph.order.forEach(function (id) { // managed switches: the web/management address belongs to the switch's domain
+      var o = idx.objects[id];
+      if (o.type !== 'switch' || !o.ipAddress) return;
+      var s = seg('c:' + find(id)), ip = String(o.ipAddress).trim();
+      s.ports.push({ portId: null, objId: o.id, name: o.name, label: 'management', role: 'management', ip: ip, subnet: NM.topology.subnetOf(ip) });
     });
     return Object.keys(segs).map(function (k) { return segs[k]; });
   }
 
+  /*
+   * Warnings per segment with at least two members: different subnets, the same address twice, and a router LAN port without
+   * any address next to configured ones. Unaddressed devices (DHCP) and unaddressed WAN ports are ignored.
+   */
   function networkIssues(p, graph) {
     var out = [];
     segments(p, graph).forEach(function (s) {
@@ -297,7 +318,7 @@
       configured.forEach(function (x) { (byHost[hostOf(x.ip)] = byHost[hostOf(x.ip)] || []).push(x); });
       Object.keys(byHost).forEach(function (h) {
         if (byHost[h].length > 1) out.push({
-          severity: 'warning', code: 'DUPLICATE_IP', target: { kind: 'port', id: byHost[h][0].portId }, objectIds: byHost[h].map(function (x) { return x.objId; }),
+          severity: 'warning', code: 'DUPLICATE_IP', target: byHost[h][0].portId ? { kind: 'port', id: byHost[h][0].portId } : { kind: 'object', id: byHost[h][0].objId }, objectIds: byHost[h].map(function (x) { return x.objId; }),
           message: 'Address ' + h + ' is configured twice on one network segment: ' + byHost[h].map(function (x) { return x.name + ' / ' + x.label; }).join(' and ')
         });
       });

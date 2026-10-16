@@ -631,7 +631,7 @@
     $('tabTrace').textContent = S.trace ? 'Trace *' : 'Trace';
   }
 
-  const hasIp = (o) => o.type === 'router' || o.type === 'internet';
+  const hasIp = (o) => M.hasPortIp(o); // per-port addresses (router, generic device, Internet); switches have one management address
   function containerOptions(forKind, forType, selfId) {
     const out = [['', '(none - standalone)']];
     S.p.groups.forEach((g) => {
@@ -701,7 +701,11 @@
     let h = '<h3>' + esc(M.typeLabel(o)) + '</h3>' + inp('Name', 'name', o.name) + inp('Location', 'location', o.location) + inp('Description', 'description', o.description);
     if (o.type === 'generic') h += isEdit() ? fld('Device type', '<select data-f="deviceKind">' + opts(M.DEVICE_KINDS.map((k) => [k[0], k[1]]), o.deviceKind || 'other') + '</select>') : fld('Device type', esc(M.typeLabel(o)));
     if (o.type === 'rack') h += inp('Height (U)', 'rackHeight', o.rackHeight || '');
-    if (hasIp(o)) h += inp(o.type === 'internet' ? 'Public IP' : 'IP address', 'ipAddress', o.ipAddress || '');
+    if (M.hasDeviceIp(o)) {
+      h += inp(o.type === 'internet' ? 'Public IP' : (o.type === 'switch' ? 'Management IP' : 'IP address'), 'ipAddress', o.ipAddress || '');
+      if (isEdit() && o.type === 'switch') h += '<div class="sub">Address of the switch\'s web interface (managed switch). It joins the network of the switch, not its ports.</div>';
+      if (isEdit() && o.type === 'generic') h += '<div class="sub">Used for its port when it has just one; with several ports (e.g. a PC with two NICs) give each port its own IP below - a device never joins its networks together.</div>';
+    }
     const par = o.containerId ? M.findContainer(S.p, o.containerId) : null;
     h += isEdit() ? fld('Inside', '<select data-f="container">' + opts(containerOptions('object', o.type, id), o.containerId || '') + '</select>') : fld('Inside', par ? lnk(par.kind, par.id, par.item.name) : '-');
     h += fld('On maps', mapsLine('object', id)) + fld('ID', '<span class="sub">' + esc(o.id) + '</span>');
@@ -940,6 +944,8 @@
       fields.push({ k: 'portCount', label: 'ISP ports', type: 'number', v: 1, min: 1, max: 12 });
       fields.push({ k: 'ipAddress', label: 'Public IP / circuit', v: '' });
     }
+    if (type === 'switch') fields.push({ k: 'ipAddress', label: 'Management IP', v: '', hint: 'Optional: the web interface address of a managed switch (IPv4, e.g. 192.168.1.2).' });
+    if (type === 'generic') fields.push({ k: 'ipAddress', label: 'IP address', v: '', hint: 'Optional IPv4 address for a single-port device; give multi-port devices per-port addresses afterwards.' });
     if (type === 'socket') fields.push({ k: 'portCount', label: 'Ports', type: 'number', v: 2, min: 1, max: 12 });
     if (type === 'generic') {
       fields.unshift({ k: 'deviceKind', label: 'Device type', type: 'select', opts: M.DEVICE_KINDS.map((k) => [k[0], k[1]]), v: 'other' });
