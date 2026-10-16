@@ -128,7 +128,7 @@
           x.push('<rect x="' + num(pl.x + gp.x) + '" y="' + num(pl.y + gp.y) + '" width="' + num(gp.w) + '" height="' + num(gp.h) + '" rx="3" fill="#ffffff" fill-opacity="0.7" stroke="' + (gp.side === 'rear' ? '#d9a35a' : (gp.side === 'uplink' ? '#8e6bbf' : '#cdb86a')) + '" stroke-width="' + (gp.side === 'uplink' ? 1.4 : 0.8) + '" pointer-events="none"/>');
         });
         (ref.portGroups || []).forEach(function (g) {
-          // colour-coded band behind the group's ports, one per row, with the name tag above the first row
+          // colour-coded band behind the group's ports, one per row, with the name tag centred above the group
           var rects = g.portIds.map(function (id) { return it.lay.ports[id]; }).filter(function (r) { return r && !r.hidden; });
           if (!rects.length) return;
           var rows = {}, gsel = sel && sel.kind === 'pgroup' && sel.id === g.id;
@@ -137,8 +137,9 @@
             var rs = rows[k], x0 = Math.min.apply(null, rs.map(function (r) { return r.x; })) - 3, x1 = Math.max.apply(null, rs.map(function (r) { return r.x + r.w; })) + 3, h = rs[0].h + 6;
             x.push('<g data-kind="pgroup" data-id="' + esc(g.id) + '"><title>' + esc(g.name + ' (' + g.portIds.length + ' ports)') + '</title><rect data-kind="pgroup" data-id="' + esc(g.id) + '" x="' + num(pl.x + x0) + '" y="' + num(pl.y + k - 3) + '" width="' + num(x1 - x0) + '" height="' + num(h) + '" rx="4" fill="' + esc(g.color) + '" fill-opacity="0.32" stroke="' + (gsel ? SEL : esc(g.color)) + '" stroke-width="' + (gsel ? 3 : 1.6) + '"/></g>');
             if (i === 0) {
-              var tw = String(g.name).length * 5.4 + 8, minX = it.lay.sections.length ? 66 : Math.min(pl.w - tw - 4, 12 + String(ref.name).length * 6.5);
-              var tx = Math.max(x0, minX); tx = Math.min(tx, pl.w - tw - 2);
+              // centred above the whole group (kept inside the equipment)
+              var tw = String(g.name).length * 5.4 + 8, gx0 = Math.min.apply(null, rects.map(function (r) { return r.x; })) - 3, gx1 = Math.max.apply(null, rects.map(function (r) { return r.x + r.w; })) + 3;
+              var tx = Math.max(2, Math.min((gx0 + gx1) / 2 - tw / 2, pl.w - tw - 2));
               x.push('<g data-kind="pgroup" data-id="' + esc(g.id) + '"><rect data-kind="pgroup" data-id="' + esc(g.id) + '" x="' + num(pl.x + tx) + '" y="' + num(pl.y + k - 15) + '" width="' + num(tw) + '" height="11" rx="3" fill="' + esc(g.color) + '" stroke="#37474f" stroke-width="0.6"/>' +
                 '<text x="' + num(pl.x + tx + 4) + '" y="' + num(pl.y + k - 6.5) + '" font-size="8.5" font-weight="bold" fill="#111" font-family="sans-serif" pointer-events="none">' + esc(g.name) + '</text></g>');
             }

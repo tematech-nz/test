@@ -1199,6 +1199,9 @@ test('port groups are drawn as a coloured band with a name tag, and exported', (
   const rects = g.portIds.map(id => geo[id]);
   assert.strictEqual(new Set(rects.map(x => Math.round(x.y))).size, 1, 'one row, one band');
   assert.ok(R.svgDocument(p, mid).indexOf('to rack office') > 0);
+  const tagM = /<rect data-kind="pgroup"[^>]* x="([\d.-]+)" y="[\d.-]+" width="([\d.]+)" height="11"/.exec(r.content);
+  const gx0 = Math.min(...rects.map(q => q.x)) - 3, gx1 = Math.max(...rects.map(q => q.x + q.w)) + 3;
+  assert.ok(tagM && Math.abs(+tagM[1] + +tagM[2] / 2 - (gx0 + gx1) / 2) < 1, 'name tag is centred above its group');
   assert.ok(R.renderMap(p, mid, { selection: { kind: 'pgroup', id: g.id } }).content.indexOf('stroke="#e91e63" stroke-width="3"') > 0);
   const tip = r.content.slice(r.content.indexOf('data-id="' + g.portIds[0] + '"><title>'), r.content.indexOf('data-id="' + g.portIds[0] + '"><title>') + 150);
   assert.ok(tip.indexOf('[to rack office]') > 0, 'tooltip names the group');
