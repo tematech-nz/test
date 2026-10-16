@@ -10,6 +10,8 @@
     rack: { fill: '#e6e6e6', stroke: '#555', dash: '' },
     patchpanel: { fill: '#fdf6e3', stroke: '#b58900', dash: '' },
     'switch': { fill: '#e6f4ea', stroke: '#2e7d32', dash: '' },
+    router: { fill: '#e3f2fd', stroke: '#1565c0', dash: '' },
+    internet: { fill: '#fff3cd', stroke: '#e65100', dash: '' },
     socket: { fill: '#f3e5f5', stroke: '#7b1fa2', dash: '' },
     generic: { fill: '#ffffff', stroke: '#777', dash: '' }
   };
@@ -20,14 +22,6 @@
   }
   function trunc(s, n) { s = String(s); return s.length > n ? s.slice(0, Math.max(1, n - 1)) + '~' : s; }
   function num(v) { return Math.round(v * 10) / 10; }
-
-  function clipToRect(pl, tx, ty) {
-    var cx = pl.x + pl.w / 2, cy = pl.y + pl.h / 2, dx = tx - cx, dy = ty - cy;
-    if (!dx && !dy) return { x: cx, y: cy };
-    var sx = dx ? (pl.w / 2) / Math.abs(dx) : Infinity, sy = dy ? (pl.h / 2) / Math.abs(dy) : Infinity;
-    var s = Math.min(sx, sy);
-    return { x: cx + dx * s, y: cy + dy * s };
-  }
 
   function containerDepth(p, id) {
     var d = 0, c = M.findContainer(p, id), guard = 0;
@@ -63,6 +57,13 @@
     // effective box: collapsed patch-panel sections shrink the drawn height (view state only, never stored)
     var groupSet = {}, prevSet = {};
     (opts.groupPorts || []).forEach(function (id) { groupSet[id] = true; });
+    // ports of the selected fixed link / wire / patch cable are highlighted on both ends
+    var selPorts = {};
+    if (sel) {
+      if (sel.kind === 'link' && idx.links[sel.id]) idx.links[sel.id].wires.forEach(function (w) { if (w.aPortId) selPorts[w.aPortId] = true; if (w.bPortId) selPorts[w.bPortId] = true; });
+      else if (sel.kind === 'wire' && idx.wires[sel.id]) { var sw0 = idx.wires[sel.id]; if (sw0.aPortId) selPorts[sw0.aPortId] = true; if (sw0.bPortId) selPorts[sw0.bPortId] = true; }
+      else if (sel.kind === 'cable' && idx.cables[sel.id]) { selPorts[idx.cables[sel.id].aPortId] = true; selPorts[idx.cables[sel.id].bPortId] = true; }
+    }
     var prev = opts.preview || null;
     if (prev) prev.ids.forEach(function (id) { prevSet[id] = true; });
     items.forEach(function (it) {
@@ -78,21 +79,27 @@
       var pl = it.box, ref = it.ref, st = STYLE[it.isGroup ? 'group' : ref.type], plId = it.pl.id;
       grow(pl.x, pl.y, pl.w, pl.h);
       var isSel = sel && sel.id === ref.id && (sel.kind === 'group' || sel.kind === 'object');
+      var isDrop = opts.drop && opts.drop.containerId === ref.id;
       var container = it.isGroup || ref.type === 'rack';
       var dim = hl && !container && !hl.objects[ref.id];
       var x = [];
       x.push('<g data-kind="' + (it.isGroup ? 'group' : 'object') + '" data-id="' + esc(ref.id) + '"' + (dim ? ' opacity="0.25"' : '') + '>');
-      x.push('<rect data-kind="' + (it.isGroup ? 'group' : 'object') + '" data-id="' + esc(ref.id) + '" x="' + num(pl.x) + '" y="' + num(pl.y) + '" width="' + num(pl.w) + '" height="' + num(pl.h) + '" rx="' + (container ? 6 : 3) + '" fill="' + st.fill + '"' +
-        (hl && container ? ' fill-opacity="0.6"' : '') + ' stroke="' + (isSel ? SEL : st.stroke) + '" stroke-width="' + (isSel ? 3 : 1.5) + '"' + (st.dash ? ' stroke-dasharray="' + st.dash + '"' : '') + '/>');
+      x.push('<rect data-kind="' + (it.isGroup ? 'group' : 'object') + '" data-id="' + esc(ref.id) + '" x="' + num(pl.x) + '" y="' + num(pl.y) + '" width="' + num(pl.w) + '" height="' + num(pl.h) + '" rx="' + (container ? 6 : (ref.type === 'internet' ? 14 : 3)) + '" fill="' + st.fill + '"' +
+        (hl && container ? ' fill-opacity="0.6"' : '') + ' stroke="' + (isDrop ? '#00c853' : (isSel ? SEL : st.stroke)) + '" stroke-width="' + (isDrop ? 4 : (isSel ? 3 : 1.5)) + '"' + (st.dash ? ' stroke-dasharray="' + st.dash + '"' : '') + '/>');
       var tx = pl.x + (editing ? 22 : 6);
       var label = ref.name + (!it.isGroup && ref.type === 'rack' && ref.rackHeight ? ' (' + ref.rackHeight + 'U)' : '');
       x.push('<text x="' + num(tx) + '" y="' + num(pl.y + 14) + '" font-size="12" font-weight="bold" fill="#222" font-family="sans-serif" pointer-events="none">' + esc(trunc(label, Math.floor((pl.w - (tx - pl.x) - 4) / 6.5))) + '</text>');
+      if (!it.isGroup && (ref.type === 'router' || ref.type === 'internet') && ref.ipAddress) {
+        x.push('<text x="' + num(pl.x + pl.w - 5) + '" y="' + num(pl.y + 14) + '" font-size="9" text-anchor="end" fill="#0d47a1" font-family="sans-serif" pointer-events="none">' + esc(ref.ipAddress) + '</text>');
+      }
       if (it.lay) {
         if (it.lay.sections.length) {
           it.lay.sections.forEach(function (sec) {
-            var rear = sec.side === 'rear', coll = sec.collapsed;
-            x.push('<rect x="' + num(pl.x + sec.x) + '" y="' + num(pl.y + sec.y) + '" width="' + num(sec.w) + '" height="' + num(sec.h) + '" rx="3" fill="' + (rear ? '#ffe9cc' : '#fffdf0') + '" stroke="' + (rear ? '#d38b2c' : '#d4b44a') + '" stroke-width="1"' + (rear ? ' stroke-dasharray="4 2"' : '') + ' pointer-events="none"/>');
-            x.push('<text x="' + num(pl.x + sec.x + 5) + '" y="' + num(pl.y + sec.y + 10.5) + '" font-size="8.5" font-weight="bold" fill="' + (rear ? '#8a4b00' : '#7a6200') + '" font-family="sans-serif" pointer-events="none">' + (rear ? 'REAR' : 'FRONT') + ' (' + sec.count + ')</text>');
+            var rear = sec.side === 'rear' || sec.side === 'wan', coll = sec.collapsed;
+            var title = { front: 'FRONT', rear: 'REAR', wan: 'WAN', lan: 'LAN' }[sec.side];
+            var wanSec = sec.side === 'wan';
+            x.push('<rect x="' + num(pl.x + sec.x) + '" y="' + num(pl.y + sec.y) + '" width="' + num(sec.w) + '" height="' + num(sec.h) + '" rx="3" fill="' + (wanSec ? '#fde4e1' : (rear ? '#ffe9cc' : (sec.side === 'lan' ? '#e8f5e9' : '#fffdf0'))) + '" stroke="' + (wanSec ? '#c0504d' : (rear ? '#d38b2c' : (sec.side === 'lan' ? '#4c9a50' : '#d4b44a'))) + '" stroke-width="1"' + (sec.side === 'rear' ? ' stroke-dasharray="4 2"' : '') + ' pointer-events="none"/>');
+            x.push('<text x="' + num(pl.x + sec.x + 5) + '" y="' + num(pl.y + sec.y + 10.5) + '" font-size="8.5" font-weight="bold" fill="' + (wanSec ? '#8e2a26' : (rear ? '#8a4b00' : '#444')) + '" font-family="sans-serif" pointer-events="none">' + title + ' (' + sec.count + ')</text>');
             if (!exporting) {
               x.push('<g data-toggle="' + sec.side + '" data-pl="' + esc(plId) + '" style="cursor:pointer"><title>' + (coll ? 'Expand' : 'Collapse') + ' ' + sec.side + ' ports</title>' +
                 '<rect data-toggle="' + sec.side + '" data-pl="' + esc(plId) + '" x="' + num(pl.x + sec.x) + '" y="' + num(pl.y + sec.y) + '" width="' + num(sec.w) + '" height="' + sec.headH + '" fill="transparent"/>' +
@@ -100,6 +107,9 @@
             }
           });
         }
+        (it.lay.groups || []).forEach(function (gp) {
+          x.push('<rect x="' + num(pl.x + gp.x) + '" y="' + num(pl.y + gp.y) + '" width="' + num(gp.w) + '" height="' + num(gp.h) + '" rx="3" fill="#ffffff" fill-opacity="0.7" stroke="' + (gp.side === 'rear' ? '#d9a35a' : '#cdb86a') + '" stroke-width="0.8" pointer-events="none"/>');
+        });
         ref.ports.forEach(function (pt) {
           var r = it.lay.ports[pt.id]; if (!r) return;
           var abs = { x: pl.x + r.x, y: pl.y + r.y, w: r.w, h: r.h, objId: ref.id, pl: pl, hidden: r.hidden };
@@ -107,12 +117,14 @@
           if (r.hidden) return;
           var use = idx.portUse[pt.id], mapped = idx.mapByPort[pt.id];
           var fill = use ? (use.kind === 'patch' ? '#bbdefb' : '#ffe0b2') : (mapped ? '#f5f5f5' : '#ffffff');
+          if (!use && pt.role === 'wan') fill = '#fff3f1';
           var isHi = hl && hl.ports[pt.id], isSelPort = sel && sel.kind === 'port' && sel.id === pt.id, isPending = opts.pendingPortId === pt.id;
           if (isHi) fill = HI;
           var stroke = isPending ? '#d500f9' : (isSelPort ? SEL : '#444'), sw = isPending || isSelPort ? 2.5 : 1;
+          if (selPorts[pt.id]) { fill = '#ffeb3b'; stroke = '#e65100'; sw = 2.5; }
           if (groupSet[pt.id]) { fill = '#e1bee7'; stroke = '#8e24aa'; sw = 2.5; }
           if (prevSet[pt.id]) { fill = prev.ok ? '#c8e6c9' : '#ffcdd2'; stroke = prev.ok ? '#2e7d32' : '#c62828'; sw = 2.5; }
-          x.push('<g data-kind="port" data-id="' + esc(pt.id) + '"><title>' + esc(ref.name + ' / ' + pt.label + (pt.side === 'rear' ? ' (rear)' : '')) + '</title>' +
+          x.push('<g data-kind="port" data-id="' + esc(pt.id) + '"><title>' + esc(ref.name + ' / ' + pt.label + (pt.side === 'rear' ? ' (rear)' : '') + (pt.role ? ' (' + pt.role.toUpperCase() + ')' : '') + (pt.ip ? ' ' + pt.ip : '')) + '</title>' +
             '<rect data-kind="port" data-id="' + esc(pt.id) + '" x="' + num(abs.x) + '" y="' + num(abs.y) + '" width="' + num(abs.w) + '" height="' + num(abs.h) + '" rx="2" fill="' + fill + '" stroke="' + stroke + '" stroke-width="' + sw + '"' + (pt.side === 'rear' ? ' stroke-dasharray="3 1"' : '') + '/>' +
             '<text x="' + num(abs.x + abs.w / 2) + '" y="' + num(abs.y + abs.h / 2 + 3) + '" font-size="' + num(Math.min(9, abs.h * 0.55)) + '" text-anchor="middle" fill="#111" font-family="sans-serif" pointer-events="none">' + esc(trunc(pt.label, Math.max(1, Math.floor(abs.w / 5.5)))) + '</text></g>');
         });
@@ -134,8 +146,28 @@
       return (o ? o.name + ' / ' + idx.ports[pid].label : '?') + (ms.length ? ' [' + ms.map(function (m) { return idx.maps[m] ? idx.maps[m].name : '?'; }).join(', ') + ']' : ' [not on a map]');
     }
 
-    // fixed links
+    // fixed links: each end attaches to the REAR terminations its wires use (a bar under those ports), not to the panel box
     var pairCount = {};
+    function linkAnchor(l, objId) {
+      var box = byRef[objId];
+      if (!box) return null;
+      var rects = [];
+      l.wires.forEach(function (w) {
+        [w.aPortId, w.bPortId].forEach(function (pid) {
+          var g = pid && portGeo[pid];
+          if (g && g.objId === objId) rects.push(g);
+        });
+      });
+      if (!rects.length) { // nothing mapped yet: use the rear strip of the panel (or its bottom edge)
+        var rear = M.rearPorts(idx.objects[objId]).map(function (pt) { return portGeo[pt.id]; }).filter(Boolean);
+        if (!rear.length) return { x: box.x + box.w / 2, y: box.y + box.h, bar: null, ticks: [] };
+        rects = rear;
+      }
+      var x0 = Math.min.apply(null, rects.map(function (r) { return r.x + r.w / 2; }));
+      var x1 = Math.max.apply(null, rects.map(function (r) { return r.x + r.w / 2; }));
+      var y = Math.max.apply(null, rects.map(function (r) { return r.y + r.h; })) + 5;
+      return { x: (x0 + x1) / 2, y: y, bar: [x0, x1, y], ticks: rects.map(function (r) { return [r.x + r.w / 2, r.y + r.h, y]; }), hidden: rects.every(function (r) { return r.hidden; }) };
+    }
     p.fixedLinks.forEach(function (l) {
       var A = byRef[l.aObjectId], B = byRef[l.bObjectId];
       if (!A && !B) return;
@@ -144,30 +176,41 @@
       var dim = hl && !isHi;
       var label = l.name + ' x' + l.wires.length;
       var o = '<g data-kind="link" data-id="' + esc(l.id) + '"' + (dim ? ' opacity="0.15"' : '') + '>';
-      var x1, y1, x2, y2, ox = 0, oy = 0;
-      if (A && B) {
-        var key = [A.id, B.id].sort().join('|');
+      var anchors = [], d, mx, my;
+      var aA = linkAnchor(l, l.aObjectId), aB = linkAnchor(l, l.bObjectId);
+      if (aA && aB) {
+        var key = [l.aObjectId, l.bObjectId].sort().join('|');
         var n = pairCount[key] = (pairCount[key] || 0) + 1;
-        var acx = A.x + A.w / 2, acy = A.y + A.h / 2, bcx = B.x + B.w / 2, bcy = B.y + B.h / 2;
-        var len = Math.sqrt((bcx - acx) * (bcx - acx) + (bcy - acy) * (bcy - acy)) || 1;
-        ox = -(bcy - acy) / len * (n - 1) * 12; oy = (bcx - acx) / len * (n - 1) * 12;
-        var pa = clipToRect(A, bcx, bcy), pb = clipToRect(B, acx, acy);
-        x1 = pa.x + ox; y1 = pa.y + oy; x2 = pb.x + ox; y2 = pb.y + oy;
+        var cyc = Math.max(aA.y, aB.y) + 34 + (n - 1) * 16; // both ends leave downward and meet below the lower panel
+        d = 'M' + num(aA.x) + ' ' + num(aA.y) + 'C' + num(aA.x) + ' ' + num(cyc) + ' ' + num(aB.x) + ' ' + num(cyc) + ' ' + num(aB.x) + ' ' + num(aB.y);
+        mx = (aA.x + aB.x) / 2; my = (aA.y + 6 * cyc + aB.y) / 8 + 6;
+        grow(Math.min(aA.x, aB.x), Math.min(aA.y, aB.y), Math.abs(aA.x - aB.x), cyc - Math.min(aA.y, aB.y));
+        anchors = [aA, aB];
       } else {
-        var P = A || B, otherId = A ? l.bObjectId : l.aObjectId, other = idx.objects[otherId];
-        var ocount = pairCount['stub' + P.id] = (pairCount['stub' + P.id] || 0) + 1;
-        x1 = P.x + P.w; y1 = P.y + P.h / 2 + (ocount - 1) * 14; x2 = x1 + 70; y2 = y1;
+        var an = aA || aB, otherId = aA ? l.bObjectId : l.aObjectId, other = idx.objects[otherId];
+        var ocount = pairCount['stub' + (aA ? l.aObjectId : l.bObjectId)] = (pairCount['stub' + (aA ? l.aObjectId : l.bObjectId)] || 0) + 1;
+        var sy = an.y + 28 + (ocount - 1) * 14;
+        d = 'M' + num(an.x) + ' ' + num(an.y) + 'L' + num(an.x) + ' ' + num(sy);
+        mx = an.x; my = sy + 12;
         label = label + ' -> ' + (other ? other.name : '?') + (other ? ' [' + (M.mapsFor(p, 'object', other.id).map(function (m) { return idx.maps[m].name; }).join(', ') || 'not on a map') + ']' : '');
+        grow(an.x - 20, an.y, 40, sy - an.y + 20);
+        anchors = [an];
       }
-      grow(Math.min(x1, x2), Math.min(y1, y2), Math.abs(x2 - x1), Math.abs(y2 - y1));
-      var d = 'M' + num(x1) + ' ' + num(y1) + 'L' + num(x2) + ' ' + num(y2);
+      // bar + ticks tie the thick line to the exact rear ports
+      anchors.forEach(function (an) {
+        if (an.bar) {
+          var bar = 'M' + num(an.bar[0]) + ' ' + num(an.bar[2]) + 'H' + num(an.bar[1]);
+          an.ticks.forEach(function (t) { bar += 'M' + num(t[0]) + ' ' + num(t[1]) + 'V' + num(t[2]); });
+          o += '<path d="' + bar + '" stroke="' + (isSel ? SEL : '#37474f') + '" stroke-width="2" fill="none" stroke-linecap="round" pointer-events="none"/>';
+        }
+      });
       o += '<path d="' + d + '" stroke="transparent" stroke-width="16" fill="none" data-kind="link" data-id="' + esc(l.id) + '"/>';
       if (isHi) o += '<path d="' + d + '" stroke="' + HI + '" stroke-width="11" fill="none" opacity="0.7" pointer-events="none"/>';
       o += '<path d="' + d + '" stroke="' + (isSel ? SEL : '#37474f') + '" stroke-width="6" fill="none" stroke-linecap="round" pointer-events="none"/>';
       o += '<path d="' + d + '" stroke="#ffffff" stroke-width="1.6" stroke-dasharray="7 5" fill="none" pointer-events="none"/>';
-      var mx = (x1 + x2) / 2, my = (y1 + y2) / 2, tw = label.length * 5.8 + 8;
-      o += '<rect x="' + num(mx - tw / 2) + '" y="' + num(my - 16) + '" width="' + num(tw) + '" height="13" rx="3" fill="#fff" stroke="#37474f" stroke-width="0.8" pointer-events="none"/>' +
-        '<text x="' + num(mx) + '" y="' + num(my - 6) + '" font-size="10" text-anchor="middle" fill="#222" font-family="sans-serif" pointer-events="none">' + esc(label) + '</text></g>';
+      var tw = label.length * 5.8 + 8;
+      o += '<rect x="' + num(mx - tw / 2) + '" y="' + num(my - 9) + '" width="' + num(tw) + '" height="13" rx="3" fill="#fff" stroke="#37474f" stroke-width="0.8" pointer-events="none"/>' +
+        '<text x="' + num(mx) + '" y="' + num(my + 1) + '" font-size="10" text-anchor="middle" fill="#222" font-family="sans-serif" pointer-events="none">' + esc(label) + '</text></g>';
       cableParts.push(o);
     });
 
@@ -194,7 +237,8 @@
       var o = '<g data-kind="cable" data-id="' + esc(c.id) + '"' + (dim ? ' opacity="0.12"' : '') + '>';
       o += '<path d="' + d + '" stroke="transparent" stroke-width="12" fill="none" data-kind="cable" data-id="' + esc(c.id) + '"/>';
       if (isHi) o += '<path d="' + d + '" stroke="' + HI + '" stroke-width="8" fill="none" opacity="0.7" pointer-events="none"/>';
-      o += '<path d="' + d + '" stroke="' + (isSel ? SEL : esc(c.color)) + '" stroke-width="' + (isSel ? 3.5 : 2.2) + '" fill="none" stroke-linecap="round" pointer-events="none"/>';
+      o += '<path d="' + d + '" stroke="#37474f" stroke-width="' + (isSel ? 5.5 : 4) + '" fill="none" stroke-linecap="round" opacity="0.55" pointer-events="none"/>'; // outline keeps white/yellow cables visible
+      o += '<path d="' + d + '" stroke="' + (isSel ? SEL : esc(c.color)) + '" stroke-width="' + (isSel ? 3.5 : 2.4) + '" fill="none" stroke-linecap="round" pointer-events="none"/>';
       if (exporting || isSel || isHi || !(a && b)) {
         o += '<text x="' + num(mx) + '" y="' + num(my) + '" font-size="9" text-anchor="middle" fill="#111" stroke="#fff" stroke-width="2.5" paint-order="stroke" font-family="sans-serif" pointer-events="none">' + esc(label) + '</text>';
       }
@@ -202,6 +246,11 @@
       cableParts.push(o);
     });
 
+    if (opts.drop && opts.drop.line) {
+      var ln = opts.drop.line;
+      cableParts.push('<g data-drop="line" pointer-events="none"><path d="M' + num(ln.x) + ' ' + num(ln.y) + 'h' + num(ln.w) + '" stroke="#00c853" stroke-width="4" stroke-linecap="round"/>' +
+        '<path d="M' + num(ln.x) + ' ' + num(ln.y - 5) + 'l7 5l-7 5z M' + num(ln.x + ln.w) + ' ' + num(ln.y - 5) + 'l-7 5l7 5z" fill="#00c853"/></g>');
+    }
     var pad = 40;
     if (!bounds) bounds = { x0: 0, y0: 0, x1: 400, y1: 300 };
     var b = { x: bounds.x0 - pad, y: bounds.y0 - pad, w: bounds.x1 - bounds.x0 + pad * 2, h: bounds.y1 - bounds.y0 + pad * 2 };

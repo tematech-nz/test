@@ -23,9 +23,13 @@ cannot break a connection. Files use LF line endings and are written with 2-spac
 }
 ```
 
-- `type` is one of `rack`, `patchpanel`, `switch`, `socket`, `generic`.
+- `type` is one of `rack`, `patchpanel`, `switch`, `router`, `internet`, `socket`, `generic`.
 - `containerId` points at a group, or at a rack (racks hold patch panels, switches and generic objects).
-- Patch panels have `front` and `rear` ports. All other equipment has `front` ports only.
+- `internet` objects (ISP / upstream) have ordinary front ports and an optional `ipAddress` (public IP or circuit note).
+- Routers have an optional `ipAddress` and ports with `"role": "wan"|"lan"` (labels `W1..`, `L1..`) and an optional
+  per-port `"ip"`. IPs are free text (IPv4 with optional /prefix, or IPv6); invalid values produce validation warnings.
+- Patch panels have `front` and `rear` ports and an optional `sectionSize` (ports per visual section; must divide the
+  per-side port count, otherwise the automatic split is used). It is cosmetic and never affects connectivity. All other equipment has `front` ports only.
 - A **placement** is the visual position of a group or object on one map. The same record may have placements
   on several maps; connection records reference object and port IDs only, never placements.
 - Statuses: patch cable `planned|active|faulty|spare`; wire `connected|spare|unused|faulty`;

@@ -22,19 +22,46 @@ Try it: File -> Load demo project (two rooms, a fixed link between racks, a wall
   Objects move only by their dark drag handle (top-left); selecting never moves anything.
 - **Groups** organise equipment and can nest. Moving a group moves its contents visually; deleting one asks whether
   to keep or delete the contents. Groups never imply connectivity.
+- **Cable colours**: pick white, grey, green, yellow, blue, orange, red or black from the list, or `Custom...` for an RGB
+  picker. The patch cable tool has its own colour list for new cables. Cables are drawn with a thin dark outline so white and
+  yellow stay visible.
 - **Patch cables**: use "Patch cable tool" and tap two ports. Occupied ports and rear terminations are refused.
 - **Fixed links**: installed cabling between two patch panels with N numbered wires, each mapped rear port to rear port.
   Mapping is never assumed; "sequential" is an explicit choice. Endpoints and wires change only through
   "Edit installed wiring", which shows a review of every added, deleted or changed wire before applying (one undo step).
+- **Routers** (`+ Router`): choose how many WAN and LAN ports (0-96 in total, changeable later) and an optional IP
+  address; every port can have its own IP too. WAN and LAN ports sit in separate strips that fold with `^`.
+  Routers cable like switches and are searchable by IP.
+- **Internet / ISP** (`+ Internet / ISP`): a special endpoint object (default name INTERNET) with one or more ISP ports
+  and an optional public IP / circuit note. Cable its ports to router WAN ports like anything else. Use several
+  for multiple ISPs.
+- **Graph** (header button): collapses patch cables, patch panels and fixed links into device-to-device links and shows
+  the interconnection graph from a chosen device (default: INTERNET). With "To" empty you get the reachability tree
+  (what can be reached, via which cables, how many hops, what is unreachable). Pick a target device to list every
+  route to it, shortest first, with redundant paths highlighted. Switches and routers pass traffic through; Internet,
+  wall sockets and generic devices are endpoints unless you tick "Allow paths through Internet". Subnets
+  are shown on devices that have IPs with a prefix (e.g. 192.168.1.1/24). Click a device or link to jump to it on the map.
+  It is theoretical physical reachability: no routing, VLAN or firewall rules are modelled.
 - **Quick fixed link from ports** (edit mode, mouse): Ctrl+click free rear ports on one patch panel to group them
   (Shift+Ctrl+click extends a range). Move the pointer over another panel: the same number of rear ports, starting
   under the pointer, are highlighted (green = valid, red = occupied or not enough ports). Click to create the link
   and open its properties. Esc cancels. Wires map in port order, 1:1.
-- **Patch panels** have any number of ports (1-96, e.g. 15) and show separate FRONT and REAR strips. Click the `^`
+- **Patch panels** have any number of ports (1-96, e.g. 15). Ports are drawn in equal sections in one line: automatic
+  is 24 -> 3 x 8, 16 -> 2 x 8, 12 -> 2 x 6, 15 -> 3 x 5; choose another split in the properties (only equal splits that divide
+  the port count are offered, e.g. 12 x 2 or 6 x 4 for 24). Very long panels wrap to a second line of sections. They show separate FRONT and REAR strips. Click the `^`
   on a strip to fold it (`v` unfolds), like a details element; cables then attach to the strip. Folding is view state
   stored in the browser only, never in the project file, and exports always show everything.
   Patch panels have front and rear terminations. Front-to-rear internal mappings are explicit records
   (the "straight-through" option or per-port mapping writes them); tracing follows only documented mappings.
+- **Dragging into container edges**: drag an item toward the bottom or right edge of its group or rack and the container
+  grows live to hold it (up to about 60 units past the edge). Drag further and the extension disappears again; drop outside
+  or inside another container to move it there. Dropping inside the extension keeps the larger container.
+- **Rack stacking**: while you drag equipment over a rack, the rack is outlined green and a green line shows where it will
+  attach (between its neighbours). On drop the rack's equipment is re-stacked top to bottom with it at that position.
+- **No overlaps**: items inside the same container (or at the top level of a map) never overlap. A dropped, newly placed or
+  resized item slides to the nearest free spot; containers grow to hold what is inside and push neighbouring
+  containers away (with their contents), cascading outward.
+- **Selecting a fixed link, wire or patch cable** highlights its ports (yellow) on both ends, on whichever map they appear.
 - **Maps**: the same object can be shown on several maps ("Add existing here"); connections reference the shared
   object and port records. Trace results offer "open <map>" links to continue across maps.
 
@@ -62,6 +89,7 @@ connectivity rules, and migration strategy.
 | `js/layout.js`, `js/render.js` | Geometry and SVG rendering (shared by screen and exports). |
 | `js/exporters.js` | Connection table, PDF writer, download helpers. |
 | `js/builder.js` | Placement helpers and the demo project. |
+| `js/topology.js`, `js/graphview.js` | Device-level graph, reachability tree, path search and the Graph view. |
 | `js/app.js` | UI: state, undo/redo, canvas, panels, dialogs. |
 
 ## Tests

@@ -10,7 +10,8 @@
     p: null, mapId: null, mode: 'view', sel: null, trace: null, tool: null,
     undo: [], redo: [], unsaved: false, saveErr: null, savedAt: null, lastExport: null,
     drag: null, geo: null, query: '', showIssues: false, issues: [],
-    collapsed: {}, pgroup: null, hoverPort: null, preview: null
+    collapsed: {}, pgroup: null, hoverPort: null, preview: null, drop: null, cableColor: '#1f77b4', customColorFor: null,
+    view: 'map', graph: { from: '', to: '', via: false }
   };
   NM.app = { S: S, M: M }; // exposed for tests
 
@@ -248,7 +249,7 @@
       }
       const a = S.tool.pending;
       if (a === id) { S.tool.pending = null; renderAll(); return; }
-      const cable = commit('Add patch cable', (p) => M.addPatchCable(p, { aPortId: a, bPortId: id, color: S.tool.color, cableType: S.tool.cableType }));
+      const cable = commit('Add patch cable', (p) => M.addPatchCable(p, { aPortId: a, bPortId: id, color: S.cableColor, cableType: S.tool.cableType }));
       S.tool.pending = null;
       if (cable) { toast('Added ' + cable.name); S.sel = { kind: 'cable', id: cable.id }; renderAll(); }
       return;
@@ -267,6 +268,7 @@
   const pointers = new Map();
   let gesture = null, pinch = null, rafPending = false;
   function scheduleRender() { if (!rafPending) { rafPending = true; requestAnimationFrame(() => { rafPending = false; renderCanvas(); }); } }
+  const EXTEND_ZONE = 60; // map units past a container's edge in which it keeps growing to hold a dragged item
   const snap = (v) => (S.p.settings.snapToGrid ? Math.round(v / S.p.settings.gridSize) * S.p.settings.gridSize : v);
 
   function bindCanvas() {
@@ -285,7 +287,7 @@
         if (!q) return;
         const kind = h.dataset.handle, start = toMap(e.clientX, e.clientY);
         const items = kind === 'move' ? M.placementGroup(S.p, q.id).map((x) => ({ q: x, ox: x.x, oy: x.y })) : [{ q: q, ow: q.w, oh: q.h }];
-        S.drag = { kind: kind, plId: q.id, start: start, snap: JSON.stringify(S.p), items: items, moved: false };
+        S.drag = { kind: kind, plId: q.id, start: start, snap: JSON.stringify(S.p), items: items, moved: false, chain: kind === 'move' ? B.captureChain(S.p, q.mapId, q.refId) : [] };
         return;
       }
       gesture = { x: e.clientX, y: e.clientY, vx: vpState().x, vy: vpState().y, target: e.target, moved: false };
@@ -313,6 +315,8 @@
           const p0 = d.items[0];
           dx = snap(p0.ox + dx) - p0.ox; dy = snap(p0.oy + dy) - p0.oy;
           d.items.forEach((it) => { it.q.x = it.ox + dx; it.q.y = it.oy + dy; });
+          B.applyExtension(S.p, d.items[0].q.mapId, d.chain, d.items[0].q, EXTEND_ZONE);
+          S.drop = B.dropSlot(S.p, d.items[0].q);
         } else {
           const it = d.items[0];
           it.q.w = Math.max(60, snap(it.ow + dx)); it.q.h = Math.max(40, snap(it.oh + dy));
@@ -335,47 +339,61 @@
       }
     };
     cv.addEventListener('pointerup', up);
-    cv.addEventListener('pointercancel', (e) => { pointers.delete(e.pointerId); gesture = null; pinch = null; if (S.drag) { S.p = JSON.parse(S.drag.snap); S.drag = null; renderAll(); } });
+    cv.addEventListener('pointercancel', (e) => { pointers.delete(e.pointerId); gesture = null; pinch = null; S.drop = null; if (S.drag) { S.p = JSON.parse(S.drag.snap); S.drag = null; renderAll(); } });
     cv.addEventListener('wheel', (e) => { e.preventDefault(); zoomAt(e.deltaY < 0 ? 1.12 : 1 / 1.12, e.clientX, e.clientY); }, { passive: false });
   }
 
   function finishDrag() {
     const d = S.drag; S.drag = null;
+    const slot = S.drop; S.drop = null;
     if (!d.moved) return;
     S.undo.push({ label: d.kind === 'move' ? 'Move' : 'Resize', snap: d.snap }); S.redo = [];
-    if (d.kind === 'move') reassignContainer(d.plId);
+    if (d.kind === 'move') {
+      reassignContainer(d.plId, d);
+      const q = S.p.placements.find((x) => x.id === d.plId), c = q && M.findContainer(S.p, q.refId);
+      if (slot && q && c && c.item.containerId === slot.containerId) B.restack(S.p, q.mapId, slot.containerId, q.refId, slot.index);
+      if (q && B.resolveDrop(S.p, d.plId)) toast('Moved to avoid overlapping another item');
+    } else {
+      const q = S.p.placements.find((x) => x.id === d.plId);
+      if (q) B.settle(S.p, q);
+    }
     scheduleSave(); afterChange();
   }
   /* dropping an item with its centre inside another container changes containment (data only; connections untouched) */
-  function reassignContainer(plId) {
+  function reassignContainer(plId, d) {
     const pl = S.p.placements.find((x) => x.id === plId);
     if (!pl) return;
     const c = M.findContainer(S.p, pl.refId);
     if (!c) return;
-    const cx = pl.x + pl.w / 2, cy = pl.y + pl.h / 2;
-    const banned = {}; banned[pl.refId] = true; M.descendants(S.p, pl.refId).forEach((x) => { banned[x.id] = true; });
-    let best = null;
-    S.p.placements.forEach((q) => {
-      if (q.mapId !== pl.mapId || banned[q.refId]) return;
-      const cc = M.findContainer(S.p, q.refId);
-      if (!cc || (cc.kind === 'object' && cc.item.type !== 'rack')) return;
-      if (cx >= q.x && cx <= q.x + q.w && cy >= q.y && cy <= q.y + q.h && (!best || q.w * q.h < best.w * best.h)) best = q;
-    });
+    const best = B.findDropContainer(S.p, pl);
     const cur = c.kind === 'group' ? c.item.parentGroupId : c.item.containerId;
     const want = best ? best.refId : null;
     if (want === cur) { if (cur) M.growToFit(S.p, pl.mapId, cur); return; }
+    if (d) B.restoreChain(d.chain); // leaving the container: its temporary extension goes away
     try {
       M.setContainer(S.p, c.kind, c.id, want);
       if (want) M.growToFit(S.p, pl.mapId, want);
       toast(want ? 'Moved into ' + M.findContainer(S.p, want).item.name : 'Removed from container');
-    } catch (e) { toast(e.message + ' (position kept, containment unchanged)', true); }
+    } catch (e) { if (cur) M.growToFit(S.p, pl.mapId, cur); toast(e.message + ' (position kept, containment unchanged)', true); }
   }
 
   /* ---------------------------------------------------------------- rendering */
   function renderAll() {
     renderTop(); renderCanvas(); renderLeft(); renderRight(); renderToolbar();
-    document.body.className = 'mode-' + S.mode;
+    document.body.className = 'mode-' + S.mode + (S.view === 'graph' ? ' view-graph' : '');
+    renderGraph();
   }
+  function renderGraph() {
+    const gv = $('graphView'), on = S.view === 'graph';
+    gv.hidden = !on;
+    $('btnGraph').classList.toggle('active', on);
+    $('btnGraph').textContent = on ? 'Map' : 'Graph';
+    if (!on) return;
+    const top = gv.scrollTop;
+    gv.innerHTML = NM.graphview.render(S.p, S.graph);
+    gv.scrollTop = top;
+  }
+  function setView(v) { S.view = v; clearPgroup(); renderAll(); if (v === 'map' && S.p.placements.some((q) => q.mapId === S.mapId)) applyVp(); }
   function renderTop() {
     $('projTitle').textContent = S.p.name;
     $('mapSelect').innerHTML = opts(S.p.maps.map((m) => [m.id, m.name]), S.mapId);
@@ -388,7 +406,7 @@
     const map = curMap();
     const r = R.renderMap(S.p, map.id, {
       mode: S.mode, selection: S.sel, highlight: S.trace && S.trace.highlight,
-      pendingPortId: S.tool && S.tool.pending, collapsed: S.collapsed,
+      pendingPortId: S.tool && S.tool.pending, collapsed: S.collapsed, drop: S.drop,
       groupPorts: S.pgroup ? S.pgroup.ids : null, preview: S.preview
     });
     S.geo = r;
@@ -416,10 +434,11 @@
     if (!isEdit()) { tb.innerHTML = ''; return; }
     const pc = S.tool && S.tool.type === 'patch';
     tb.innerHTML =
-      ['group:Group', 'rack:Rack', 'patchpanel:Patch panel', 'switch:Switch', 'socket:Wall socket', 'generic:Generic'].map((s) => {
+      ['group:Group', 'rack:Rack', 'patchpanel:Patch panel', 'switch:Switch', 'router:Router', 'internet:Internet / ISP', 'socket:Wall socket', 'generic:Generic'].map((s) => {
         const a = s.split(':'); return '<button data-add="' + a[0] + '">+ ' + a[1] + '</button>';
       }).join('') + '<span class="sep"></span>' +
       '<button data-act="patchTool" class="' + (pc ? 'active' : '') + '">Patch cable tool</button>' +
+      (pc ? ' <span class="cable-colour">' + colorPicker('toolPreset', 'toolColor', S.cableColor, '__tool') + '</span>' : '') +
       '<button data-act="newLink">+ Fixed link</button>' +
       '<button data-act="addMapItems">Add existing here...</button>';
   }
@@ -477,6 +496,14 @@
   const openLeft = () => $('left').classList.add('open');
   const closeLeft = () => $('left').classList.remove('open');
 
+  /* preset cable colours plus "Custom..." which reveals the RGB picker */
+  function colorPicker(presetField, colorField, value, ownerId) {
+    const preset = M.CABLE_COLORS.find((c) => c[1].toLowerCase() === String(value).toLowerCase());
+    const custom = !preset || S.customColorFor === ownerId;
+    const o = M.CABLE_COLORS.map((c) => [c[1], c[0]]).concat([['custom', 'Custom...']]);
+    return '<span class="swatch" style="background:' + esc(value) + '"></span> <select data-f="' + presetField + '">' + opts(o, custom ? 'custom' : preset[1]) + '</select>' +
+      (custom ? ' <input type="color" data-f="' + colorField + '" value="' + esc(value) + '" title="Custom colour">' : '');
+  }
   function fld(label, html) { return '<div class="field"><label>' + label + '</label><div>' + html + '</div></div>'; }
   function inp(label, f, val, t, extra) {
     if (!isEdit()) return fld(label, '<div class="ro">' + esc(val) + '</div>');
@@ -498,6 +525,7 @@
     $('tabTrace').textContent = S.trace ? 'Trace *' : 'Trace';
   }
 
+  const hasIp = (o) => o.type === 'router' || o.type === 'internet';
   function containerOptions(forKind, forType, selfId) {
     const out = [['', '(none - standalone)']];
     S.p.groups.forEach((g) => {
@@ -540,6 +568,7 @@
     const idx = M.buildIndex(S.p), o = idx.objects[id];
     let h = '<h3>' + esc(M.TYPE_LABELS[o.type]) + '</h3>' + inp('Name', 'name', o.name) + inp('Location', 'location', o.location) + inp('Description', 'description', o.description);
     if (o.type === 'rack') h += inp('Height (U)', 'rackHeight', o.rackHeight || '');
+    if (hasIp(o)) h += inp(o.type === 'internet' ? 'Public IP' : 'IP address', 'ipAddress', o.ipAddress || '');
     const par = o.containerId ? M.findContainer(S.p, o.containerId) : null;
     h += isEdit() ? fld('Inside', '<select data-f="container">' + opts(containerOptions('object', o.type, id), o.containerId || '') + '</select>') : fld('Inside', par ? lnk(par.kind, par.id, par.item.name) : '-');
     h += fld('On maps', mapsLine('object', id)) + fld('ID', '<span class="sub">' + esc(o.id) + '</span>');
@@ -551,14 +580,24 @@
       const used = o.ports.filter((p) => idx.portUse[p.id]).length;
       h += '<h3>Ports (' + per + (o.type === 'patchpanel' ? ' front + ' + per + ' rear' : '') + ', ' + used + ' cabled)</h3>';
     }
-    if (isEdit() && o.type !== 'rack') {
+    if (o.type === 'patchpanel') {
+      const per = o.ports.length / 2, cur = M.effectiveSectionSize(o, per);
+      h += isEdit() ? fld('Sections', '<select data-f="sectionSize">' + opts(M.validSectionSizes(per).map((d) => [d, d + ' per section (' + per / d + ' x ' + d + ')']), cur) + '</select><div class="sub">Equal sections only.</div>') :
+        fld('Sections', per / cur + ' x ' + cur);
+    }
+    if (isEdit() && o.type === 'router') {
+      const nw = o.ports.filter((x) => x.role === 'wan').length, nl = o.ports.length - nw;
+      h += fld('Ports', 'WAN <input type="number" id="wanInput" min="0" max="96" value="' + nw + '" style="width:60px"> LAN <input type="number" id="lanInput" min="0" max="96" value="' + nl + '" style="width:60px"> ' + btn('applyRouterPorts', 'Apply'));
+    } else if (isEdit() && o.type !== 'rack') {
       h += fld('Port count', '<input type="number" id="pcInput" min="0" max="96" value="' + (o.type === 'patchpanel' ? o.ports.length / 2 : o.ports.length) + '" style="width:70px"> ' + btn('applyPortCount', 'Apply') +
         (o.type === 'switch' ? '<div class="sub">Presets: ' + [8, 16, 24, 48].map((n) => '<a class="lnk" data-act="presetPorts" data-n="' + n + '">' + n + '</a>').join(' ') + '</div>' : ''));
     }
     if (o.ports.length) {
       h += '<table class="t"><tr><th>Port</th><th>Connection</th><th></th></tr>' + o.ports.map((pt) =>
         '<tr><td>' + (isEdit() ? '<input type="text" data-f="plabel" data-t="' + esc(pt.id) + '" value="' + esc(pt.label) + '" style="width:5em">' : '<a class="lnk" data-act="select" data-kind="port" data-id="' + esc(pt.id) + '">' + esc(pt.label) + '</a>') +
-        (o.type === 'patchpanel' ? ' <span class="tag">' + pt.side + '</span>' : '') + '</td><td>' + portState(o, pt, idx) + '</td><td>' +
+        (o.type === 'patchpanel' ? ' <span class="tag">' + pt.side + '</span>' : '') + (o.type === 'router' ? ' <span class="tag">' + esc(pt.role) + '</span>' : '') + '</td><td>' +
+        (hasIp(o) ? (isEdit() ? '<input type="text" data-f="pip" data-t="' + esc(pt.id) + '" value="' + esc(pt.ip || '') + '" placeholder="IP" style="width:100%;margin-bottom:2px">' : (pt.ip ? '<div>' + esc(pt.ip) + '</div>' : '')) : '') +
+        portState(o, pt, idx) + '</td><td>' +
         '<button data-act="trace" data-kind="port" data-id="' + esc(pt.id) + '" title="Trace connection">Trace</button></td></tr>').join('') + '</table>';
     }
     if (isEdit()) {
@@ -573,6 +612,8 @@
     const idx = M.buildIndex(S.p), pt = idx.ports[id], o = idx.portObj[id];
     let h = '<h3>Port</h3>' + fld('Equipment', lnk('object', o.id, o.name)) + inp('Label', 'plabel', pt.label, pt.id);
     if (o.type === 'patchpanel') h += fld('Side', pt.side);
+    if (o.type === 'router') h += fld('Role', esc((pt.role || '').toUpperCase()));
+    if (hasIp(o)) h += inp('IP address', 'pip', pt.ip || '', pt.id);
     if (o.type === 'switch') h += inp('Type', 'ptype', pt.portType || '', pt.id) + inp('Speed', 'pspeed', pt.speed || '', pt.id) + inp('Media', 'pmedia', pt.media || '', pt.id);
     h += fld('Connection', portState(o, pt, idx));
     h += '<div class="btn-row">' + btn('trace', 'Trace connection', 'data-kind="port" data-id="' + esc(id) + '"', 'primary');
@@ -592,7 +633,7 @@
     let h = '<h3>Patch cable</h3>' + inp('ID', 'name', c.name) +
       fld('End A', lnk('port', c.aPortId, M.portName(S.p, c.aPortId, idx))) + fld('End B', lnk('port', c.bPortId, M.portName(S.p, c.bPortId, idx)));
     h += inp('Cable type', 'cableType', c.cableType) + inp('Length', 'length', c.length);
-    h += isEdit() ? fld('Colour', '<input type="color" data-f="color" value="' + esc(c.color) + '">') : fld('Colour', '<span style="display:inline-block;width:30px;height:12px;background:' + esc(c.color) + ';border:1px solid #888"></span>');
+    h += isEdit() ? fld('Colour', colorPicker('colorPreset', 'color', c.color, c.id)) : fld('Colour', '<span style="display:inline-block;width:30px;height:12px;background:' + esc(c.color) + ';border:1px solid #888"></span>');
     h += isEdit() ? fld('Status', '<select data-f="status">' + opts(M.CABLE_STATUS.map((s) => [s, s]), c.status) + '</select>') : fld('Status', esc(c.status));
     h += '<div class="btn-row">' + btn('trace', 'Trace connection', 'data-kind="cable" data-id="' + esc(id) + '"', 'primary');
     if (isEdit()) h += btn('reconnect', 'Reconnect end A', 'data-end="a"') + btn('reconnect', 'Reconnect end B', 'data-end="b"') + btn('deleteSel', 'Remove cable', '', 'danger');
@@ -743,9 +784,20 @@
     const isGroup = type === 'group';
     const fields = [{ k: 'name', label: 'Name', v: '' }];
     if (type === 'switch' || type === 'patchpanel') fields.push({ k: 'portCount', label: 'Ports', type: 'number', v: 24, min: 1, max: 96, hint: 'Any number from 1 to 96 (for example 8, 12, 15, 16, 24, 48).' });
+    if (type === 'router') {
+      fields.push({ k: 'wanPorts', label: 'WAN ports', type: 'number', v: 1, min: 0, max: 96 });
+      fields.push({ k: 'lanPorts', label: 'LAN ports', type: 'number', v: 4, min: 0, max: 96 });
+      fields.push({ k: 'ipAddress', label: 'IP address', v: '', hint: 'Optional, e.g. 192.168.1.1 or 192.168.1.1/24. Each port can also have its own IP later.' });
+    }
+    if (type === 'internet') {
+      fields[0].v = 'INTERNET'; fields[0].hint = 'The ISP / upstream network. Cable its ports to your router WAN ports.';
+      fields.push({ k: 'portCount', label: 'ISP ports', type: 'number', v: 1, min: 1, max: 12 });
+      fields.push({ k: 'ipAddress', label: 'Public IP / circuit', v: '' });
+    }
     if (type === 'socket') fields.push({ k: 'portCount', label: 'Ports', type: 'number', v: 2, min: 1, max: 12 });
     if (type === 'generic') fields.push({ k: 'portCount', label: 'Ports', type: 'number', v: 0, min: 0, max: 96 });
     if (type === 'rack') fields.push({ k: 'rackHeight', label: 'Height (U)', type: 'number', v: 42, min: 1, max: 60 });
+    if (type === 'patchpanel') fields.push({ k: 'sectionSize', label: 'Ports per section', type: 'number', v: '', min: 1, max: 96, hint: 'Leave empty for automatic (24 -> 3 x 8, 12 -> 2 x 6, 16 -> 2 x 8). Must divide the port count evenly.' });
     if (type === 'patchpanel') fields.push({ k: 'straight', label: 'Front N <-> rear N', type: 'check', v: true, hint: 'Documents a straight-through internal mapping. Untick if this panel is not wired that way.' });
     fields.push({ k: 'container', label: 'Inside', type: 'select', opts: containerOptions(isGroup ? 'group' : 'object', type, null), v: defaultContainer(type) });
     const v = await formDlg('New ' + (isGroup ? 'group' : M.TYPE_LABELS[type]), fields, 'Create');
@@ -754,7 +806,7 @@
     const r = commit('Create ' + type, (p) => {
       if (isGroup) return B.addGroupPlaced(p, mid, { name: v.name || undefined, parentGroupId: v.container || null }, pos.x, pos.y).id;
       const portCount = v.portCount != null ? parseInt(v.portCount, 10) : undefined;
-      return B.addObjectPlaced(p, mid, { type: type, name: v.name || undefined, portCount: portCount, rackHeight: v.rackHeight, straight: v.straight, containerId: v.container || null }, pos.x, pos.y).id;
+      return B.addObjectPlaced(p, mid, { type: type, name: v.name || undefined, portCount: portCount, rackHeight: v.rackHeight, straight: v.straight, wanPorts: v.wanPorts, lanPorts: v.lanPorts, sectionSize: type === 'patchpanel' && v.sectionSize > 0 ? v.sectionSize : undefined, ipAddress: v.ipAddress, containerId: v.container || null }, pos.x, pos.y).id;
     });
     if (r && r !== true) { S.sel = { kind: isGroup ? 'group' : 'object', id: r }; renderAll(); openRight(); }
   }
@@ -925,23 +977,33 @@
 
   /* ---------------------------------------------------------------- field editing */
   function onFieldChange(el) {
-    const f = el.dataset.f, t = el.dataset.t, val = el.type === 'number' ? el.value : el.value;
+    let f = el.dataset.f;
+    const t = el.dataset.t, val = el.value;
+    if (f === 'colorPreset') {
+      if (val === 'custom') { S.customColorFor = S.sel && S.sel.id; renderRight(); return; }
+      S.customColorFor = null; f = 'color';
+    } else if (f === 'color') S.customColorFor = null;
     const sel = S.sel; if (!sel && !t) return;
     commit('Edit ' + f, (p) => {
       const idx = M.buildIndex(p);
-      if (f === 'plabel' || f === 'ptype' || f === 'pspeed' || f === 'pmedia') {
+      if (f === 'plabel' || f === 'ptype' || f === 'pspeed' || f === 'pmedia' || f === 'pip') {
         const pt = idx.ports[t || sel.id]; if (!pt) return;
-        if (f === 'plabel') pt.label = val; else pt[{ ptype: 'portType', pspeed: 'speed', pmedia: 'media' }[f]] = val;
+        if (f === 'pip' && !M.isValidIp(val)) toast('That does not look like a valid IP address (kept as typed)', true);
+        if (f === 'plabel') pt.label = val; else pt[{ ptype: 'portType', pspeed: 'speed', pmedia: 'media', pip: 'ip' }[f]] = val.trim();
         return;
       }
       if (f === 'wstatus') { M.updateWireStatus(p, t, val); return; }
       if (sel.kind === 'group' || sel.kind === 'object') {
         const c = M.findContainer(p, sel.id);
-        if (f === 'container') {
+        if (f === 'sectionSize') { M.setSectionSize(p, sel.id, parseInt(val, 10)); B.refitObject(p, sel.id); }
+        else if (f === 'container') {
           M.setContainer(p, sel.kind, sel.id, val || null);
           M.mapsFor(p, sel.kind, sel.id).forEach((m) => { if (val) M.growToFit(p, m, val); });
         } else if (f === 'rackHeight') c.item.rackHeight = parseInt(val, 10) || null;
-        else c.item[f] = val;
+        else {
+          if (f === 'ipAddress' && !M.isValidIp(val)) toast('That does not look like a valid IP address (kept as typed)', true);
+          c.item[f] = f === 'ipAddress' ? val.trim() : val;
+        }
       } else if (sel.kind === 'cable') M.updatePatchCable(p, sel.id, { [f]: val });
       else if (sel.kind === 'link') M.updateLinkMeta(p, sel.id, { [f]: val });
     });
@@ -1052,6 +1114,20 @@
     $('btnMode').onclick = () => setMode(isEdit() ? 'view' : 'edit');
     $('btnUndo').onclick = undo; $('btnRedo').onclick = redo;
     $('btnFile').onclick = fileMenu;
+    $('btnGraph').onclick = () => setView(S.view === 'graph' ? 'map' : 'graph');
+    $('graphView').addEventListener('change', (e) => {
+      const k = e.target.dataset.g; if (!k) return;
+      if (k === 'via') S.graph.via = e.target.checked; else S.graph[k] = e.target.value;
+      renderGraph();
+    });
+    $('graphView').addEventListener('click', (e) => {
+      const n = e.target.closest('[data-gnode]'), l = e.target.closest('[data-gedge]');
+      if (n) { S.view = 'map'; renderAll(); goTo('object', n.dataset.gnode); }
+      else if (l) {
+        const g = NM.topology.buildGraph(S.p, { viaInternet: S.graph.via }), lk = g.links.find((x) => x.id === l.dataset.gedge);
+        if (lk) { S.view = 'map'; renderAll(); startTrace('port', lk.paths[0].aPortId); goTo('port', lk.paths[0].aPortId); }
+      }
+    });
     $('btnMenu').onclick = openLeft; $('btnCloseLeft').onclick = closeLeft; $('btnCloseRight').onclick = closeRight;
     $('mapSelect').onchange = (e) => switchMap(e.target.value);
     $('searchBox').oninput = (e) => { S.query = e.target.value; renderLeft(); if (S.query) openLeft(); };
@@ -1059,14 +1135,19 @@
     $('tabDetails').onclick = () => showTab('details'); $('tabTrace').onclick = () => showTab('trace');
     $('zoomIn').onclick = () => zoomAt(1.25); $('zoomOut').onclick = () => zoomAt(0.8); $('zoomFit').onclick = fitMap;
     $('fileInput').onchange = (e) => { const f = e.target.files[0]; e.target.value = ''; if (f) importFile(f); };
+    $('toolbar').addEventListener('change', (e) => {
+      const f = e.target.dataset.f;
+      if (f === 'toolPreset') { if (e.target.value === 'custom') S.customColorFor = '__tool'; else { S.customColorFor = null; S.cableColor = e.target.value; } renderToolbar(); }
+      else if (f === 'toolColor') { S.cableColor = e.target.value; S.customColorFor = null; renderToolbar(); }
+    });
     $('toolbar').onclick = (e) => {
       const a = e.target.closest('button'); if (!a) return;
       if (a.dataset.add) createItem(a.dataset.add);
-      else if (a.dataset.act === 'patchTool') setTool(S.tool && S.tool.type === 'patch' ? null : { type: 'patch', pending: null, color: '#1f77b4', cableType: 'Cat6' });
+      else if (a.dataset.act === 'patchTool') setTool(S.tool && S.tool.type === 'patch' ? null : { type: 'patch', pending: null, cableType: 'Cat6' });
       else if (a.dataset.act === 'newLink') newLink();
       else if (a.dataset.act === 'addMapItems') addExisting();
     };
-    document.addEventListener('change', (e) => { if (e.target.dataset && e.target.dataset.f && isEdit() && !e.target.closest('dialog')) onFieldChange(e.target); });
+    document.addEventListener('change', (e) => { if (e.target.dataset && e.target.dataset.f && isEdit() && !e.target.closest('dialog') && !e.target.closest('#toolbar')) onFieldChange(e.target); });
     document.addEventListener('click', (e) => {
       const a = e.target.closest('[data-act]'); if (!a || a.closest('dialog')) return;
       const d = a.dataset;
@@ -1080,12 +1161,13 @@
         case 'removeFromMap': commit('Remove from map', (p) => { p.placements = p.placements.filter((q) => !(q.mapId === curMap().id && q.refId === d.id)); }); break;
         case 'deleteSel': deleteSelection(); break;
         case 'deleteCable': { S.sel = { kind: 'cable', id: d.id }; deleteSelection(); break; }
-        case 'applyPortCount': { const n = parseInt($('pcInput').value, 10), id = S.sel.id; commit('Set port count', (p) => M.setPortCount(p, id, n)); break; }
-        case 'presetPorts': { const id = S.sel.id, n = parseInt(d.n, 10); commit('Set port count', (p) => M.setPortCount(p, id, n)); break; }
+        case 'applyPortCount': { const n = parseInt($('pcInput').value, 10), id = S.sel.id; commit('Set port count', (p) => { M.setPortCount(p, id, n); B.refitObject(p, id); }); break; }
+        case 'applyRouterPorts': { const id = S.sel.id, w = parseInt($('wanInput').value, 10), l = parseInt($('lanInput').value, 10); commit('Set router ports', (p) => M.setRouterPorts(p, id, w, l)); break; }
+        case 'presetPorts': { const id = S.sel.id, n = parseInt(d.n, 10); commit('Set port count', (p) => { M.setPortCount(p, id, n); B.refitObject(p, id); }); break; }
         case 'automap': { const id = S.sel.id; commit('Map front to rear', (p) => { const n = M.autoMapPanel(p, id); toast(n + ' mapping(s) added'); }); break; }
         case 'mapPort': mapPort(d.id); break;
         case 'unmap': commit('Remove internal mapping', (p) => M.removeInternalMapping(p, d.id)); break;
-        case 'startPatchFrom': S.tool = { type: 'patch', pending: d.id, color: '#1f77b4', cableType: 'Cat6' }; renderAll(); break;
+        case 'startPatchFrom': S.tool = { type: 'patch', pending: d.id, cableType: 'Cat6' }; renderAll(); break;
         case 'patchTool': break;
         case 'reconnect': S.tool = { type: 'reconnect', cableId: S.sel.id, end: d.end }; renderAll(); break;
         case 'editWiring': editWiring(S.sel.id); break;

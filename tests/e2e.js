@@ -198,6 +198,205 @@ const ok = (m) => console.log('  ok   ' + m);
     assert.ok(before);
   });
 
+
+  await step('router: create with WAN/LAN ports and IP via the toolbar', async () => {
+    await page.click('#toolbar button[data-add="router"]');
+    await page.fill('#dlg input[name="name"]', 'Edge GW');
+    await page.fill('#dlg input[name="wanPorts"]', '2');
+    await page.fill('#dlg input[name="lanPorts"]', '5');
+    await page.fill('#dlg input[name="ipAddress"]', '192.168.50.1');
+    await page.click('#dlg button[data-btn="ok"]');
+    await page.waitForTimeout(100);
+    const r = await page.evaluate(() => { const o = NetMap.app.S.p.objects.find(x => x.name === 'Edge GW'); return { n: o.ports.length, ip: o.ipAddress }; });
+    assert.deepStrictEqual(r, { n: 7, ip: '192.168.50.1' });
+    assert.ok(/IP address/i.test(await page.innerText('#detailsPane')));
+    assert.ok((await page.innerHTML('#vp')).indexOf('192.168.50.1') > 0, 'IP drawn on the map');
+    await page.fill('#detailsPane input[data-f="pip"] >> nth=0', '203.0.113.2');
+    await page.keyboard.press('Tab');
+    assert.strictEqual(await page.evaluate(() => NetMap.app.S.p.objects.find(x => x.name === 'Edge GW').ports[0].ip), '203.0.113.2');
+    await shot('router');
+    await page.click('#btnUndo'); await page.click('#btnUndo'); await page.click('#btnUndo');
+    assert.ok(!(await page.evaluate(() => NetMap.app.S.p.objects.some(x => x.name === 'Edge GW'))));
+  });
+
+
+  await step('topology graph: INTERNET object, tree, paths, navigation back to the map', async () => {
+    await page.evaluate(() => NetMap.app.api.commit('internet', (p) => {
+      const M = NetMap.model, B = NetMap.builder;
+      const inet = B.addObjectPlaced(p, p.maps[0].id, { type: 'internet', name: 'INTERNET', ipAddress: '203.0.113.1' }, 900, 40);
+      const r = B.addObjectPlaced(p, p.maps[0].id, { type: 'router', name: 'Edge', wanPorts: 1, lanPorts: 2, ipAddress: '192.168.1.1/24' }, 900, 140);
+      const sw = p.objects.find(o => o.name === 'Switch A');
+      M.addPatchCable(p, { aPortId: inet.ports[0].id, bPortId: r.ports[0].id });
+      M.addPatchCable(p, { aPortId: r.ports[1].id, bPortId: sw.ports.find(x => x.label === '5').id });
+    }));
+    await page.click('#btnGraph');
+    await page.waitForSelector('#graphView svg [data-gnode]');
+    let txt = await page.innerText('#graphView');
+    assert.ok(/reachable from internet/i.test(txt) && /Edge/.test(txt) && /WS-02/.test(txt), txt.slice(0, 400));
+    await shot('graph-tree');
+    await page.selectOption('#graphView select[data-g="to"]', { label: 'WS-02 (Wall socket)' });
+    txt = await page.innerText('#graphView');
+    assert.ok(/paths from internet to ws-02/i.test(txt) && /shortest/.test(txt) && /FL-001/.test(txt), txt.slice(0, 600));
+    await shot('graph-paths');
+    await page.locator('#graphView [data-gnode]').first().click({ force: true });
+    await page.waitForTimeout(150);
+    assert.strictEqual(await page.evaluate(() => NetMap.app.S.view), 'map');
+    assert.strictEqual(await page.evaluate(() => NetMap.app.S.sel.kind), 'object');
+  });
+
+
+  await step('patch panel sections: change split in the properties panel', async () => {
+    await page.evaluate(() => NetMap.app.api.commit('panel', (p) => NetMap.builder.addObjectPlaced(p, p.maps[0].id, { type: 'patchpanel', name: 'PP-S', portCount: 24 }, 700, 500)));
+    const id = await page.evaluate(() => NetMap.app.S.p.objects.find(o => o.name === 'PP-S').id);
+    await page.evaluate((i) => NetMap.app.api.select({ kind: 'object', id: i }), id);
+    const ys = () => page.evaluate((i) => { const o = NetMap.app.S.p.objects.find(x => x.id === i); const geo = NetMap.app.S.geo.portGeo; return new Set(o.ports.filter(x => x.side === 'front').map(x => Math.round(geo[x.id].y))).size; }, id);
+    assert.strictEqual(await ys(), 1, 'default: 3 x 8 in one line');
+    assert.ok(/3 x 8/.test(await page.evaluate(() => document.querySelector('#detailsPane select[data-f="sectionSize"]').selectedOptions[0].textContent)));
+    await shot('sections-3x8');
+    await page.selectOption('#detailsPane select[data-f="sectionSize"]', '12');
+    await page.waitForTimeout(100);
+    assert.strictEqual(await page.evaluate((i) => NetMap.app.S.p.objects.find(x => x.id === i).sectionSize, id), 12);
+    assert.strictEqual(await ys(), 1);
+    const opts = await page.$$eval('#detailsPane select[data-f="sectionSize"] option', (os) => os.map(o => o.value));
+    assert.ok(opts.indexOf('7') < 0 && opts.indexOf('8') >= 0, 'only equal splits offered: ' + opts);
+    await page.click('#btnUndo'); await page.click('#btnUndo');
+  });
+
+
+  await step('drag to the bottom of a container extends it; dragging out hides the extension and reassigns', async () => {
+    const ids = await page.evaluate(() => {
+      const B = NetMap.builder, p = NetMap.app.S.p;
+      let out;
+      NetMap.app.api.commit('ext test', (pp) => {
+        const g = B.addGroupPlaced(pp, pp.maps[0].id, { name: 'ExtG' }, 1200, 40);
+        const sw = B.addObjectPlaced(pp, pp.maps[0].id, { type: 'switch', name: 'ExtSw', portCount: 8, containerId: g.id });
+        out = { g: g.id, sw: sw.id };
+      });
+      return out;
+    });
+    await page.evaluate(() => NetMap.app.api.goTo('object', NetMap.app.S.p.objects.find(o => o.name === 'ExtSw').id, NetMap.app.S.p.maps[0].id));
+    const st = () => page.evaluate((i) => {
+      const S = NetMap.app.S, pl = (id) => S.p.placements.find(q => q.refId === id && q.mapId === S.mapId);
+      const sw = S.p.objects.find(o => o.id === i.sw), g = pl(i.g), s = pl(i.sw);
+      return { gh: g.h, gb: g.y + g.h, sb: s.y + s.h, cont: sw.containerId, zoom: NetMap.app.S.p.maps.find(m => m.id === S.mapId).viewport.zoom };
+    }, ids);
+    const s0 = await st();
+    const handle = page.locator('[data-handle="move"][data-pl="' + await page.evaluate((i) => NetMap.app.S.p.placements.find(q => q.refId === i.sw).id, ids) + '"]');
+    const box = await handle.boundingBox();
+    const gap = (s0.gb - s0.sb) * s0.zoom;
+    await page.mouse.move(box.x + 5, box.y + 5); await page.mouse.down();
+    await page.mouse.move(box.x + 5, box.y + 5 + gap + 25 * s0.zoom, { steps: 8 });
+    const mid = await st();
+    assert.ok(mid.gh > s0.gh, 'container grew while dragging: ' + JSON.stringify([s0, mid]));
+    assert.ok(mid.gb >= mid.sb, 'item fits inside the extended container');
+    await page.mouse.move(box.x + 5, box.y + 5 + gap + 400 * s0.zoom, { steps: 8 });
+    const far = await st();
+    assert.strictEqual(far.gh, s0.gh, 'extension hidden again when dragged further away');
+    await page.mouse.move(box.x + 5, box.y + 5 + gap + 25 * s0.zoom, { steps: 8 });
+    await page.mouse.up();
+    await page.waitForTimeout(100);
+    const kept = await st();
+    assert.ok(kept.gh > s0.gh && kept.cont === ids.g, 'dropped inside the extension: stays in the container');
+    await shot('container-extended');
+    // second drag: out of the container
+    const box2 = await page.locator('[data-handle="move"][data-pl="' + await page.evaluate((i) => NetMap.app.S.p.placements.find(q => q.refId === i.sw).id, ids) + '"]').boundingBox();
+    await page.mouse.move(box2.x + 5, box2.y + 5); await page.mouse.down();
+    await page.mouse.move(box2.x + 5, box2.y + 5 + 500 * s0.zoom, { steps: 8 });
+    await page.mouse.up();
+    await page.waitForTimeout(100);
+    const out = await st();
+    assert.strictEqual(out.cont, null, 'moved outside: container cleared');
+    assert.strictEqual(out.gh, kept.gh, 'old container keeps the size it had before this drag');
+    await page.click('#btnUndo'); await page.click('#btnUndo'); await page.click('#btnUndo');
+  });
+
+  await step('selecting a fixed link highlights its ports on both panels', async () => {
+    const lid = await page.evaluate(() => NetMap.app.S.p.fixedLinks[0].id);
+    await page.evaluate((id) => NetMap.app.api.select({ kind: 'link', id }), lid);
+    const n = await page.locator('#vp rect[data-kind="port"][fill="#ffeb3b"]').count();
+    assert.ok(n >= 24, 'highlighted ports on this map: ' + n);
+    await page.evaluate((id) => NetMap.app.api.goTo('link', id, NetMap.app.S.p.maps[1].id), lid);
+    assert.ok((await page.locator('#vp rect[data-kind="port"][fill="#ffeb3b"]').count()) >= 24, 'and on the other map');
+  });
+
+
+  await step('rack stacking: drop line shows while dragging and the item attaches there', async () => {
+    const info = await page.evaluate(() => {
+      NetMap.app.api.commit('stack test', (p) => {
+        const rack = p.objects.find(o => o.name === 'Rack A');
+        NetMap.builder.addObjectPlaced(p, p.maps[0].id, { type: 'switch', name: 'Stack3', portCount: 8, containerId: rack.id });
+      });
+      const S = NetMap.app.S, pl = (n) => S.p.placements.find(q => q.refId === S.p.objects.find(o => o.name === n).id && q.mapId === S.p.maps[0].id);
+      NetMap.app.api.goTo('object', S.p.objects.find(o => o.name === 'Stack3').id, S.p.maps[0].id);
+      return { zoom: S.p.maps[0].viewport.zoom, ppBottom: pl('PP-A').y + pl('PP-A').h, swTop: pl('Switch A').y, id3: pl('Stack3').id };
+    });
+    const order = () => page.evaluate(() => { const S = NetMap.app.S; return ['PP-A', 'Switch A', 'Stack3'].map(n => S.p.placements.find(q => q.refId === S.p.objects.find(o => o.name === n).id && q.mapId === S.p.maps[0].id)).map((q, i) => [i, q.y]).sort((a, b) => a[1] - b[1]).map(x => x[0]).join(''); });
+    assert.strictEqual(await order(), '012');
+    const h = page.locator('[data-handle="move"][data-pl="' + info.id3 + '"]');
+    const box = await h.boundingBox();
+    const dy = -(await page.evaluate((id) => { const S = NetMap.app.S, q = S.p.placements.find(x => x.id === id), pp = S.p.placements.find(x => x.refId === S.p.objects.find(o => o.name === 'PP-A').id && x.mapId === q.mapId); return q.y - (pp.y + pp.h) + q.h / 2; }, info.id3)) * info.zoom;
+    await page.mouse.move(box.x + 5, box.y + 5); await page.mouse.down();
+    await page.mouse.move(box.x + 5, box.y + 5 + dy, { steps: 10 });
+    await page.waitForTimeout(100);
+    assert.ok((await page.locator('#vp [data-drop="line"]').count()) === 1, 'drop line visible while dragging');
+    await shot('drop-line');
+    await page.mouse.up();
+    await page.waitForTimeout(100);
+    assert.strictEqual(await order(), '021', 'Stack3 attached between PP-A and Switch A');
+    assert.strictEqual(await page.locator('#vp [data-drop="line"]').count(), 0, 'line gone after drop');
+    await page.click('#btnUndo'); await page.click('#btnUndo');
+  });
+
+
+  await step('dropping a panel on top of another moves it to the nearest free spot', async () => {
+    const ids = await page.evaluate(() => {
+      const S = NetMap.app.S;
+      NetMap.app.api.commit('two panels', (p) => {
+        NetMap.builder.addObjectPlaced(p, p.maps[0].id, { type: 'patchpanel', name: 'OvA', portCount: 12 }, 1500, 700);
+        NetMap.builder.addObjectPlaced(p, p.maps[0].id, { type: 'patchpanel', name: 'OvB', portCount: 12 }, 1500, 900);
+      });
+      const pl = (n) => S.p.placements.find(q => q.refId === S.p.objects.find(o => o.name === n).id && q.mapId === S.p.maps[0].id);
+      NetMap.app.api.goTo('object', S.p.objects.find(o => o.name === 'OvB').id, S.p.maps[0].id);
+      return { a: pl('OvA').id, b: pl('OvB').id };
+    });
+    const geo = () => page.evaluate((i) => { const S = NetMap.app.S, a = S.p.placements.find(q => q.id === i.a), b = S.p.placements.find(q => q.id === i.b); return { a, b, zoom: S.p.maps[0].viewport.zoom }; }, ids);
+    const g0 = await geo();
+    const box = await page.locator('[data-handle="move"][data-pl="' + ids.b + '"]').boundingBox();
+    const dy = (g0.a.y + 10 - g0.b.y) * g0.zoom;
+    await page.mouse.move(box.x + 5, box.y + 5); await page.mouse.down();
+    await page.mouse.move(box.x + 5, box.y + 5 + dy, { steps: 8 }); await page.mouse.up();
+    await page.waitForTimeout(100);
+    const g1 = await geo(), A = g1.a, Bp = g1.b;
+    const ov = A.x < Bp.x + Bp.w && Bp.x < A.x + A.w && A.y < Bp.y + Bp.h && Bp.y < A.y + A.h;
+    assert.ok(!ov, 'panels no longer overlap: ' + JSON.stringify([A, Bp]));
+    assert.ok(Math.abs(Bp.y - A.y) < 400, 'close to where it was dropped');
+    await page.click('#btnUndo'); await page.click('#btnUndo');
+  });
+
+
+  await step('cable colour: presets, custom RGB picker, patch tool colour', async () => {
+    const cid = await page.evaluate(() => NetMap.app.S.p.patchCables[0].id);
+    await page.evaluate((id) => NetMap.app.api.select({ kind: 'cable', id }), cid);
+    const color = () => page.evaluate((id) => NetMap.app.S.p.patchCables.find(c => c.id === id).color, cid);
+    assert.strictEqual(await page.locator('#detailsPane input[type="color"]').count(), 0, 'no picker for a preset colour');
+    const names = await page.$$eval('#detailsPane select[data-f="colorPreset"] option', (os) => os.map(o => o.textContent));
+    assert.deepStrictEqual(names, ['white', 'grey', 'green', 'yellow', 'blue', 'orange', 'red', 'black', 'Custom...']);
+    await page.selectOption('#detailsPane select[data-f="colorPreset"]', { label: 'red' });
+    assert.strictEqual(await color(), '#d62728');
+    await page.selectOption('#detailsPane select[data-f="colorPreset"]', { label: 'Custom...' });
+    assert.strictEqual(await page.locator('#detailsPane input[type="color"]').count(), 1, 'RGB picker appears');
+    assert.strictEqual(await color(), '#d62728', 'choosing Custom alone changes nothing');
+    await page.fill('#detailsPane input[type="color"]', '#123456');
+    assert.strictEqual(await color(), '#123456');
+    assert.strictEqual(await page.locator('#detailsPane input[type="color"]').count(), 1, 'stays visible for a non-preset colour');
+    await page.click('#toolbar button[data-act="patchTool"]');
+    await page.selectOption('#toolbar select[data-f="toolPreset"]', { label: 'green' });
+    assert.strictEqual(await page.evaluate(() => NetMap.app.S.cableColor), '#2ca02c');
+    await page.keyboard.press('Escape');
+    await page.click('#btnUndo'); await page.click('#btnUndo');
+    assert.notStrictEqual(await color(), '#123456');
+  });
+
   await step('autosave survives a refresh', async () => {
     await page.click('#btnMode'); // back to view mode flushes the save
     const name = await page.evaluate(() => NetMap.app.S.p.name);
