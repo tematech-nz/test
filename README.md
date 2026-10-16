@@ -32,6 +32,8 @@ Try it: File -> Load demo project (two rooms, a fixed link between racks, a wall
 - **Fixed links**: installed cabling between two patch panels with N numbered wires, each mapped rear port to rear port.
   Mapping is never assumed; "sequential" is an explicit choice. Endpoints and wires change only through
   "Edit installed wiring", which shows a review of every added, deleted or changed wire before applying (one undo step).
+- **Switch sections**: switches use plain rows by default; in edit mode (or when creating one) choose "N per section" in the
+  properties to get equal sections in one line like patch panels (e.g. 3 x 8 for 24 ports), or "None" to go back.
 - **Routers** (`+ Router`): choose how many WAN and LAN ports (0-96 in total, changeable later) and an optional IP
   address; every port can have its own IP too. WAN and LAN ports sit in separate strips that fold with `^`.
   Routers cable like switches and are searchable by IP.

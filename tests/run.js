@@ -680,5 +680,25 @@ test('minPlacementSize keeps containers around their contents; editing a label g
   assert.deepStrictEqual(overlapPairs(p), []);
 });
 
+test('switches can opt in to equal sections; plain rows stay the default', () => {
+  const p = M.createProject('sw');
+  const sw = M.addObject(p, { type: 'switch', portCount: 24 });
+  const L = NM.layout, sz0 = L.defaultSize(sw);
+  assert.strictEqual(L.usesSections(sw), false);
+  const ys0 = new Set(sw.ports.map(x => Math.round(L.computeLayout(sw, sz0.w, sz0.h, {}).ports[x.id].y)));
+  assert.strictEqual(ys0.size, 2, 'default: two rows of 12');
+  assert.throws(() => M.setSectionSize(p, sw.id, 7), /equal/);
+  M.setSectionSize(p, sw.id, 8);
+  const sz = L.defaultSize(sw), lay = L.computeLayout(sw, sz.w, sz.h, {});
+  assert.strictEqual(new Set(sw.ports.map(x => Math.round(lay.ports[x.id].y))).size, 1, '3 x 8 in one line');
+  assert.strictEqual(lay.groups.length, 3);
+  M.setSectionSize(p, sw.id, 0);
+  assert.strictEqual(sw.sectionSize, undefined);
+  assert.throws(() => M.addObject(p, { type: 'switch', portCount: 24, sectionSize: 5 }), /equal/);
+  const sw2 = M.addObject(p, { type: 'switch', portCount: 16, sectionSize: 8 });
+  M.setPortCount(p, sw2.id, 12);
+  assert.strictEqual(sw2.sectionSize, undefined, 'stale split dropped');
+});
+
 console.log('\n' + passed + ' passed, ' + failed + ' failed');
 process.exit(failed ? 1 : 0);

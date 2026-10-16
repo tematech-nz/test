@@ -17,11 +17,17 @@
     return { rows: rows, cols: Math.ceil(n / rows) };
   }
   /* patch panels: ports are drawn in equal sections (e.g. 3 x 8) laid out in one line where they fit */
+  /* patch panels always use sections (automatic split unless chosen); switches only when a valid split was chosen */
+  function usesSections(obj) {
+    if (obj.type === 'patchpanel') return true;
+    var n = sideCount(obj, 'front');
+    return obj.type === 'switch' && obj.sectionSize > 0 && n > 0 && n % obj.sectionSize === 0;
+  }
   function gridOf(obj, side) {
     var n = sideCount(obj, side);
-    if (obj.type !== 'patchpanel') return gridFor(n);
+    if (!usesSections(obj)) return gridFor(n);
     if (n <= 0) return { rows: 0, cols: 0, perRow: 0, size: 0, nsec: 0 };
-    var size = NM.model.effectiveSectionSize(obj, n), nsec = n / size;
+    var size = obj.type === 'switch' ? obj.sectionSize : NM.model.effectiveSectionSize(obj, n), nsec = n / size;
     var perRow = Math.max(1, Math.min(nsec, Math.floor(LINEMAX / size)));
     return { rows: Math.ceil(nsec / perRow), cols: perRow * size, perRow: perRow, size: size, nsec: nsec };
   }
@@ -50,7 +56,7 @@
     var cols = Math.max(front.cols, rear.cols, 4);
     var w = cols * cellFor(obj) + PADX * 2 + (SECTIONED[obj.type] ? 6 : 0);
     if (obj.type === 'generic') w = Math.max(w, 100);
-    if (obj.type === 'patchpanel') w += (Math.max(front.perRow || 1, rear.perRow || 1) - 1) * SGAP;
+    if (usesSections(obj)) w += (Math.max(front.perRow || 1, rear.perRow || 1) - 1) * SGAP;
     if (obj.type === 'router') w = Math.max(w, 150);
     if (obj.type === 'internet') w = Math.max(w, 130);
     if (SECTIONED[obj.type]) return { w: w, h: panelHeight(obj, {}) };
@@ -116,24 +122,25 @@
         out.sections.push({ side: side, x: SECPAD, y: y, w: w - SECPAD * 2, h: sh, headH: SECHEAD, collapsed: coll, count: list.length });
         if (coll) {
           list.forEach(function (p) { out.ports[p.id] = { x: w / 2 - 2, y: y, w: 4, h: SECHEAD, side: side, hidden: true }; });
-        } else if (obj.type === 'patchpanel') placeSections(side, list, y + SECHEAD, w, rowH, out.ports, gr, out.groups);
+        } else if (usesSections(obj)) placeSections(side, list, y + SECHEAD, w, rowH, out.ports, gr, out.groups);
         else placeGrid(obj, side, list, 0, y + SECHEAD, w, rowH, out.ports, false);
         y += sh + SECGAP;
       });
       out.h = anyCollapsed ? y + 4 : h;
       return out;
     }
-    var grids = sides.map(function (s) { return gridFor(sideCount(obj, s)); });
+    var grids = sides.map(function (s) { return gridOf(obj, s); });
     var totalRows = grids.reduce(function (a, x) { return a + x.rows; }, 0);
     var rh = Math.max(CELL + 2, (h - HEADER - 8) / totalRows), y0 = HEADER + 2;
     sides.forEach(function (side, si) {
-      placeGrid(obj, side, inSide(obj, side), 0, y0, w, rh, out.ports, false);
+      if (usesSections(obj)) placeSections(side, inSide(obj, side), y0, w, rh, out.ports, grids[si], out.groups);
+      else placeGrid(obj, side, inSide(obj, side), 0, y0, w, rh, out.ports, false);
       y0 += grids[si].rows * rh;
     });
     return out;
   }
   function layoutPorts(obj, w, h, collapsed) { return computeLayout(obj, w, h, collapsed).ports; }
 
-  NM.layout = { HEADER: HEADER, defaultSize: defaultSize, defaultGroupSize: defaultGroupSize, layoutPorts: layoutPorts, minSize: minSize, cellFor: cellFor, computeLayout: computeLayout, gridOf: gridOf, panelHeight: panelHeight, gridFor: gridFor };
+  NM.layout = { HEADER: HEADER, defaultSize: defaultSize, defaultGroupSize: defaultGroupSize, layoutPorts: layoutPorts, minSize: minSize, cellFor: cellFor, computeLayout: computeLayout, gridOf: gridOf, usesSections: usesSections, panelHeight: panelHeight, gridFor: gridFor };
   if (typeof module !== 'undefined' && module.exports) module.exports = NM.layout;
 })(typeof window !== 'undefined' ? window : globalThis);

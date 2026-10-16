@@ -541,6 +541,22 @@ const ok = (m) => console.log('  ok   ' + m);
     await page.click('#btnUndo'); await page.click('#btnUndo');
   });
 
+
+  await step('switch sections can be changed after creation', async () => {
+    await page.evaluate(() => NetMap.app.api.commit('sw', (p) => NetMap.builder.addObjectPlaced(p, p.maps[0].id, { type: 'switch', name: 'SecSw', portCount: 24 }, 3800, 40)));
+    const id = await page.evaluate(() => NetMap.app.S.p.objects.find(o => o.name === 'SecSw').id);
+    await page.evaluate((i) => NetMap.app.api.select({ kind: 'object', id: i }), id);
+    const rows = () => page.evaluate((i) => { const o = NetMap.app.S.p.objects.find(x => x.id === i); return new Set(o.ports.map(x => Math.round(NetMap.app.S.geo.portGeo[x.id].y))).size; }, id);
+    assert.strictEqual(await rows(), 2);
+    await page.selectOption('#detailsPane select[data-f="sectionSize"]', '8');
+    await page.waitForTimeout(100);
+    assert.strictEqual(await rows(), 1);
+    await page.selectOption('#detailsPane select[data-f="sectionSize"]', '0');
+    await page.waitForTimeout(100);
+    assert.strictEqual(await rows(), 2, 'back to plain rows');
+    await page.click('#btnUndo'); await page.click('#btnUndo'); await page.click('#btnUndo');
+  });
+
   await step('autosave survives a refresh', async () => {
     await page.click('#btnMode'); // back to view mode flushes the save
     const name = await page.evaluate(() => NetMap.app.S.p.name);
