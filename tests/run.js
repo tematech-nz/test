@@ -1296,6 +1296,21 @@ console.log('Placing new items');
 test('nextName counts up: trailing numbers keep their width, plain names get a 2', () => {
   assert.deepStrictEqual(['PC 1', 'AP-07', 'Switch', 'Rack 9', 'x99'].map(B.nextName), ['PC 2', 'AP-08', 'Switch 2', 'Rack 10', 'x100']);
 });
+test('graph view: an edge spanning several columns is routed around the devices in between', () => {
+  const GV = NM.graphview, N = GV.NODE, X = (c) => 16 + c * (N.w + N.xgap), Y = (r) => 16 + r * (N.h + N.ygap);
+  const nodes = [];
+  for (let c = 0; c < 4; c++) for (let r = 0; r < 3; r++) nodes.push({ x: X(c), y: Y(r), col: c, row: r });
+  const A = nodes.find(n => n.col === 0 && n.row === 1), B = nodes.find(n => n.col === 3 && n.row === 1);
+  const e = GV.edgePath(A, B, 'lk7');
+  assert.ok(e.pts && e.pts.length >= 5, 'a detour, not a straight curve');
+  const hits = (p, q, n) => { // axis-aligned segment p-q against a node rectangle
+    const x0 = Math.min(p[0], q[0]), x1 = Math.max(p[0], q[0]), y0 = Math.min(p[1], q[1]), y1 = Math.max(p[1], q[1]);
+    return x1 > n.x && x0 < n.x + N.w && y1 > n.y && y0 < n.y + N.h;
+  };
+  nodes.filter(n => n !== A && n !== B).forEach(n => { for (let i = 1; i < e.pts.length - 1; i++) assert.ok(!hits(e.pts[i - 1], e.pts[i], n) && !hits(e.pts[i], e.pts[i + 1], n), 'clear of ' + n.col + '/' + n.row); });
+  const near = GV.edgePath(A, nodes.find(n => n.col === 1 && n.row === 2), 'lk8');
+  assert.ok(!near.pts, 'neighbouring columns keep the smooth curve');
+});
 test('route optimisation: a route 1 > 3 > 2 is flagged when a fixed link 1-2 has free wires', () => {
   const p = M.createProject('ro');
   const sw = M.addObject(p, { type: 'switch', name: 'SW', portCount: 8 }), pc = M.addObject(p, { type: 'generic', name: 'PC', portCount: 1 });

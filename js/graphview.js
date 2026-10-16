@@ -17,6 +17,33 @@
     return pick('internet') || pick('router') || graph.order[0] || '';
   }
 
+  /* polyline with rounded corners */
+  function roundedPath(pts, r) {
+    var d = 'M' + pts[0][0] + ' ' + pts[0][1];
+    for (var i = 1; i < pts.length - 1; i++) {
+      var a = pts[i - 1], b = pts[i], c = pts[i + 1];
+      var l1 = Math.hypot(b[0] - a[0], b[1] - a[1]), l2 = Math.hypot(c[0] - b[0], c[1] - b[1]), rr = Math.min(r, l1 / 2, l2 / 2);
+      if (!rr) { d += 'L' + b[0] + ' ' + b[1]; continue; }
+      d += 'L' + (b[0] + (a[0] - b[0]) * rr / l1) + ' ' + (b[1] + (a[1] - b[1]) * rr / l1) + 'Q' + b[0] + ' ' + b[1] + ' ' + (b[0] + (c[0] - b[0]) * rr / l2) + ' ' + (b[1] + (c[1] - b[1]) * rr / l2);
+    }
+    return d + 'L' + pts[pts.length - 1][0] + ' ' + pts[pts.length - 1][1];
+  }
+  function jitterOf(key) { var h = 0; for (var i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) | 0; return (Math.abs(h) % 7) - 3; }
+  /*
+   * Edge geometry. Neighbouring columns: a smooth curve. Edges that span more than one column would run under the devices in
+   * between, so they are routed around them: out into the gap beside the source, along the free lane between two rows, and down
+   * into the gap in front of the target. Returns { d, lx, ly } (path and the point for the "xN" label).
+   */
+  function edgePath(A, B, key) {
+    var L = A.col <= B.col ? A : B, R = L === A ? B : A;
+    if (A.col === B.col) { var cx = A.x + NW + 30, ay0 = A.y + NH / 2, by0 = B.y + NH / 2; return { d: 'M' + (A.x + NW) + ' ' + ay0 + 'C' + cx + ' ' + ay0 + ' ' + cx + ' ' + by0 + ' ' + (B.x + NW) + ' ' + by0, lx: cx, ly: (ay0 + by0) / 2 }; }
+    var x0 = L.x + NW, y0 = L.y + NH / 2, x1 = R.x, y1 = R.y + NH / 2;
+    if (R.col - L.col <= 1) return { d: 'M' + x0 + ' ' + y0 + 'C' + (x0 + (x1 - x0) / 2) + ' ' + y0 + ' ' + (x0 + (x1 - x0) / 2) + ' ' + y1 + ' ' + x1 + ' ' + y1, lx: (x0 + x1) / 2, ly: (y0 + y1) / 2 - 4 };
+    var j = jitterOf(key), g1 = x0 + XG / 2 + j, g2 = x1 - XG / 2 + j, lane = 16 + Math.min(L.row, R.row) * (NH + YG) + NH + YG / 2 + j * 0.8;
+    var pts = [[x0, y0], [g1, y0], [g1, lane], [g2, lane], [g2, y1], [x1, y1]];
+    return { d: roundedPath(pts, 8), pts: pts, lx: (g1 + g2) / 2, ly: lane - 3 };
+  }
+
   /* state: {from, to, via}; returns { html } */
   function render(p, state) {
     var graph = TP.buildGraph(p, { viaInternet: !!state.via });
@@ -53,7 +80,7 @@
     if (tail.length) cols.push(tail);
     var maxRows = 0;
     cols.forEach(function (c, ci) {
-      c.forEach(function (id, ri) { pos[id] = { x: 16 + ci * (NW + XG), y: 16 + ri * (NH + YG) }; });
+      c.forEach(function (id, ri) { pos[id] = { x: 16 + ci * (NW + XG), y: 16 + ri * (NH + YG), col: ci, row: ri }; });
       maxRows = Math.max(maxRows, c.length);
     });
     var W = 32 + cols.length * (NW + XG) - XG, H = 32 + maxRows * (NH + YG) - YG;
@@ -64,25 +91,20 @@
       if (!A || !B) return;
       var inTree = tree.order.some(function (n) { return n.link === l; });
       var hi = hiLink[l.id], faded = dim && !hi;
-      var ax = A.x + NW, ay = A.y + NH / 2, bx = B.x, by = B.y + NH / 2;
-      if (B.x < A.x) { ax = A.x; bx = B.x + NW; }
-      var d;
-      if (A.x === B.x) { var cx = A.x + NW + 30; d = 'M' + (A.x + NW) + ' ' + ay + 'C' + cx + ' ' + ay + ' ' + cx + ' ' + by + ' ' + (B.x + NW) + ' ' + by; }
-      else d = 'M' + ax + ' ' + ay + 'C' + (ax + (bx - ax) / 2) + ' ' + ay + ' ' + (ax + (bx - ax) / 2) + ' ' + by + ' ' + bx + ' ' + by;
+      var ep = edgePath(A, B, l.id), d = ep.d;
       var tip = l.paths.map(function (e) { return e.via.join(' > ') || 'direct'; }).join('\n');
       svg += '<g data-gedge="' + l.id + '" style="cursor:pointer"' + (faded ? ' opacity="0.2"' : '') + '><title>' + esc(graph.nodes[l.a].name + ' <-> ' + graph.nodes[l.b].name + '\n' + tip) + '</title>' +
         '<path d="' + d + '" fill="none" stroke="transparent" stroke-width="14"/>' +
         '<path d="' + d + '" fill="none" stroke="' + (best[l.id] ? '#d32f2f' : (hi ? '#ff9800' : (inTree ? '#37474f' : '#90a4ae'))) + '" stroke-width="' + (best[l.id] ? 4 : (hi ? 3.2 : 2)) + '"' + (inTree || hi ? '' : ' stroke-dasharray="5 4"') + '/>';
-      if (l.paths.length > 1) svg += '<text x="' + ((ax + bx) / 2) + '" y="' + ((ay + by) / 2 - 4) + '" font-size="10" text-anchor="middle" fill="#222" stroke="#fff" stroke-width="3" paint-order="stroke" font-family="sans-serif">x' + l.paths.length + '</text>';
+      if (l.paths.length > 1) svg += '<text x="' + ep.lx + '" y="' + ep.ly + '" font-size="10" text-anchor="middle" fill="#222" stroke="#fff" stroke-width="3" paint-order="stroke" font-family="sans-serif">x' + l.paths.length + '</text>';
       svg += '</g>';
     });
     pseudoList.forEach(function (ps) {
       var A = pos[ps.parent], B = pos[ps.id];
       if (!A || !B) return;
-      var faded = dim && !hiNode[ps.parent], ax = A.x + NW, ay = A.y + NH / 2, bx = B.x, by = B.y + NH / 2;
-      if (B.x < A.x) { ax = A.x; bx = B.x + NW; }
-      svg += '<g' + (faded ? ' opacity="0.2"' : '') + '><title>' + esc(ps.objName + ' <-> ' + ps.name + '\n' + ps.count + ' port(s) occupied by ' + ps.kind.toLowerCase() + ' (not modelled individually)') + '</title><path d="M' + ax + ' ' + ay + 'C' + (ax + (bx - ax) / 2) + ' ' + ay + ' ' + (ax + (bx - ax) / 2) + ' ' + by + ' ' + bx + ' ' + by + '" fill="none" stroke="' + esc(ps.color) + '" stroke-width="2.5" stroke-dasharray="2 3"/>' +
-        '<text x="' + ((ax + bx) / 2) + '" y="' + ((ay + by) / 2 - 4) + '" font-size="10" text-anchor="middle" fill="#222" stroke="#fff" stroke-width="3" paint-order="stroke" font-family="sans-serif">x' + ps.count + '</text></g>';
+      var faded = dim && !hiNode[ps.parent], ep = edgePath(A, B, ps.id);
+      svg += '<g' + (faded ? ' opacity="0.2"' : '') + '><title>' + esc(ps.objName + ' <-> ' + ps.name + '\n' + ps.count + ' port(s) occupied by ' + ps.kind.toLowerCase() + ' (not modelled individually)') + '</title><path d="' + ep.d + '" fill="none" stroke="' + esc(ps.color) + '" stroke-width="2.5" stroke-dasharray="2 3"/>' +
+        '<text x="' + ep.lx + '" y="' + ep.ly + '" font-size="10" text-anchor="middle" fill="#222" stroke="#fff" stroke-width="3" paint-order="stroke" font-family="sans-serif">x' + ps.count + '</text></g>';
     });
     pseudoList.forEach(function (ps) {
       var P = pos[ps.id]; if (!P) return;
@@ -144,6 +166,6 @@
     return html;
   }
 
-  NM.graphview = { render: render, defaultRoot: defaultRoot };
+  NM.graphview = { render: render, defaultRoot: defaultRoot, edgePath: edgePath, NODE: { w: NW, h: NH, xgap: XG, ygap: YG } };
   if (typeof module !== 'undefined' && module.exports) module.exports = NM.graphview;
 })(typeof window !== 'undefined' ? window : globalThis);
