@@ -121,6 +121,8 @@ Try it: File -> Load demo project (two rooms, a fixed link between racks, a wall
   resized item slides to the nearest free spot; containers grow to hold what is inside and push neighbouring
   containers away (with their contents), cascading outward. Boxes may touch, so an item can sit right under or beside another;
   new items get grid-sized boxes and sliding away keeps them on the grid. A new item's top-left corner sticks to the pointer.
+  Projects made before this are put on the grid automatically the first time they are opened (positions snap to the nearest grid line,
+  sizes round up so nothing becomes unreadable; marked by `settings.gridAligned`); **File > Align everything to the grid** repeats it any time (undoable).
 - **Fixed link layering**: a fixed link is drawn behind every group, rack and device it does not start or end in, so it no
   longer cuts across unrelated equipment; it shows over its own endpoint groups, racks and panels and over empty canvas.
   Select the link (or trace it) to see its full length on top.

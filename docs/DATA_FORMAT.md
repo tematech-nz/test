@@ -8,7 +8,7 @@ cannot break a connection. Files use LF line endings and are written with 2-spac
 {
   "schemaVersion": 1,
   "id": "prj_...", "name": "...", "createdAt": ISO, "updatedAt": ISO,
-  "settings": { "gridSize": 20, "snapToGrid": true },
+  "settings": { "gridSize": 20, "snapToGrid": true, "gridAligned": true },  // gridAligned: layout was put on the grid (optional)
   "counters": { "patch": 3, "fixed": 1 },          // for generated names PC-003 / FL-001
   "maps":       [ { "id", "name", "location", "viewport": { "x", "y", "zoom" } } ],
   "groups":     [ { "id", "name", "description", "location", "parentGroupId": id|null } ],

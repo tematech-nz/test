@@ -1268,6 +1268,25 @@ console.log('Placing new items');
 test('nextName counts up: trailing numbers keep their width, plain names get a 2', () => {
   assert.deepStrictEqual(['PC 1', 'AP-07', 'Switch', 'Rack 9', 'x99'].map(B.nextName), ['PC 2', 'AP-08', 'Switch 2', 'Rack 10', 'x100']);
 });
+test('alignToGrid puts an old project on the grid, keeps it overlap-free and readable, once per project', () => {
+  const p = M.createProject('old'), mid = p.maps[0].id, g = p.settings.gridSize;
+  p.settings.gridSize = 1; // build off-grid, like an old file
+  const rack = B.addObjectPlaced(p, mid, { type: 'rack', name: 'R' }, 33, 47);
+  const sw = B.addObjectPlaced(p, mid, { type: 'switch', name: 'S', portCount: 16, containerId: rack.id });
+  const pc = B.addObjectPlaced(p, mid, { type: 'generic', name: 'PC', portCount: 1 }, 431, 77);
+  p.settings.gridSize = g;
+  const n = B.alignToGrid(p);
+  assert.ok(n > 0 && p.settings.gridAligned, 'something moved');
+  p.placements.filter(q => !q.refId || [pc.id, rack.id].indexOf(q.refId) >= 0).forEach(q => {
+    assert.ok(q.x % g === 0 && q.y % g === 0 && q.w % g === 0 && q.h % g === 0, 'on the grid: ' + JSON.stringify(q));
+  });
+  const sp = M.placementOf(p, mid, sw.id), rp = M.placementOf(p, mid, rack.id);
+  assert.ok(sp.w >= NM.layout.minSize(sw).w && sp.x >= rp.x && sp.x + sp.w <= rp.x + rp.w && sp.y + sp.h <= rp.y + rp.h, 'switch still readable and inside the rack');
+  assert.deepStrictEqual(overlapPairs(p), []);
+  assert.strictEqual(B.alignToGrid(p), 0, 'runs once per project');
+  assert.strictEqual(B.alignToGrid(p, true), 0, 'forcing it again changes nothing');
+  p.settings.snapToGrid = false; assert.strictEqual(B.alignToGrid(p, true), 0, 'nothing to do without snapping');
+});
 test('new items get grid-sized boxes and can sit right under or beside another without being pushed away', () => {
   const p = M.createProject('g'), mid = p.maps[0].id, g = p.settings.gridSize;
   const a = B.placeNewAt(p, mid, 'object', { type: 'switch', name: 'A', portCount: 8 }, 100, 100);

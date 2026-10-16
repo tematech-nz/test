@@ -1408,8 +1408,9 @@
     toast('Imported ' + res.project.name);
   }
   function loadProject(p) {
-    const fixed = B.normalizeSizes(p);
+    const fixed = B.normalizeSizes(p), aligned = B.alignToGrid(p);
     if (fixed) setTimeout(() => toast('Enlarged ' + fixed + ' item(s) that were too small to read', false), 100);
+    else if (aligned) setTimeout(() => toast('Aligned ' + aligned + ' item(s) to the grid (older project)', false), 100);
     S.rev++; markDirty(false); S.p = p; S.mapId = p.maps[0].id; S.sel = null; S.trace = null; S.tool = null; S.undo = []; S.redo = []; S.issues = []; S.showIssues = false;
     saveNow(); renderAll();
     if (p.placements.some((q) => q.mapId === S.mapId)) fitMap();
@@ -1418,13 +1419,14 @@
     const choice = await openDialog({
       title: 'Project: ' + S.p.name, render: () => ({
         body: '<div class="btn-row" style="flex-direction:column;align-items:stretch">' +
-          [['rename', 'Rename project'], ['json', 'Export project as JSON (backup)'], ['import', 'Import JSON...'], ['svg', 'Export map as SVG'], ['png', 'Export map as PNG'], ['pdf', 'Export PDF (maps + connection table)'], ['table', 'Connection table...'], ['validate', 'Validate project'], ['demo', 'Load demo project...'], ['new', 'New empty project...'], ['help', 'Help']]
+          [['rename', 'Rename project'], ['json', 'Export project as JSON (backup)'], ['import', 'Import JSON...'], ['svg', 'Export map as SVG'], ['png', 'Export map as PNG'], ['pdf', 'Export PDF (maps + connection table)'], ['table', 'Connection table...'], ['grid', 'Align everything to the grid'], ['validate', 'Validate project'], ['demo', 'Load demo project...'], ['new', 'New empty project...'], ['help', 'Help']]
             .map((b) => '<button data-btn="' + b[0] + '">' + b[1] + '</button>').join('') + '</div><p class="sub">Browser autosave is a convenience only. Export a JSON file to back up your work.</p>',
         buttons: [{ key: 'x', label: 'Close' }]
       }), onButton: (k, c) => c.close(k)
     });
     if (!choice || choice === 'x') return;
     if (choice === 'rename') { const v = await formDlg('Rename project', [{ k: 'n', label: 'Name', v: S.p.name }], 'Save'); if (v && v.n) commit('Rename project', (p) => { p.name = v.n; }); }
+    else if (choice === 'grid') { const n = commit('Align to grid', (p) => B.alignToGrid(p, true)); toast(typeof n === 'number' && n ? 'Aligned ' + n + ' item(s) to the grid' : 'Everything is already on the grid'); }
     else if (choice === 'json') exportJson();
     else if (choice === 'import') $('fileInput').click();
     else if (choice === 'svg' || choice === 'png' || choice === 'pdf') exportImages(choice);
@@ -1602,7 +1604,7 @@
   function init() {
     try { S.lastExport = localStorage.getItem(KEY_EXPORT); S.fileDirty = localStorage.getItem(KEY_DIRTY) === '1'; } catch (_) { S.lastExport = null; }
     S.p = loadSaved() || M.createProject('Untitled project');
-    if (B.normalizeSizes(S.p)) saveNow();
+    if (B.normalizeSizes(S.p) | B.alignToGrid(S.p)) saveNow();
     S.mapId = S.p.maps[0].id;
     loadCollapsed();
     bindUi(); bindCanvas();

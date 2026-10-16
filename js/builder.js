@@ -351,6 +351,37 @@
     touched.forEach(function (pl) { settle(p, pl); });
     return changed;
   }
+  /*
+   * Old projects: put every box on the grid (position to the nearest grid line, size rounded up so nothing gets smaller than
+   * its readable minimum), then settle so containers hold their contents and nothing overlaps. Runs once automatically per
+   * project (settings.gridAligned) unless force is set. Returns how many placements changed.
+   */
+  function alignToGrid(p, force) {
+    var s = p.settings, g = gridStep(p);
+    if (!s || g <= 1 || (!force && s.gridAligned)) return 0;
+    var pm = parentMap(p), changed = 0;
+    function depth(pl) { var d = 0, id = pm[pl.refId], n = 0; while (id && n++ < 20) { d++; id = pm[id]; } return d; }
+    var list = p.placements.map(function (pl) { return { pl: pl, d: depth(pl) }; }).sort(function (a, b) { return a.d - b.d; });
+    list.forEach(function (it) {
+      var pl = it.pl, par = pm[pl.refId], cp = par ? M.placementOf(p, pl.mapId, par) : null;
+      var nx = Math.round(pl.x / g) * g, ny = Math.round(pl.y / g) * g;
+      if (cp) { nx = Math.max(nx, gridUp(p, cp.x + M.PAD)); ny = Math.max(ny, gridUp(p, cp.y + M.HEADER + 2)); }
+      var nw = gridUp(p, pl.w), nh = gridUp(p, pl.h);
+      if (nx !== pl.x || ny !== pl.y || nw !== pl.w || nh !== pl.h) { pl.x = nx; pl.y = ny; pl.w = nw; pl.h = nh; changed++; }
+    });
+    // containers that grew around off-grid contents are rounded up again (deepest first) until nothing changes
+    for (var pass = 0; pass < 4; pass++) {
+      var again = false;
+      list.slice().reverse().forEach(function (it) {
+        settle(p, it.pl);
+        var q = it.pl, nw = gridUp(p, q.w), nh = gridUp(p, q.h);
+        if (nw !== q.w || nh !== q.h) { q.w = nw; q.h = nh; again = true; changed++; }
+      });
+      if (!again) break;
+    }
+    s.gridAligned = true;
+    return changed;
+  }
   /* after a label/port change: grow (never shrink) the object's placements to the new minimum */
   function fitMinimum(p, objectId) {
     var o = M.buildIndex(p).objects[objectId];
@@ -405,6 +436,6 @@
     return m[1] + n;
   }
 
-  NM.builder = { containerAt: containerAt, placeNewAt: placeNewAt, nextName: nextName, applyFullWidth: applyFullWidth, applyFullWidthFor: applyFullWidthFor, minPlacementSize: minPlacementSize, normalizeSizes: normalizeSizes, fitMinimum: fitMinimum, resolveDrop: resolveDrop, settle: settle, findDropContainer: findDropContainer, dropSlot: dropSlot, restack: restack, captureChain: captureChain, restoreChain: restoreChain, applyExtension: applyExtension, refitObject: refitObject, placeItem: placeItem, addGroupPlaced: addGroupPlaced, addObjectPlaced: addObjectPlaced, buildDemoProject: buildDemoProject };
+  NM.builder = { containerAt: containerAt, placeNewAt: placeNewAt, nextName: nextName, applyFullWidth: applyFullWidth, applyFullWidthFor: applyFullWidthFor, minPlacementSize: minPlacementSize, normalizeSizes: normalizeSizes, alignToGrid: alignToGrid, fitMinimum: fitMinimum, resolveDrop: resolveDrop, settle: settle, findDropContainer: findDropContainer, dropSlot: dropSlot, restack: restack, captureChain: captureChain, restoreChain: restoreChain, applyExtension: applyExtension, refitObject: refitObject, placeItem: placeItem, addGroupPlaced: addGroupPlaced, addObjectPlaced: addObjectPlaced, buildDemoProject: buildDemoProject };
   if (typeof module !== 'undefined' && module.exports) module.exports = NM.builder;
 })(typeof window !== 'undefined' ? window : globalThis);
