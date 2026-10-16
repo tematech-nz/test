@@ -278,6 +278,12 @@
     var rc = M.findContainer(p, rackPl.refId);
     if (!rc || rc.kind !== 'object' || rc.item.type !== 'rack') return null;
     var sibs = stackSiblings(p, dragPl.mapId, rackPl.refId, dragPl.refId), cy = dragPl.y + dragPl.h / 2, index = 0;
+    // next to an existing item in the same row (e.g. adding to a row of devices): free placement, no magnet. "Next to" = shares
+    // a good part of its height but not its width, so items that stack above/below each other (same width) still magnetise.
+    function overlap(a0, a1, b0, b1) { return Math.max(0, Math.min(a1, b1) - Math.max(a0, b0)); }
+    if (sibs.some(function (s) {
+      return overlap(dragPl.y, dragPl.y + dragPl.h, s.y, s.y + s.h) > 0.3 * dragPl.h && overlap(dragPl.x, dragPl.x + dragPl.w, s.x, s.x + s.w) < 0.3 * dragPl.w;
+    })) return null;
     if (fromContainerId === rackPl.refId) {
       var best = null;
       for (var i = 1; i < sibs.length; i++) {
@@ -290,18 +296,26 @@
       return { containerId: rackPl.refId, index: best.i, line: { x: rackPl.x + M.PAD / 2, y: best.y, w: rackPl.w - M.PAD } };
     }
     sibs.forEach(function (s) { if (s.y + s.h / 2 < cy) index++; });
-    var top = rackPl.y + M.HEADER, prevBottom = index ? sibs[index - 1].y + sibs[index - 1].h : top;
-    var y = index < sibs.length ? (prevBottom + sibs[index].y) / 2 : prevBottom + 4;
+    var above = sibs.slice(0, index), below = sibs.slice(index);
+    var prevBottom = above.reduce(function (m, s) { return Math.max(m, s.y + s.h); }, rackPl.y + M.HEADER);
+    var y = below.length ? (prevBottom + Math.min.apply(null, below.map(function (s) { return s.y; }))) / 2 : prevBottom + 4;
     return { containerId: rackPl.refId, index: index, line: { x: rackPl.x + M.PAD / 2, y: y, w: rackPl.w - M.PAD } };
   }
   /* attach: re-stack the rack's equipment top to bottom with the dragged item at `index` */
   function restack(p, mapId, rackId, dragRefId, index) {
     var rackPl = M.placementOf(p, mapId, rackId), dragPl = M.placementOf(p, mapId, dragRefId);
     if (!rackPl || !dragPl) return;
-    var list = stackSiblings(p, mapId, rackId, dragRefId);
-    list.splice(Math.min(index, list.length), 0, dragPl);
-    var y = rackPl.y + M.HEADER + 6;
-    list.forEach(function (q) { q.x = rackPl.x + M.PAD; q.y = y; y += q.h + 8; });
+    // Insert at the slot without re-flowing the rack: only the dragged item moves into place and whatever sits at or below the
+    // slot is pushed down, so rows of side-by-side devices keep their layout. In a plain stack (everything left-aligned) the
+    // item also aligns to it; otherwise it keeps the x where it was dropped.
+    var sibs = stackSiblings(p, mapId, rackId, dragRefId), left = rackPl.x + M.PAD;
+    var stacked = sibs.every(function (s) { return Math.abs(s.x - left) < 3; });
+    var lastBottom = sibs.reduce(function (m, s) { return Math.max(m, s.y + s.h); }, rackPl.y + M.HEADER - 2);
+    var slotTop = index < sibs.length ? sibs[index].y : lastBottom + 8;
+    var below = sibs.filter(function (s) { return s.y >= slotTop - 1; });
+    dragPl.y = slotTop;
+    dragPl.x = stacked ? left : Math.max(dragPl.x, left);
+    below.forEach(function (s) { s.y += dragPl.h + 8; });
     M.growToFit(p, mapId, rackId);
   }
 

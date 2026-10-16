@@ -521,7 +521,7 @@ test('dropSlot finds the insertion line between rack neighbours; restack attache
   assert.ok(pl(rack).y + pl(rack).h >= pl(sw).y + pl(sw).h, 'rack still contains everything');
   // dragged above everything -> index 0; far below the last item inside the rack -> last
   // dragged from elsewhere: the magnet works at the ends too; inside its own rack only seams between stuck items magnetise
-  drag.y = pl(rack).y;
+  drag.y = pl(rack).y - drag.h / 2 + 4; // centre just inside the rack top, above every item
   assert.strictEqual(B.dropSlot(p, drag, null).index, 0);
   assert.strictEqual(B.dropSlot(p, drag, rack.id), null, 'free placement in its own rack away from a seam');
   drag.y = pl(rack).y + pl(rack).h - drag.h;
@@ -1176,6 +1176,59 @@ test('port groups are drawn as a coloured band with a name tag, and exported', (
   // collapsed strip hides the band safely
   const c = R.renderMap(p, mid, { collapsed: { [M.placementOf(p, mid, pp.id).id]: { rear: true } } });
   assert.ok(c.content.indexOf('to rack office</text>') < 0);
+});
+
+console.log('Version stamp');
+test('version files match the sources; the stamp tracks content, ignores CRLF and its own files', () => {
+  const V = require('../tools/version.js'), fs = require('fs'), os = require('os'), path = require('path');
+  const root = path.resolve(__dirname, '..');
+  assert.ok(V.isCurrent(root), 'run "npm run stamp"');
+  const v = V.computeVersion(root);
+  assert.ok(/^[0-9a-f]{10}$/.test(v));
+  assert.strictEqual(JSON.parse(fs.readFileSync(path.join(root, 'version.json'), 'utf8')).version, v);
+  assert.ok(fs.readFileSync(path.join(root, 'js/version.js'), 'utf8').indexOf('NetMap.version = "' + v + '"') > 0);
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'netmap-ver-'));
+  try {
+    V.sources(root).forEach((f) => { fs.mkdirSync(path.dirname(path.join(tmp, f)), { recursive: true }); fs.copyFileSync(path.join(root, f), path.join(tmp, f)); });
+    fs.copyFileSync(path.join(root, 'js/version.js'), path.join(tmp, 'js/version.js'));
+    assert.strictEqual(V.computeVersion(tmp), v);
+    fs.writeFileSync(path.join(tmp, 'js/version.js'), '// anything');
+    assert.strictEqual(V.computeVersion(tmp), v, 'js/version.js is not part of the hash');
+    const css = fs.readFileSync(path.join(tmp, 'css/style.css'), 'utf8');
+    fs.writeFileSync(path.join(tmp, 'css/style.css'), css.replace(/\n/g, '\r\n'));
+    assert.strictEqual(V.computeVersion(tmp), v, 'line endings do not change the version');
+    fs.writeFileSync(path.join(tmp, 'css/style.css'), css + '\n/* edit */\n');
+    assert.notStrictEqual(V.computeVersion(tmp), v, 'a source change changes the version');
+    assert.ok(!V.isCurrent(tmp), 'stale version files are detected');
+  } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
+});
+
+test('placing a device beside others in a rack row is free: no magnet line, and a magnet drop never re-flows existing rows', () => {
+  const p = M.createProject('row'), mid = p.maps[0].id;
+  const rack = B.addObjectPlaced(p, mid, { type: 'rack', name: 'R' }, 0, 0);
+  const rp = M.placementOf(p, mid, rack.id); rp.w = 900; rp.h = 400;
+  const mk = (n, x, y) => { const o = B.addObjectPlaced(p, mid, { type: 'internet', name: n, portCount: 1, containerId: rack.id }, 0, 0); const q = M.placementOf(p, mid, o.id); q.x = rp.x + x; q.y = rp.y + y; return { o, q }; };
+  const a = mk('A', 10, 60), b = mk('B', 200, 60), c = mk('C', 400, 60);
+  const outsider = M.addObject(p, { type: 'internet', name: 'D', portCount: 1 });
+  const dq = M.addPlacement(p, mid, 'object', outsider.id, rp.x + 600, rp.y + 70, 150, 50);
+  // centre inside the row's vertical band -> free placement whether it comes from outside or from this rack
+  M.setContainer(p, 'object', outsider.id, rack.id);
+  assert.strictEqual(B.dropSlot(p, dq, null), null);
+  assert.strictEqual(B.dropSlot(p, dq, rack.id), null);
+  // below the row: from outside the slot is after the row; restack leaves the row exactly where it was
+  dq.y = rp.y + 200;
+  const slot = B.dropSlot(p, dq, null);
+  assert.ok(slot && slot.index === 3);
+  const before = [a, b, c].map(x => [x.q.x, x.q.y]);
+  const dx = dq.x;
+  B.restack(p, mid, rack.id, outsider.id, slot.index);
+  assert.deepStrictEqual([a, b, c].map(x => [x.q.x, x.q.y]), before, 'the row is untouched');
+  assert.strictEqual(dq.x, dx, 'a row layout (not a left-aligned stack) keeps the dropped x');
+  assert.ok(dq.y >= a.q.y + a.q.h, 'below the row');
+  // dropping into the middle of the row band slides it clear instead (no overlap)
+  dq.x = b.q.x + 20; dq.y = b.q.y + 5;
+  B.resolveDrop(p, dq.id);
+  assert.deepStrictEqual(overlapPairs(p), []);
 });
 
 console.log('\n' + passed + ' passed, ' + failed + ' failed');

@@ -1,0 +1,4 @@
+#!/bin/sh
+# Optional: git config core.hooksPath .githooks
+# Keeps version.json and js/version.js in step with the sources so open pages learn about the update.
+node tools/version.js >/dev/null && git add version.json js/version.js

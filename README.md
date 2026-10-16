@@ -104,10 +104,11 @@ Try it: File -> Load demo project (two rooms, a fixed link between racks, a wall
 - **Dragging into container edges**: drag an item toward the bottom or right edge of its group or rack and the container
   grows live to hold it (up to about 60 units past the edge). Drag further and the extension disappears again; drop outside
   or inside another container to move it there. Dropping inside the extension keeps the larger container.
-- **Rack stacking**: dragging equipment from outside into a rack outlines the rack in green and shows a line where it will attach;
-  on drop the rack's equipment is re-stacked with it at that position. Moving equipment around inside its own rack is free: the
-  magnet only applies at a seam between two items that are stuck together, so you can insert an item between them (the line
-  shows where) or place it anywhere else without snapping.
+- **Rack stacking**: dragging equipment from outside into a rack outlines the rack in green and shows a line where it will attach.
+  The magnet only applies in stack-like spots: it is off when you place a device **beside** others in a row (so you can line
+  devices up freely) and, for items already in the rack, it only appears at a seam between two items that are stuck together.
+  A magnet drop inserts at the line and pushes what is below it down - it never re-flows the rest of the rack, and it only
+  aligns the item to the left edge when the rack really is a left-aligned stack.
 - **No overlaps**: items inside the same container (or at the top level of a map) never overlap. A dropped, newly placed or
   resized item slides to the nearest free spot; containers grow to hold what is inside and push neighbouring
   containers away (with their contents), cascading outward.
@@ -117,6 +118,19 @@ Try it: File -> Load demo project (two rooms, a fixed link between racks, a wall
 - **Selecting a fixed link, wire or patch cable** highlights its ports (yellow) on both ends, on whichever map they appear.
 - **Maps**: the same object can be shown on several maps ("Add existing here"); connections reference the shared
   object and port records. Trace results offer "open <map>" links to continue across maps.
+
+## Updates and unsaved changes
+
+- **New-version notice**: every build has a version stamp (a short hash of the sources: `js/version.js` is what this page runs,
+  `version.json` is what the server has). When the page is served over http(s) it reads `version.json` every minute (and when you
+  return to the tab). If it differs, the header shows **New version available** and a banner asks you to export your project and
+  reload with **F5** or **Ctrl+R**. Nothing is ever reloaded for you. Opened from disk (`file://`) there is nothing to poll, so no notice.
+- **Stamp the version** whenever you change source files before publishing: `npm run stamp` (`npm test` does it first), or enable
+  the optional hook once with `git config core.hooksPath .githooks`. `node tools/version.js --check` fails when the stamp is stale.
+  `npm run serve` always reports the current files' version, so local edits are noticed immediately.
+- **Leave-page protection**: reloading or closing the tab with changes that were not exported to a file asks for confirmation
+  (the browser autosave is not a backup). Exporting a JSON file, or importing / loading a project, clears the flag; zooming and
+  folding do not set it. The flag also survives a reload, so you are asked again until you export.
 
 ## Saving and backup
 
@@ -140,6 +154,7 @@ connectivity rules, and migration strategy.
 | `js/model.js` | Data model, rules, validation, search, migration. No DOM. |
 | `js/trace.js` | End-to-end tracing. |
 | `js/layout.js`, `js/render.js` | Geometry and SVG rendering (shared by screen and exports). |
+| `tools/version.js`, `tools/serve.js` | Version stamp (`version.json`, `js/version.js`) and the optional dev server. |
 | `js/exporters.js` | Connection table, PDF writer, download helpers. |
 | `js/builder.js` | Placement helpers and the demo project. |
 | `js/topology.js`, `js/graphview.js` | Device-level graph, reachability tree, path search and the Graph view. |

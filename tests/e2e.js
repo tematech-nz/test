@@ -18,6 +18,8 @@ const ok = (m) => console.log('  ok   ' + m);
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, acceptDownloads: true });
   const page = await ctx.newPage();
   const errors = [];
+  const dialogs = []; // beforeunload prompts etc: record and accept so reloads in the tests proceed
+  page.on('dialog', (d) => { dialogs.push(d.type()); d.accept(); });
   page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
   page.on('console', (m) => { if (m.type() === 'error') errors.push('console: ' + m.text()); });
   const shot = async (name) => { if (shots) await page.screenshot({ path: path.join(shots, String(++n).padStart(2, '0') + '-' + name + '.png') }); };
@@ -920,6 +922,37 @@ const ok = (m) => console.log('  ok   ' + m);
     for (let i = 0; i < 12; i++) await page.click('#btnUndo');
   });
 
+
+  await step('adding a device to a row inside a rack is free placement (no magnet line, row untouched)', async () => {
+    const ids = await page.evaluate(() => {
+      let out;
+      NetMap.app.api.commit('row rack', (p) => {
+        const B = NetMap.builder, M = NetMap.model, mid = p.maps[0].id;
+        const rack = B.addObjectPlaced(p, mid, { type: 'rack', name: 'RowRack' }, 9600, 40);
+        const rp = M.placementOf(p, mid, rack.id); rp.w = 800; rp.h = 360;
+        const mk = (n, x) => { const o = B.addObjectPlaced(p, mid, { type: 'internet', name: n, portCount: 1, containerId: rack.id }, 0, 0); const q = M.placementOf(p, mid, o.id); q.x = rp.x + x; q.y = rp.y + 60; return q.id; };
+        const outside = B.addObjectPlaced(p, mid, { type: 'internet', name: 'RowNew', portCount: 1 }, 9600, 520);
+        out = { rack: rack.id, row: [mk('R1', 12), mk('R2', 212), mk('R3', 412)], mover: M.placementOf(p, mid, outside.id).id, outside: outside.id };
+      });
+      NetMap.app.api.goTo('object', out.rack, NetMap.app.S.p.maps[0].id);
+      return out;
+    });
+    const rowPos = () => page.evaluate((r) => r.map(id => { const q = NetMap.app.S.p.placements.find(x => x.id === id); return [q.x, q.y]; }), ids.row);
+    const before = JSON.stringify(await rowPos());
+    const info = await page.evaluate((i) => { const S = NetMap.app.S, q = S.p.placements.find(x => x.id === i.mover), rp = S.p.placements.find(x => x.refId === i.rack), r1 = S.p.placements.find(x => x.id === i.row[0]); return { zoom: S.p.maps[0].viewport.zoom, dx: (rp.x + 640 - q.x), dy: (r1.y + 5 - q.y) }; }, ids);
+    const box = await page.locator('[data-handle="move"][data-pl="' + ids.mover + '"]').boundingBox();
+    await page.mouse.move(box.x + 5, box.y + 5); await page.mouse.down();
+    await page.mouse.move(box.x + 5 + info.dx * info.zoom, box.y + 5 + info.dy * info.zoom, { steps: 10 });
+    await page.waitForTimeout(100);
+    assert.strictEqual(await page.locator('#vp [data-drop="line"]').count(), 0, 'no magnet line beside the row');
+    await page.mouse.up();
+    await page.waitForTimeout(100);
+    assert.strictEqual(JSON.stringify(await rowPos()), before, 'the existing row did not move');
+    const inRack = await page.evaluate((i) => NetMap.app.S.p.objects.find(o => o.id === i.outside).containerId === i.rack, ids);
+    assert.ok(inRack, 'it joined the rack');
+    for (let i = 0; i < 2; i++) await page.click('#btnUndo');
+  });
+
   await step('autosave survives a refresh', async () => {
     await page.click('#btnMode'); // back to view mode flushes the save
     const name = await page.evaluate(() => NetMap.app.S.p.name);
@@ -974,9 +1007,69 @@ const ok = (m) => console.log('  ok   ' + m);
     await page.click('#dlg button[data-btn="close"]');
   });
 
+
+  await step('leaving with changes that were never exported asks first; after an export it does not', async () => {
+    const n0 = dialogs.length;
+    await page.evaluate(() => NetMap.app.api.commit('touch', (p) => { p.name = p.name + ' '; }));
+    assert.strictEqual(await page.evaluate(() => NetMap.app.S.fileDirty), true);
+    await page.reload();
+    assert.ok(dialogs.slice(n0).indexOf('beforeunload') >= 0, 'reload prompted: ' + dialogs.slice(n0));
+    assert.strictEqual(await page.evaluate(() => NetMap.app.S.fileDirty), true, 'the unsaved state survives the reload');
+    const n1 = dialogs.length;
+    await page.click('#btnFile');
+    await Promise.all([page.waitForEvent('download'), page.click('#dlg button[data-btn="json"]')]);
+    assert.strictEqual(await page.evaluate(() => NetMap.app.S.fileDirty), false);
+    await page.reload();
+    assert.strictEqual(dialogs.slice(n1).indexOf('beforeunload'), -1, 'clean: no prompt');
+    // zooming / folding are view state and must not make the project dirty
+    await page.evaluate(() => { document.getElementById('zoomIn').click(); });
+    assert.strictEqual(await page.evaluate(() => NetMap.app.S.fileDirty), false);
+  });
+
+  await step('new-version detection: polls version.json, shows a header warning and a banner, never reloads', async () => {
+    const cp = require('child_process'), os = require('os');
+    const repo = path.resolve(__dirname, '..');
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'netmap-e2e-'));
+    ['index.html', 'version.json'].forEach((f) => fs.copyFileSync(path.join(repo, f), path.join(tmp, f)));
+    ['css', 'js'].forEach((d) => { fs.mkdirSync(path.join(tmp, d)); fs.readdirSync(path.join(repo, d)).forEach((f) => fs.copyFileSync(path.join(repo, d, f), path.join(tmp, d, f))); });
+    const port = 20000 + Math.floor(Math.random() * 20000);
+    const server = cp.spawn(process.execPath, [path.join(repo, 'tools', 'serve.js'), String(port)], { env: Object.assign({}, process.env, { NETMAP_ROOT: tmp }), stdio: ['ignore', 'pipe', 'pipe'] });
+    try {
+      await new Promise((res, rej) => { server.stdout.on('data', (d) => { if (/NetMap on/.test(String(d))) res(); }); server.on('error', rej); setTimeout(() => rej(new Error('server did not start')), 8000); });
+      const vp = await ctx.newPage();
+      vp.on('dialog', (d) => d.accept());
+      await vp.goto('http://127.0.0.1:' + port + '/');
+      await vp.waitForSelector('#vp, #canvas');
+      const cur = await vp.evaluate(() => NetMap.version);
+      assert.ok(/^[0-9a-f]{10}$/.test(cur));
+      assert.strictEqual(await vp.evaluate(() => NetMap.app.api.pollMs), 60000, 'polls once a minute');
+      assert.ok((await vp.innerText('#verInfo')).indexOf(cur) >= 0, 'header shows the running version');
+      await vp.evaluate(() => { window.__marker = 'same page'; });
+      assert.strictEqual(await vp.evaluate(() => NetMap.app.api.checkVersion()), cur);
+      assert.ok(await vp.isHidden('#btnUpdate') && await vp.isHidden('#updateBar'), 'no warning while up to date');
+      fs.appendFileSync(path.join(tmp, 'css', 'style.css'), '\n/* deployed change */\n');
+      const latest = await vp.evaluate(() => NetMap.app.api.checkVersion());
+      assert.notStrictEqual(latest, cur);
+      assert.ok(await vp.isVisible('#btnUpdate'), 'header warning');
+      const bar = await vp.innerText('#updateBar');
+      assert.ok(/new version/i.test(bar) && /F5/.test(bar) && /Ctrl\+R/.test(bar) && /Export JSON/i.test(bar), bar);
+      await vp.screenshot({ path: shots ? path.join(shots, 'new-version.png') : path.join(tmp, 'x.png') });
+      assert.strictEqual(await vp.evaluate(() => window.__marker), 'same page', 'the page was not reloaded');
+      await vp.click('#updateBar button[data-upd="hide"]');
+      assert.ok(await vp.isHidden('#updateBar') && await vp.isVisible('#btnUpdate'), 'banner hidden, header warning stays');
+      await vp.click('#btnUpdate');
+      assert.ok(await vp.isVisible('#updateBar'));
+      const [dl] = await Promise.all([vp.waitForEvent('download'), vp.click('#updateBar button[data-upd="export"]')]);
+      assert.ok(/\.json$/.test(dl.suggestedFilename()));
+      assert.strictEqual(await vp.evaluate(() => window.__marker), 'same page');
+      await vp.close();
+    } finally { server.kill(); fs.rmSync(tmp, { recursive: true, force: true }); }
+  });
+
   /* ---- phone ---- */
   const mctx = await browser.newContext({ viewport: { width: 390, height: 780 }, hasTouch: true, isMobile: true });
   const m = await mctx.newPage();
+  m.on('dialog', (d) => d.accept());
   m.on('pageerror', (e) => errors.push('mobile pageerror: ' + e.message));
   await m.goto(URL);
   await m.evaluate((txt) => { localStorage.setItem('netmap.autosave.v1', txt); }, await page.evaluate(() => JSON.stringify(NetMap.app.S.p)));
