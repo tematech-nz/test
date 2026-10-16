@@ -777,34 +777,62 @@ test('alignment moves the ports inside a wider switch', () => {
   assert.ok(Math.abs(center - left - 101) < 1 && Math.abs(right - left - 202) < 1);
 });
 test('fullWidth equipment fills its rack, follows rack resizes and never shrinks below readable', () => {
-  const p = M.createProject('s'), mid = p.maps[0].id;
+  const p = M.createProject('s'), mid = p.maps[0].id, INS = 2 * M.PAD; // side margin of full-width items: one grid step when the rack is on the grid
   const rack = B.addObjectPlaced(p, mid, { type: 'rack', name: 'R' }, 0, 0);
   const sw = B.addObjectPlaced(p, mid, { type: 'switch', name: 'S', portCount: 24, containerId: rack.id });
   const rp = M.placementOf(p, mid, rack.id), sp = M.placementOf(p, mid, sw.id), mn = NM.layout.minSize(sw).w;
   M.setFullWidth(p, sw.id, true); B.applyFullWidthFor(p, sw.id);
-  assert.strictEqual(sp.w, Math.max(mn, rp.w - 2 * M.PAD));
-  assert.strictEqual(sp.x, rp.x + M.PAD);
+  assert.strictEqual(sp.w, Math.max(mn, rp.w - 2 * INS));
+  assert.strictEqual(sp.x, rp.x + INS);
   rp.w = 600; B.settle(p, rp);
-  assert.strictEqual(sp.w, 600 - 2 * M.PAD);
-  assert.ok(B.minPlacementSize(p, rp).w <= mn + 2 * M.PAD + 1, 'rack can shrink to the switch minimum, not stay at its stretched width');
+  assert.strictEqual(sp.w, 600 - 2 * INS);
+  assert.ok(B.minPlacementSize(p, rp).w <= mn + 2 * INS + 1, 'rack can shrink to the switch minimum, not stay at its stretched width');
   rp.w = 100; B.settle(p, rp);
-  assert.ok(sp.w >= mn && rp.w >= sp.w + 2 * M.PAD, 'rack grew instead of crushing the switch');
+  assert.ok(sp.w >= mn && rp.w >= sp.w + INS + M.PAD, 'rack grew instead of crushing the switch');
   M.setFullWidth(p, sw.id, false); assert.strictEqual(sw.fullWidth, undefined);
   assert.deepStrictEqual(overlapPairs(p), []);
 });
+test('full-width equipment left off-line in an old project is lined up with its rack and the grid on load', () => {
+  const p = M.createProject('s'), mid = p.maps[0].id;
+  const rack = B.addObjectPlaced(p, mid, { type: 'rack', name: 'R' }, 0, 0);
+  const sw = B.addObjectPlaced(p, mid, { type: 'switch', name: 'S', portCount: 24, containerId: rack.id });
+  M.setFullWidth(p, sw.id, true); B.applyFullWidthFor(p, sw.id);
+  const rp = M.placementOf(p, mid, rack.id), sp = M.placementOf(p, mid, sw.id);
+  sp.x += 15; // stale position
+  assert.ok(B.normalizeSizes(p) > 0);
+  assert.strictEqual(sp.x, rp.x + 2 * M.PAD);
+  assert.strictEqual((sp.x % p.settings.gridSize), 0, 'on the grid');
+  assert.strictEqual(sp.x + sp.w, rp.x + rp.w - 2 * M.PAD, 'symmetric margins');
+  assert.strictEqual(B.normalizeSizes(p), 0, 'stable');
+});
+test('old project: a switch stored too short that sits on the one below is repaired and pushed apart on load', () => {
+  const p = M.createProject('s'), mid = p.maps[0].id;
+  const rack = B.addObjectPlaced(p, mid, { type: 'rack', name: 'R' }, 0, 0);
+  const top = B.addObjectPlaced(p, mid, { type: 'switch', name: 'S3', portCount: 24, containerId: rack.id });
+  const low = B.addObjectPlaced(p, mid, { type: 'switch', name: 'S2', portCount: 8, containerId: rack.id });
+  const tp = M.placementOf(p, mid, top.id), lp = M.placementOf(p, mid, low.id);
+  lp.x = tp.x; lp.y = tp.y + tp.h + 20; // sits right below
+  tp.h = tp.h - 20; // stored too short: drawn taller by the readable minimum
+  const need = NM.layout.minSizeAt(top, tp.w).h;
+  tp.y = lp.y - 30; // and now the taller drawing reaches into the one below
+  B.normalizeSizes(p);
+  assert.ok(tp.h >= need, 'enlarged to its readable height');
+  assert.ok(lp.y >= tp.y + tp.h, 'the lower switch no longer sits under it');
+  assert.deepStrictEqual(overlapPairs(p), []);
+});
 test('rack with a fullWidth switch can be made much narrower: sections wrap onto more lines', () => {
-  const p = M.createProject('s'), mid = p.maps[0].id, L = NM.layout;
+  const p = M.createProject('s'), mid = p.maps[0].id, L = NM.layout, INS = 2 * M.PAD;
   const rack = B.addObjectPlaced(p, mid, { type: 'rack', name: 'R' }, 0, 0);
   const sw = B.addObjectPlaced(p, mid, { type: 'switch', name: 'S', portCount: 24, containerId: rack.id });
   M.setSectionSize(p, sw.id, 8);
   const rp = M.placementOf(p, mid, rack.id), sp = M.placementOf(p, mid, sw.id), natW = L.minSize(sw).w, natH = L.minSize(sw).h;
   M.setFullWidth(p, sw.id, true); B.applyFullWidthFor(p, sw.id);
   const minW = B.minPlacementSize(p, rp).w;
-  assert.ok(minW < natW + 2 * M.PAD, 'rack minimum is below the one-line width of the switch: ' + minW + ' vs ' + natW);
+  assert.ok(minW < natW + 2 * INS, 'rack minimum is below the one-line width of the switch: ' + minW + ' vs ' + natW);
   rp.w = minW; B.settle(p, rp);
-  assert.strictEqual(sp.w, rp.w - 2 * M.PAD);
+  assert.strictEqual(sp.w, rp.w - 2 * INS);
   assert.ok(sp.h > natH, 'switch grew taller to wrap its sections');
-  assert.ok(rp.w >= sp.w + 2 * M.PAD && rp.h >= sp.y + sp.h - rp.y);
+  assert.ok(rp.w >= sp.w + 2 * INS && rp.h >= sp.y + sp.h - rp.y);
   const lay = L.computeLayout(sw, sp.w, sp.h);
   Object.keys(lay.ports).forEach((id) => { const r = lay.ports[id]; assert.ok(r.x >= 0 && r.x + r.w <= sp.w + 0.5, 'port inside switch width'); });
   assert.deepStrictEqual(overlapPairs(p), []);

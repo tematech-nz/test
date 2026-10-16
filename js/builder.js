@@ -73,16 +73,19 @@
     return out;
   }
   /* equipment flagged fullWidth fills the inner width of its container (never below its readable minimum) */
+  /* side margin of full-width equipment: one grid step when the container sits on the grid (so the edge is on the grid too) */
+  function fwInset(p, cp) { var g = gridStep(p); return g > 1 && cp.x % g === 0 ? gridUp(p, M.PAD) : M.PAD; }
   function applyFullWidth(p, mapId, containerRefId) {
     var cp = M.placementOf(p, mapId, containerRefId), changed = false;
     if (!cp) return false;
+    var inset = fwInset(p, cp);
     M.containerChildren(p, containerRefId).forEach(function (k) {
       if (k.kind !== 'object') return;
       var o = M.findContainer(p, k.id).item;
       if (!o.fullWidth || o.type === 'rack') return;
       var q = M.placementOf(p, mapId, k.id);
       if (!q) return;
-      var w = Math.max(L.minWidth(o), cp.w - 2 * M.PAD), x = cp.x + M.PAD, h = Math.max(q.h, L.minSizeAt(o, w).h);
+      var w = Math.max(L.minWidth(o), cp.w - 2 * inset), x = cp.x + inset, h = Math.max(q.h, L.minSizeAt(o, w).h);
       if (q.w !== w || q.x !== x || q.h !== h) { q.w = w; q.x = x; q.h = h; changed = true; }
     });
     return changed;
@@ -372,7 +375,7 @@
     M.containerChildren(p, pl.refId).forEach(function (k) {
       var q = M.placementOf(p, pl.mapId, k.id);
       var kc = M.findContainer(p, k.id);
-      if (q) { base.w = Math.max(base.w, (kc && kc.item.fullWidth ? L.minWidth(kc.item) + 2 * M.PAD : q.x + q.w + M.PAD - pl.x)); base.h = Math.max(base.h, q.y + q.h + M.PAD - pl.y); }
+      if (q) { base.w = Math.max(base.w, (kc && kc.item.fullWidth ? L.minWidth(kc.item) + 2 * fwInset(p, pl) : q.x + q.w + M.PAD - pl.x)); base.h = Math.max(base.h, q.y + q.h + M.PAD - pl.y); }
     });
     return base;
   }
@@ -389,6 +392,19 @@
       if (pl.w < mn.w || pl.h < mn.h) { pl.w = Math.max(pl.w, mn.w); pl.h = Math.max(pl.h, mn.h); changed++; touched.push(pl); }
     });
     touched.forEach(function (pl) { settle(p, pl); });
+    // anything the repairs above made overlap (or that overlapped already) slides apart again
+    var before = p.placements.map(function (q) { return q.x + ',' + q.y + ',' + q.w + ',' + q.h; });
+    p.placements.slice().sort(function (a, b) { return a.y - b.y; }).forEach(function (pl) { if (siblingsOf(p, parentMap(p), pl).some(function (s) { return overlaps(pl, s); })) settle(p, pl); });
+    p.placements.forEach(function (q, i) { if (before[i] !== q.x + ',' + q.y + ',' + q.w + ',' + q.h) changed++; });
+    // full-width equipment must line up with its container (old files, or an item that was left half a step off)
+    p.placements.forEach(function (pl) {
+      var c = M.findContainer(p, pl.refId);
+      if (!c || c.kind !== 'object' || !c.item.fullWidth || !c.item.containerId || c.item.type === 'rack') return;
+      var cp = M.placementOf(p, pl.mapId, c.item.containerId);
+      if (!cp) return;
+      var x0 = pl.x, w0 = pl.w;
+      if (applyFullWidth(p, pl.mapId, c.item.containerId) && (pl.x !== x0 || pl.w !== w0)) { changed++; settle(p, pl); }
+    });
     return changed;
   }
   /*
@@ -404,6 +420,8 @@
     var list = p.placements.map(function (pl) { return { pl: pl, d: depth(pl) }; }).sort(function (a, b) { return a.d - b.d; });
     list.forEach(function (it) {
       var pl = it.pl, par = pm[pl.refId], cp = par ? M.placementOf(p, pl.mapId, par) : null;
+      var fc = M.findContainer(p, pl.refId);
+      if (cp && fc && fc.kind === 'object' && fc.item.fullWidth) return; // lined up with its container by applyFullWidth
       var nx = Math.round(pl.x / g) * g, ny = Math.round(pl.y / g) * g;
       if (cp) { nx = Math.max(nx, gridUp(p, cp.x + M.PAD)); ny = Math.max(ny, gridUp(p, cp.y + M.HEADER + 2)); }
       var nw = gridUp(p, pl.w), nh = gridUp(p, pl.h);

@@ -66,11 +66,11 @@
   function loadCollapsed() { try { S.collapsed = JSON.parse(localStorage.getItem(KEY_COLL) || '{}') || {}; } catch (e) { S.collapsed = {}; } }
   /* drawn height of a placement: folded sections make equipment shorter than its stored box */
   function drawnHeight(pl) {
-    const coll = pl.id && S.collapsed && S.collapsed[pl.id];
-    if (!coll || !pl.refId) return pl.h;
+    if (!pl.refId) return pl.h;
     const c = M.findContainer(S.p, pl.refId);
-    if (!c || c.kind !== 'object' || !c.item.ports.length || !Object.keys(coll).some((k) => coll[k])) return pl.h;
-    const mn = L.minSizeAt(c.item, pl.w);
+    if (!c || c.kind !== 'object' || !c.item.ports.length) return pl.h;
+    const mn = L.minSizeAt(c.item, pl.w), coll = pl.id && S.collapsed && S.collapsed[pl.id]; // equipment is never drawn smaller than its readable minimum
+    if (!coll || !Object.keys(coll).some((k) => coll[k])) return Math.max(pl.h, mn.h);
     return L.computeLayout(c.item, Math.max(pl.w, mn.w), Math.max(pl.h, mn.h), coll).h;
   }
   B.setHeightFn(drawnHeight);
@@ -456,8 +456,9 @@
         if (Math.abs(dx) + Math.abs(dy) < 2 && !d.moved) return;
         d.moved = true;
         if (d.kind === 'move') {
-          const p0 = d.items[0];
+          const p0 = d.items[0], fc = M.findContainer(S.p, p0.q.refId);
           dx = snap(p0.ox + dx) - p0.ox; dy = snap(p0.oy + dy) - p0.oy;
+          if (fc && fc.kind === 'object' && fc.item.fullWidth && fc.item.containerId) dx = 0; // full-width equipment only moves up and down its container
           d.items.forEach((it) => { it.q.x = it.ox + dx; it.q.y = it.oy + dy; });
           B.applyExtension(S.p, d.items[0].q.mapId, d.chain, d.items[0].q, EXTEND_ZONE);
           S.drop = B.dropSlot(S.p, d.items[0].q, d.from);
@@ -1455,7 +1456,7 @@
   }
   function loadProject(p) {
     const fixed = B.normalizeSizes(p), aligned = B.alignToGrid(p);
-    if (fixed) setTimeout(() => toast('Enlarged ' + fixed + ' item(s) that were too small to read', false), 100);
+    if (fixed) setTimeout(() => toast('Adjusted ' + fixed + ' item(s) (too small to read, or not lined up with their rack)', false), 100);
     else if (aligned) setTimeout(() => toast('Aligned ' + aligned + ' item(s) to the grid (older project)', false), 100);
     S.rev++; markDirty(false); S.p = p; S.mapId = p.maps[0].id; S.sel = null; S.trace = null; S.tool = null; S.undo = []; S.redo = []; S.issues = []; S.showIssues = false;
     saveNow(); renderAll();

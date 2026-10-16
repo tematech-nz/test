@@ -675,7 +675,7 @@ const ok = (m) => console.log('  ok   ' + m);
     await page.check('#detailsPane input[data-f="fullWidth"]');
     s = await sw();
     const rackW = await page.evaluate((i) => NetMap.app.S.p.placements.find(q => q.refId === i).w, ids.rack);
-    assert.ok(s.o.fullWidth && s.w >= rackW - 20 - 1, 'stretched to the rack width: ' + s.w + ' vs ' + rackW);
+    assert.ok(s.o.fullWidth && s.w >= rackW - 40 - 1, 'stretched to the rack width: ' + s.w + ' vs ' + rackW);
     const left = s.x1;
     await sel('align', 'center'); const c = (await sw()).x1;
     await sel('align', 'right'); const r = (await sw()).x1;
