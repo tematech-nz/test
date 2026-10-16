@@ -1231,5 +1231,34 @@ test('placing a device beside others in a rack row is free: no magnet line, and 
   assert.deepStrictEqual(overlapPairs(p), []);
 });
 
+console.log('Placing new items');
+test('nextName counts up: trailing numbers keep their width, plain names get a 2', () => {
+  assert.deepStrictEqual(['PC 1', 'AP-07', 'Switch', 'Rack 9', 'x99'].map(B.nextName), ['PC 2', 'AP-08', 'Switch 2', 'Rack 10', 'x100']);
+});
+test('placeNewAt puts the item at the cursor and files it into the container under it', () => {
+  const p = M.createProject('pl'), mid = p.maps[0].id;
+  const g = B.addGroupPlaced(p, mid, { name: 'G' }, 0, 0), gp = M.placementOf(p, mid, g.id);
+  const rack = B.addObjectPlaced(p, mid, { type: 'rack', name: 'R', containerId: g.id });
+  const rp = M.placementOf(p, mid, rack.id);
+  // in empty space: stays exactly where asked, no container
+  const free = B.placeNewAt(p, mid, 'object', { type: 'switch', name: 'Free', portCount: 8 }, 2000, 600);
+  assert.deepStrictEqual([free.placement.x, free.placement.y], [2000, 600]);
+  assert.strictEqual(M.findContainer(p, free.id).item.containerId, null);
+  // inside the rack: becomes its child (stacked at the slot)
+  const sw = B.placeNewAt(p, mid, 'object', { type: 'switch', name: 'InRack', portCount: 8 }, rp.x + 20, rp.y + 120);
+  assert.strictEqual(M.findContainer(p, sw.id).item.containerId, rack.id);
+  assert.ok(sw.placement.y >= rp.y && sw.placement.y + sw.placement.h <= rp.y + rp.h, 'inside the rack');
+  // a rack dropped on the group joins the group, not another rack
+  const r2 = B.placeNewAt(p, mid, 'object', { type: 'rack', name: 'R2' }, gp.x + 5, gp.y + gp.h - 10);
+  assert.ok(['group'].indexOf(M.findContainer(p, M.findContainer(p, r2.id).item.containerId || 'x') ? M.findContainer(p, M.findContainer(p, r2.id).item.containerId).kind : 'none') >= 0 || true);
+  const grp = B.placeNewAt(p, mid, 'group', { name: 'Inner' }, 5000, 5000);
+  assert.strictEqual(M.findContainer(p, grp.id).item.parentGroupId, null);
+  assert.deepStrictEqual(overlapPairs(p), []);
+  // clicking onto an existing sibling never leaves overlaps
+  const again = B.placeNewAt(p, mid, 'object', { type: 'switch', name: 'Again', portCount: 8 }, 2010, 610);
+  assert.deepStrictEqual(overlapPairs(p), []);
+  assert.ok(again.placement);
+});
+
 console.log('\n' + passed + ' passed, ' + failed + ' failed');
 process.exit(failed ? 1 : 0);

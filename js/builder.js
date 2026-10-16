@@ -358,6 +358,48 @@
     });
   }
 
-  NM.builder = { applyFullWidth: applyFullWidth, applyFullWidthFor: applyFullWidthFor, minPlacementSize: minPlacementSize, normalizeSizes: normalizeSizes, fitMinimum: fitMinimum, resolveDrop: resolveDrop, settle: settle, findDropContainer: findDropContainer, dropSlot: dropSlot, restack: restack, captureChain: captureChain, restoreChain: restoreChain, applyExtension: applyExtension, refitObject: refitObject, placeItem: placeItem, addGroupPlaced: addGroupPlaced, addObjectPlaced: addObjectPlaced, buildDemoProject: buildDemoProject };
+  /* smallest group (or rack, for equipment) on the map whose box contains the point - where a new item dropped there would live */
+  function containerAt(p, mapId, cx, cy, kind, type) {
+    var best = null;
+    p.placements.forEach(function (q) {
+      if (q.mapId !== mapId || !(cx >= q.x && cx <= q.x + q.w && cy >= q.y && cy <= q.y + q.h)) return;
+      var c = M.findContainer(p, q.refId);
+      if (!c) return;
+      var ok = c.kind === 'group' || (c.kind === 'object' && c.item.type === 'rack' && kind === 'object' && type !== 'rack');
+      if (ok && (!best || q.w * q.h < best.w * best.h)) best = q;
+    });
+    return best;
+  }
+  /*
+   * Create a new group/object with its top-left at (x, y) and file it into the container under its centre (racks stack it at the
+   * dropped slot). spec: addGroup / addObject options without a container. Returns { id, placement }.
+   */
+  function placeNewAt(p, mapId, kind, spec, x, y) {
+    var item, size, pl;
+    if (kind === 'group') { item = M.addGroup(p, { name: spec.name }); size = L.defaultGroupSize(); }
+    else { item = M.addObject(p, spec); size = L.defaultSize(item); }
+    pl = M.addPlacement(p, mapId, kind, item.id, x, y, size.w, size.h);
+    var host = containerAt(p, mapId, x + size.w / 2, y + size.h / 2, kind, item.type);
+    if (host) {
+      try { M.setContainer(p, kind, item.id, host.refId); } catch (e) { host = null; }
+    }
+    if (host) {
+      var hc = M.findContainer(p, host.refId);
+      if (hc.kind === 'object') { var slot = dropSlot(p, pl, null); if (slot) restack(p, mapId, host.refId, item.id, slot.index); }
+      M.growToFit(p, mapId, host.refId);
+    }
+    resolveDrop(p, pl.id);
+    return { id: item.id, placement: pl };
+  }
+  /* 'Switch 1' -> 'Switch 2', 'PC' -> 'PC 2', 'AP-07' -> 'AP-08' */
+  function nextName(name) {
+    var m = /^(.*?)(\d+)$/.exec(String(name));
+    if (!m) return name + ' 2';
+    var n = String(+m[2] + 1);
+    while (n.length < m[2].length) n = '0' + n;
+    return m[1] + n;
+  }
+
+  NM.builder = { containerAt: containerAt, placeNewAt: placeNewAt, nextName: nextName, applyFullWidth: applyFullWidth, applyFullWidthFor: applyFullWidthFor, minPlacementSize: minPlacementSize, normalizeSizes: normalizeSizes, fitMinimum: fitMinimum, resolveDrop: resolveDrop, settle: settle, findDropContainer: findDropContainer, dropSlot: dropSlot, restack: restack, captureChain: captureChain, restoreChain: restoreChain, applyExtension: applyExtension, refitObject: refitObject, placeItem: placeItem, addGroupPlaced: addGroupPlaced, addObjectPlaced: addObjectPlaced, buildDemoProject: buildDemoProject };
   if (typeof module !== 'undefined' && module.exports) module.exports = NM.builder;
 })(typeof window !== 'undefined' ? window : globalThis);
