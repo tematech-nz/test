@@ -12,7 +12,7 @@
     undo: [], redo: [], unsaved: false, saveErr: null, savedAt: null, lastExport: null,
     drag: null, geo: null, query: '', showIssues: false, issues: [],
     collapsed: {}, pgroup: null, hoverPort: null, preview: null, drop: null, cableColor: 'auto', customColorFor: null, ring: null,
-    fileDirty: false, newVersion: null, updateHidden: false, rev: 0, netRev: -1, netCache: [], view: 'map', graph: { from: '', to: '', via: false }
+    fileDirty: false, newVersion: null, updateHidden: false, place: null, rev: 0, netRev: -1, netCache: [], view: 'map', graph: { from: '', to: '', via: false }
   };
   NM.app = { S: S, M: M }; // exposed for tests
 
@@ -120,7 +120,9 @@
   function vpState() { const m = curMap(); return m.viewport; }
   function applyVp() {
     const v = vpState();
-    $('vp').setAttribute('transform', 'translate(' + v.x + ' ' + v.y + ') scale(' + v.zoom + ')');
+    const tf = 'translate(' + v.x + ' ' + v.y + ') scale(' + v.zoom + ')';
+    $('vp').setAttribute('transform', tf);
+    $('ghost').setAttribute('transform', tf);
   }
   function stageSize() { const r = $('canvas').getBoundingClientRect(); return { w: r.width, h: r.height, left: r.left, top: r.top }; }
   function toMap(cx, cy) { const s = stageSize(), v = vpState(); return { x: (cx - s.left - v.x) / v.zoom, y: (cy - s.top - v.y) / v.zoom }; }
@@ -178,6 +180,7 @@
   }
   function switchMap(id, keepSel) {
     S.mapId = id; clearPgroup(); if (!keepSel) { S.sel = null; }
+    if (S.place) { S.place = null; $('ghostInner').innerHTML = ''; $('ghost').style.display = 'none'; }
     renderAll();
     const v = vpState();
     if (v.zoom === 1 && v.x === 0 && v.y === 0 && S.p.placements.some((p) => p.mapId === id)) fitMap();
@@ -312,6 +315,7 @@
   }
 
   function handleTap(target, ev) {
+    if (S.place && ev) { placeHere(ev); return; }
     const tg = target.closest ? target.closest('[data-toggle]') : null;
     if (tg) { toggleCollapse(tg.dataset.pl, tg.dataset.toggle); return; }
     const el = target.closest ? target.closest('[data-kind]') : null;
@@ -378,7 +382,7 @@
         pinch = { d: Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y) };
         gesture = null; S.drag = null; return;
       }
-      const h = isEdit() && e.target.closest ? e.target.closest('[data-handle]') : null;
+      const h = isEdit() && !S.place && e.target.closest ? e.target.closest('[data-handle]') : null;
       if (h) {
         const q = S.p.placements.find((x) => x.id === h.dataset.pl);
         if (!q) return;
@@ -389,7 +393,9 @@
       }
       gesture = { x: e.clientX, y: e.clientY, vx: vpState().x, vy: vpState().y, target: e.target, moved: false };
     });
+    cv.addEventListener('pointerleave', () => { if (S.place) $('ghost').style.display = 'none'; });
     cv.addEventListener('pointermove', (e) => {
+      if (S.place && !pointers.size) { moveGhost(e); return; }
       if (S.pgroup && isEdit() && !pointers.size) {
         const pe = e.target.closest ? e.target.closest('[data-kind="port"]') : null;
         const hid = pe ? pe.dataset.id : null;
@@ -506,7 +512,7 @@
     const map = curMap();
     const r = R.renderMap(S.p, map.id, {
       mode: S.mode, selection: S.sel, highlight: S.trace && S.trace.highlight,
-      pendingPortId: S.tool && S.tool.pending, collapsed: S.collapsed, drop: S.drop, alerts: netAlertMap(), ringPorts: ringPorts(),
+      pendingPortId: S.tool && S.tool.pending, collapsed: S.collapsed, drop: S.place && S.place.host ? { containerId: S.place.host } : S.drop, alerts: netAlertMap(), ringPorts: ringPorts(),
       groupPorts: S.pgroup ? S.pgroup.ids : null, preview: S.preview
     });
     S.geo = r;
@@ -521,6 +527,7 @@
     }
     const th = $('toolHint');
     if (S.tool && S.tool.type === 'patch') { th.hidden = false; th.textContent = S.tool.pending ? 'Tap the destination port (Esc to cancel)' : 'Patch cable: tap the first port (W or Esc to stop)'; }
+    else if (S.place) { th.hidden = false; th.textContent = 'Click to place ' + (S.place.name || M.TYPE_LABELS[S.place.type] || 'item') + ' - hold Ctrl to place more copies (names count up), Esc to cancel'; }
     else if (S.pgroup) {
       th.hidden = false;
       const pv = S.preview;
@@ -1025,16 +1032,65 @@
     if (type === 'switch') fields.push({ k: 'sectionRows', label: 'Rows per section', type: 'number', v: '', min: 1, max: 8, hint: 'Optional: 2 makes 8-port sections 2 x 4. Needs ports per section.' });
     if (type === 'switch') fields.push({ k: 'portIsolation', label: 'Port isolation', type: 'check', v: false, hint: 'Access ports can only talk to uplinks, not to each other.' });
     if (type === 'patchpanel' || type === 'socket') fields.push({ k: 'straight', label: 'Front N <-> rear N', type: 'check', v: true, hint: 'Documents a straight-through internal mapping. Untick if this panel is not wired that way.' });
-    fields.push({ k: 'container', label: 'Inside', type: 'select', opts: containerOptions(isGroup ? 'group' : 'object', type, null), v: defaultContainer(type) });
     const v = await formDlg('New ' + (isGroup ? 'group' : M.TYPE_LABELS[type]), fields, 'Create', '', (vals) => (vals.ipAddress && !M.isValidIp(vals.ipAddress) ? M.IP_ERROR : null));
     if (!v) return;
-    const pos = viewCentre(), mid = curMap().id;
-    const r = commit('Create ' + type, (p) => {
-      if (isGroup) return B.addGroupPlaced(p, mid, { name: v.name || undefined, parentGroupId: v.container || null }, pos.x, pos.y).id;
-      const portCount = v.portCount != null ? parseInt(v.portCount, 10) : undefined;
-      return B.addObjectPlaced(p, mid, { type: type, name: v.name || undefined, portCount: portCount, rackHeight: v.rackHeight, straight: v.straight, wanPorts: v.wanPorts, lanPorts: v.lanPorts, deviceKind: v.deviceKind, sectionSize: (type === 'patchpanel' || type === 'switch') && v.sectionSize > 0 ? v.sectionSize : undefined, uplinkPorts: v.uplinkPorts > 0 ? v.uplinkPorts : undefined, sectionRows: v.sectionRows > 1 ? v.sectionRows : undefined, portIsolation: !!v.portIsolation, ipAddress: v.ipAddress, containerId: v.container || null }, pos.x, pos.y).id;
-    });
-    if (r && r !== true) { S.sel = { kind: isGroup ? 'group' : 'object', id: r }; renderAll(); openRight(); }
+    const portCount = v.portCount != null ? parseInt(v.portCount, 10) : undefined;
+    const spec = isGroup ? { name: v.name || undefined } : { type: type, name: v.name || undefined, portCount: portCount, rackHeight: v.rackHeight, straight: v.straight, wanPorts: v.wanPorts, lanPorts: v.lanPorts, deviceKind: v.deviceKind, sectionSize: (type === 'patchpanel' || type === 'switch') && v.sectionSize > 0 ? v.sectionSize : undefined, uplinkPorts: v.uplinkPorts > 0 ? v.uplinkPorts : undefined, sectionRows: v.sectionRows > 1 ? v.sectionRows : undefined, portIsolation: !!v.portIsolation, ipAddress: v.ipAddress };
+    startPlace(isGroup ? 'group' : 'object', spec, type);
+  }
+
+  /* ---- placing a new item: it follows the cursor, a click drops it, Ctrl+click keeps going with incrementing names ---- */
+  function ghostMarkup(pl) {
+    const temp = M.createProject('ghost'), mid = temp.maps[0].id;
+    try {
+      const spec = Object.assign({}, pl.spec);
+      if (pl.name) spec.name = pl.name;
+      if (pl.kind === 'group') B.addGroupPlaced(temp, mid, spec, 0, 0); else B.addObjectPlaced(temp, mid, spec, 0, 0);
+      const q = temp.placements[0], r = R.renderMap(temp, mid, { mode: 'view' });
+      return { svg: r.content, w: q.w, h: q.h };
+    } catch (e) { return { svg: '', w: 160, h: 60 }; }
+  }
+  function startPlace(kind, spec, type) {
+    S.tool = null; clearPgroup();
+    S.place = { kind: kind, spec: spec, type: type, name: spec.name || '', count: 0, pos: null, host: null };
+    const g = ghostMarkup(S.place);
+    S.place.w = g.w; S.place.h = g.h; $('ghostInner').innerHTML = g.svg;
+    $('ghost').style.display = 'none'; // shown once the cursor is over the map
+    renderAll(); closeRight(); closeLeft();
+  }
+  function cancelPlace() {
+    if (!S.place) return;
+    S.place = null; $('ghostInner').innerHTML = ''; $('ghost').style.display = 'none';
+    renderAll();
+  }
+  function moveGhost(e) {
+    const pl = S.place; if (!pl) return;
+    const pt = toMap(e.clientX, e.clientY);
+    pl.pos = { x: snap(pt.x - pl.w / 2), y: snap(pt.y - pl.h / 2) };
+    $('ghostInner').setAttribute('transform', 'translate(' + pl.pos.x + ' ' + pl.pos.y + ')');
+    $('ghost').style.display = '';
+    const host = B.containerAt(S.p, curMap().id, pl.pos.x + pl.w / 2, pl.pos.y + pl.h / 2, pl.kind, pl.type);
+    const hid = host ? host.refId : null;
+    if (hid !== pl.host) { pl.host = hid; renderCanvas(); }
+  }
+  function placeHere(e) {
+    const pl = S.place; if (!pl) return;
+    const pt = toMap(e.clientX, e.clientY);
+    const x = snap(pt.x - pl.w / 2), y = snap(pt.y - pl.h / 2), keep = e.ctrlKey || e.metaKey;
+    const spec = Object.assign({}, pl.spec); if (pl.name) spec.name = pl.name; else delete spec.name;
+    const r = commit('Create ' + pl.type, (p) => B.placeNewAt(p, curMap().id, pl.kind, spec, x, y).id);
+    if (!r || r === true) { cancelPlace(); return; }
+    pl.count++;
+    if (keep) { // next copy: same settings, name counts up
+      if (pl.name) pl.name = B.nextName(pl.name);
+      else { const it = M.findContainer(S.p, r); pl.name = it ? B.nextName(it.item.name) : ''; }
+      const g = ghostMarkup(pl); pl.w = g.w; pl.h = g.h; $('ghostInner').innerHTML = g.svg;
+      pl.host = null; moveGhost(e);
+      toast('Placed ' + M.findContainer(S.p, r).item.name + ' - Ctrl+click to place more, Esc to stop');
+    } else {
+      S.place = null; $('ghostInner').innerHTML = ''; $('ghost').style.display = 'none';
+      S.sel = { kind: pl.kind, id: r }; renderAll(); openRight();
+    }
   }
 
   async function deleteSelection() {
@@ -1369,7 +1425,7 @@
   /* ---------------------------------------------------------------- wiring up */
   function setMode(mode) {
     if (S.mode === mode) return;
-    S.mode = mode; S.tool = null; S.drag = null; clearPgroup();
+    S.mode = mode; S.tool = null; S.drag = null; clearPgroup(); cancelPlace();
     if (mode === 'view') saveNow();
     renderAll();
     toast(mode === 'edit' ? 'Edit mode on' : 'View mode - saved, read-only');
@@ -1492,7 +1548,7 @@
     document.addEventListener('keydown', (e) => {
       if ($('dlg').open) return;
       const typing = /INPUT|SELECT|TEXTAREA/.test((e.target.tagName || ''));
-      if (e.key === 'Escape') { if (S.pgroup) { clearPgroup(); renderAll(); } else if (S.tool) cancelTool(); else if (S.trace) clearTrace(); else if (S.sel) { S.sel = null; renderAll(); } }
+      if (e.key === 'Escape') { if (S.place) cancelPlace(); else if (S.pgroup) { clearPgroup(); renderAll(); } else if (S.tool) cancelTool(); else if (S.trace) clearTrace(); else if (S.sel) { S.sel = null; renderAll(); } }
       else if (isEdit() && !typing && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); }
       else if (isEdit() && !typing && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') { e.preventDefault(); redo(); }
       else if (isEdit() && !typing && (e.key === 'Delete')) deleteSelection();

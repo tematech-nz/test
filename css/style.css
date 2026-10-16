@@ -51,6 +51,8 @@ body.mode-edit #stage { outline: 3px solid var(--edit); outline-offset: -3px; }
 #toolbar { flex-wrap: wrap; position: absolute; left: 8px; top: 8px; right: 8px; flex-wrap: wrap; gap: 4px; background: rgba(255,255,255,0.95); border: 1px solid var(--line); border-radius: 8px; padding: 5px; }
 #toolbar .sep { width: 1px; background: var(--line); margin: 0 3px; }
 #toolbar button.active { background: #ede7f6; border-color: #7e57c2; }
+#ghost { opacity: 0.6; pointer-events: none; }
+#ghost * { pointer-events: none; }
 #zoomctl { position: absolute; right: 8px; bottom: 8px; display: flex; gap: 4px; }
 #zoomctl button { min-width: 38px; min-height: 38px; font-weight: 700; }
 #toolHint { position: absolute; left: 50%; transform: translateX(-50%); bottom: 12px; background: #4a148c; color: #fff; padding: 6px 12px; border-radius: 16px; font-size: 13px; }

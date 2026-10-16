@@ -54,6 +54,11 @@ Try it: File -> Load demo project (two rooms, a fixed link between racks, a wall
   edit its name, colour and ports, or use "Fixed link from this group..." to start a link from exactly those rear ports. A port
   belongs to one group; groups work on any equipment with ports, are searchable, and the group name appears in the port tooltip
   and in trace/cable descriptions.
+- **Placing new items**: after you fill in the "+ Switch / + Router / ..." form, the new item **follows the mouse cursor** as a
+  translucent preview; click to drop it right there. Dropping on a group or rack files it into that container (the container
+  is outlined in green while you hover; in a rack it stacks at the slot). **Hold Ctrl while clicking** to keep going: every Ctrl+click
+  places another copy with the same settings and a counting name (Cam 1, Cam 2, Cam 3...); a plain click places the last one.
+  Esc cancels, and nothing exists until you click. On a touch screen a tap drops it where you tap.
 - **Cable colours**: pick white, grey, green, yellow, blue, orange, red or black from the list, or `Custom...` for an RGB
   picker. The patch cable tool has its own colour list for new cables. Cables are drawn with a thin dark outline so white and
   yellow stay visible.

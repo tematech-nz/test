@@ -22,6 +22,8 @@ const ok = (m) => console.log('  ok   ' + m);
   page.on('dialog', (d) => { dialogs.push(d.type()); d.accept(); });
   page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
   page.on('console', (m) => { if (m.type() === 'error') errors.push('console: ' + m.text()); });
+  // a new item follows the cursor: move over the map and click to drop it (Ctrl keeps going)
+  const placeAt = async (x = 640, y = 620, mods = []) => { await page.mouse.move(x, y); await page.mouse.move(x + 3, y + 3); await page.keyboard.down('Control'); await page.keyboard.up('Control'); if (mods.length) await page.keyboard.down(mods[0]); await page.mouse.click(x + 3, y + 3); if (mods.length) await page.keyboard.up(mods[0]); await page.waitForTimeout(150); };
   const shot = async (name) => { if (shots) await page.screenshot({ path: path.join(shots, String(++n).padStart(2, '0') + '-' + name + '.png') }); };
   const step = async (name, fn) => { try { await fn(); ok(name); } catch (e) { failed++; console.log('  FAIL ' + name + '\n       ' + String(e.stack || e).split('\n').slice(0, 5).join('\n       ')); await shot('FAIL-' + name.replace(/\W+/g, '_')); } };
 
@@ -91,7 +93,9 @@ const ok = (m) => console.log('  ok   ' + m);
     await page.click('#toolbar button[data-add="group"]');
     await page.fill('#dlg input[name="name"]', 'Room 3');
     await page.click('#dlg button[data-btn="ok"]');
-    await page.waitForTimeout(100);
+    assert.ok(await page.isVisible('#toolHint') && /Click to place/.test(await page.innerText('#toolHint')), 'placement hint');
+    assert.strictEqual(await page.evaluate(() => NetMap.app.S.p.groups.length), groups, 'nothing is created until you click');
+    await placeAt();
     assert.strictEqual(await page.evaluate(() => NetMap.app.S.p.groups.length), groups + 1);
     await page.click('#btnUndo');
     assert.strictEqual(await page.evaluate(() => NetMap.app.S.p.groups.length), groups);
@@ -208,7 +212,7 @@ const ok = (m) => console.log('  ok   ' + m);
     await page.fill('#dlg input[name="lanPorts"]', '5');
     await page.fill('#dlg input[name="ipAddress"]', '192.168.50.1');
     await page.click('#dlg button[data-btn="ok"]');
-    await page.waitForTimeout(100);
+    await placeAt(700, 640);
     const r = await page.evaluate(() => { const o = NetMap.app.S.p.objects.find(x => x.name === 'Edge GW'); return { n: o.ports.length, ip: o.ipAddress }; });
     assert.deepStrictEqual(r, { n: 7, ip: '192.168.50.1' });
     assert.ok(/IP address/i.test(await page.innerText('#detailsPane')));
@@ -603,7 +607,7 @@ const ok = (m) => console.log('  ok   ' + m);
     await page.click('#toolbar button[data-add="generic"]');
     await page.selectOption('#dlg select[name="deviceKind"]', 'pc');
     await page.click('#dlg button[data-btn="ok"]');
-    await page.waitForTimeout(100);
+    await placeAt(700, 660);
     const name = await page.evaluate(() => NetMap.app.S.p.objects.filter(o => o.deviceKind === 'pc').pop().name);
     assert.ok(/^PC \d+$/.test(name), name);
     assert.ok((await page.locator('#vp [data-icon="pc"]').count()) >= 1, 'PC icon drawn');
@@ -765,7 +769,7 @@ const ok = (m) => console.log('  ok   ' + m);
     assert.ok(/IPv4/.test(await page.innerText('#dlg .form-err')));
     await page.fill('#dlg input[name="ipAddress"]', '192.168.1.1');
     await page.click('#dlg button[data-btn="ok"]');
-    await page.waitForTimeout(100);
+    await placeAt(700, 680);
     assert.strictEqual(await page.evaluate(() => NetMap.app.S.p.objects.find(o => o.name === 'BadIpR').ipAddress), '192.168.1.1');
     await page.fill('#detailsPane input[data-f="ipAddress"]', '10.0.0.1/8');
     await page.keyboard.press('Tab');
@@ -835,7 +839,7 @@ const ok = (m) => console.log('  ok   ' + m);
     assert.ok(/IPv4/.test(await page.innerText('#dlg .form-err')), 'bad address refused');
     await page.fill('#dlg input[name="ipAddress"]', '');
     await page.click('#dlg button[data-btn="ok"]');
-    await page.waitForTimeout(100);
+    await placeAt(700, 700);
     const inputs = page.locator('#detailsPane input[data-f="pip"]');
     assert.strictEqual(await inputs.count(), 2, 'one address field per port');
     await inputs.nth(0).fill('192.168.3.240'); await page.keyboard.press('Tab');
@@ -951,6 +955,63 @@ const ok = (m) => console.log('  ok   ' + m);
     const inRack = await page.evaluate((i) => NetMap.app.S.p.objects.find(o => o.id === i.outside).containerId === i.rack, ids);
     assert.ok(inRack, 'it joined the rack');
     for (let i = 0; i < 2; i++) await page.click('#btnUndo');
+  });
+
+
+  await step('new items follow the cursor and drop where you click; Ctrl+click places copies with counting names; Esc cancels', async () => {
+    const before = await page.evaluate(() => NetMap.app.S.p.objects.length);
+    await page.click('#toolbar button[data-add="generic"]');
+    await page.selectOption('#dlg select[name="deviceKind"]', 'camera');
+    await page.fill('#dlg input[name="name"]', 'Cam 1');
+    await page.click('#dlg button[data-btn="ok"]');
+    assert.strictEqual(await page.evaluate(() => NetMap.app.S.p.objects.length), before, 'nothing created yet');
+    assert.ok(await page.evaluate(() => !!NetMap.app.S.place));
+    await page.mouse.move(420, 560); await page.mouse.move(430, 570);
+    assert.ok((await page.getAttribute('#ghostInner', 'transform')).indexOf('translate(') === 0, 'ghost follows the cursor');
+    assert.notStrictEqual(await page.$eval('#ghost', (g) => g.style.display), 'none');
+    assert.ok((await page.innerHTML('#ghostInner')).indexOf('data-icon="camera"') > 0, 'ghost shows what is being placed');
+    const mapPt = (sx, sy) => page.evaluate(([x, y]) => { const r = document.getElementById('canvas').getBoundingClientRect(), v = NetMap.app.S.p.maps.find(m => m.id === NetMap.app.S.mapId).viewport; return { x: (x - r.left - v.x) / v.zoom, y: (y - r.top - v.y) / v.zoom }; }, [sx, sy]);
+    const pts = [[440, 580], [640, 580], [840, 580]], names = [];
+    for (const [x, y] of pts) {
+      await page.mouse.move(x, y);
+      await page.keyboard.down('Control');
+      await page.mouse.click(x, y);
+      await page.keyboard.up('Control');
+      await page.waitForTimeout(120);
+    }
+    assert.ok(await page.evaluate(() => !!NetMap.app.S.place), 'still placing after Ctrl+click');
+    await page.mouse.move(440, 700);
+    await page.mouse.click(440, 700); // plain click: last copy, then done
+    await page.waitForTimeout(150);
+    assert.strictEqual(await page.evaluate(() => NetMap.app.S.place), null);
+    const made = await page.evaluate((n) => NetMap.app.S.p.objects.slice(n).map(o => { const q = NetMap.app.S.p.placements.find(x => x.refId === o.id); return { name: o.name, x: q.x, y: q.y, w: q.w, h: q.h, kind: o.deviceKind }; }), before);
+    assert.deepStrictEqual(made.map(m => m.name), ['Cam 1', 'Cam 2', 'Cam 3', 'Cam 4']);
+    assert.ok(made.every(m => m.kind === 'camera'));
+    const c0 = await mapPt(440, 580);
+    assert.ok(Math.abs(made[0].x + made[0].w / 2 - c0.x) <= 40 && Math.abs(made[0].y + made[0].h / 2 - c0.y) <= 40, 'dropped under the cursor: ' + JSON.stringify([made[0], c0]));
+    assert.ok(made[1].x > made[0].x + 20 && made[2].x > made[1].x + 20, 'copies went where each click was');
+    assert.strictEqual(await page.evaluate(() => NetMap.app.S.sel.kind), 'object', 'the last one is selected');
+    // Escape cancels
+    await page.click('#toolbar button[data-add="switch"]');
+    await page.click('#dlg button[data-btn="ok"]');
+    assert.ok(await page.evaluate(() => !!NetMap.app.S.place));
+    await page.keyboard.press('Escape');
+    assert.strictEqual(await page.evaluate(() => NetMap.app.S.place), null);
+    assert.strictEqual(await page.evaluate(() => NetMap.app.S.p.objects.length), before + 4);
+    // placing onto a rack files it into the rack and the rack gets the green outline while hovering
+    const rackPt = await page.evaluate(() => { const S = NetMap.app.S, rk = S.p.objects.find(o => o.name === 'Rack A'); NetMap.app.api.goTo('object', rk.id, S.p.maps[0].id); const q = S.p.placements.find(x => x.refId === rk.id && x.mapId === S.mapId), r = document.getElementById('canvas').getBoundingClientRect(), v = S.p.maps.find(m => m.id === S.mapId).viewport; return { x: r.left + v.x + (q.x + q.w / 2) * v.zoom, y: r.top + v.y + (q.y + q.h - 30) * v.zoom }; });
+    await page.click('#toolbar button[data-add="switch"]');
+    await page.fill('#dlg input[name="name"]', 'DropSw');
+    await page.fill('#dlg input[name="portCount"]', '8');
+    await page.click('#dlg button[data-btn="ok"]');
+    await page.mouse.move(rackPt.x, rackPt.y); await page.mouse.move(rackPt.x + 2, rackPt.y + 2);
+    await page.waitForTimeout(100);
+    assert.ok((await page.innerHTML('#vp')).indexOf('stroke="#00c853"') > 0, 'target rack outlined while hovering');
+    await page.mouse.click(rackPt.x + 2, rackPt.y + 2);
+    await page.waitForTimeout(150);
+    const inRack = await page.evaluate(() => { const S = NetMap.app.S, o = S.p.objects.find(x => x.name === 'DropSw'), rk = S.p.objects.find(x => x.name === 'Rack A'); return o && o.containerId === rk.id; });
+    assert.ok(inRack, 'filed into the rack under the cursor');
+    for (let i = 0; i < 5; i++) await page.click('#btnUndo');
   });
 
   await step('autosave survives a refresh', async () => {
