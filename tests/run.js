@@ -700,5 +700,26 @@ test('switches can opt in to equal sections; plain rows stay the default', () =>
   assert.strictEqual(sw2.sectionSize, undefined, 'stale split dropped');
 });
 
+console.log('Link layering');
+test('fixed links hide behind unrelated containers and show in full when selected or traced', () => {
+  const p = M.createProject('z'), mid = p.maps[0].id;
+  const gL = B.addGroupPlaced(p, mid, { name: 'GL' }, 0, 0), gR = B.addGroupPlaced(p, mid, { name: 'GR' }, 900, 0);
+  const gM = B.addGroupPlaced(p, mid, { name: 'GMID' }, 440, 0);
+  const a = B.addObjectPlaced(p, mid, { type: 'patchpanel', name: 'A', portCount: 8, containerId: gL.id });
+  const b = B.addObjectPlaced(p, mid, { type: 'patchpanel', name: 'B', portCount: 8, containerId: gR.id });
+  const rackM = B.addObjectPlaced(p, mid, { type: 'rack', name: 'RM', containerId: gM.id });
+  const link = M.addFixedLink(p, { aObjectId: a.id, bObjectId: b.id, wireCount: 2, mapping: 'sequential' });
+  const holes = (svg) => { const m = /<clipPath id="lc_[^"]+"><path clip-rule="evenodd" d="([^"]+)"/.exec(svg); return m ? m[1].split('M').length - 2 : -1; };
+  const plain = R.renderMap(p, mid, {}).content;
+  assert.strictEqual(holes(plain), 1, 'only the unrelated GMID box is cut out (its rack is inside it; GL/GR are endpoint groups)');
+  const pm = M.placementOf(p, mid, gM.id);
+  assert.ok(plain.indexOf('M' + pm.x + ' ' + pm.y + 'h' + pm.w) > 0, 'hole is the GMID box');
+  assert.ok(plain.indexOf('clip-path="url(#lc_' + link.id + ')"') > 0);
+  assert.strictEqual(R.renderMap(p, mid, { selection: { kind: 'link', id: link.id } }).content.indexOf('lc_' + link.id), -1, 'selected: full length');
+  const traced = T.traceTarget(p, { kind: 'link', id: link.id });
+  assert.strictEqual(R.renderMap(p, mid, { highlight: traced.highlight }).content.indexOf('lc_' + link.id), -1, 'traced: full length');
+  assert.ok(rackM);
+});
+
 console.log('\n' + passed + ' passed, ' + failed + ' failed');
 process.exit(failed ? 1 : 0);
