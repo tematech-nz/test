@@ -237,7 +237,8 @@
       var o = '<g data-kind="cable" data-id="' + esc(c.id) + '"' + (dim ? ' opacity="0.12"' : '') + '>';
       o += '<path d="' + d + '" stroke="transparent" stroke-width="12" fill="none" data-kind="cable" data-id="' + esc(c.id) + '"/>';
       if (isHi) o += '<path d="' + d + '" stroke="' + HI + '" stroke-width="8" fill="none" opacity="0.7" pointer-events="none"/>';
-      o += '<path d="' + d + '" stroke="' + (isSel ? SEL : esc(c.color)) + '" stroke-width="' + (isSel ? 3.5 : 2.2) + '" fill="none" stroke-linecap="round" pointer-events="none"/>';
+      o += '<path d="' + d + '" stroke="#37474f" stroke-width="' + (isSel ? 5.5 : 4) + '" fill="none" stroke-linecap="round" opacity="0.55" pointer-events="none"/>'; // outline keeps white/yellow cables visible
+      o += '<path d="' + d + '" stroke="' + (isSel ? SEL : esc(c.color)) + '" stroke-width="' + (isSel ? 3.5 : 2.4) + '" fill="none" stroke-linecap="round" pointer-events="none"/>';
       if (exporting || isSel || isHi || !(a && b)) {
         o += '<text x="' + num(mx) + '" y="' + num(my) + '" font-size="9" text-anchor="middle" fill="#111" stroke="#fff" stroke-width="2.5" paint-order="stroke" font-family="sans-serif" pointer-events="none">' + esc(label) + '</text>';
       }

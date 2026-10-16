@@ -608,5 +608,13 @@ test('fixed links attach under the rear ports their wires use, not to the panel 
   assert.ok(r.content.indexOf('M' + Math.round((g6.x + g6.w / 2) * 10) / 10 + ' ' + Math.round((g6.y + g6.h) * 10) / 10 + 'V' + barY) > 0, 'tick from the port down to the bar');
 });
 
+test('predefined cable colours and outline keep every colour visible', () => {
+  assert.deepStrictEqual(M.CABLE_COLORS.map(c => c[0]), ['white', 'grey', 'green', 'yellow', 'blue', 'orange', 'red', 'black']);
+  const p = B.buildDemoProject();
+  p.patchCables[0].color = '#ffffff';
+  const svg = R.renderMap(p, p.maps[0].id, {}).content;
+  assert.ok(svg.indexOf('stroke="#ffffff" stroke-width="2.4"') > 0 && svg.indexOf('stroke="#37474f" stroke-width="4"') > 0);
+});
+
 console.log('\n' + passed + ' passed, ' + failed + ' failed');
 process.exit(failed ? 1 : 0);

@@ -10,7 +10,7 @@
     p: null, mapId: null, mode: 'view', sel: null, trace: null, tool: null,
     undo: [], redo: [], unsaved: false, saveErr: null, savedAt: null, lastExport: null,
     drag: null, geo: null, query: '', showIssues: false, issues: [],
-    collapsed: {}, pgroup: null, hoverPort: null, preview: null, drop: null,
+    collapsed: {}, pgroup: null, hoverPort: null, preview: null, drop: null, cableColor: '#1f77b4', customColorFor: null,
     view: 'map', graph: { from: '', to: '', via: false }
   };
   NM.app = { S: S, M: M }; // exposed for tests
@@ -249,7 +249,7 @@
       }
       const a = S.tool.pending;
       if (a === id) { S.tool.pending = null; renderAll(); return; }
-      const cable = commit('Add patch cable', (p) => M.addPatchCable(p, { aPortId: a, bPortId: id, color: S.tool.color, cableType: S.tool.cableType }));
+      const cable = commit('Add patch cable', (p) => M.addPatchCable(p, { aPortId: a, bPortId: id, color: S.cableColor, cableType: S.tool.cableType }));
       S.tool.pending = null;
       if (cable) { toast('Added ' + cable.name); S.sel = { kind: 'cable', id: cable.id }; renderAll(); }
       return;
@@ -438,6 +438,7 @@
         const a = s.split(':'); return '<button data-add="' + a[0] + '">+ ' + a[1] + '</button>';
       }).join('') + '<span class="sep"></span>' +
       '<button data-act="patchTool" class="' + (pc ? 'active' : '') + '">Patch cable tool</button>' +
+      (pc ? ' <span class="cable-colour">' + colorPicker('toolPreset', 'toolColor', S.cableColor, '__tool') + '</span>' : '') +
       '<button data-act="newLink">+ Fixed link</button>' +
       '<button data-act="addMapItems">Add existing here...</button>';
   }
@@ -495,6 +496,14 @@
   const openLeft = () => $('left').classList.add('open');
   const closeLeft = () => $('left').classList.remove('open');
 
+  /* preset cable colours plus "Custom..." which reveals the RGB picker */
+  function colorPicker(presetField, colorField, value, ownerId) {
+    const preset = M.CABLE_COLORS.find((c) => c[1].toLowerCase() === String(value).toLowerCase());
+    const custom = !preset || S.customColorFor === ownerId;
+    const o = M.CABLE_COLORS.map((c) => [c[1], c[0]]).concat([['custom', 'Custom...']]);
+    return '<span class="swatch" style="background:' + esc(value) + '"></span> <select data-f="' + presetField + '">' + opts(o, custom ? 'custom' : preset[1]) + '</select>' +
+      (custom ? ' <input type="color" data-f="' + colorField + '" value="' + esc(value) + '" title="Custom colour">' : '');
+  }
   function fld(label, html) { return '<div class="field"><label>' + label + '</label><div>' + html + '</div></div>'; }
   function inp(label, f, val, t, extra) {
     if (!isEdit()) return fld(label, '<div class="ro">' + esc(val) + '</div>');
@@ -624,7 +633,7 @@
     let h = '<h3>Patch cable</h3>' + inp('ID', 'name', c.name) +
       fld('End A', lnk('port', c.aPortId, M.portName(S.p, c.aPortId, idx))) + fld('End B', lnk('port', c.bPortId, M.portName(S.p, c.bPortId, idx)));
     h += inp('Cable type', 'cableType', c.cableType) + inp('Length', 'length', c.length);
-    h += isEdit() ? fld('Colour', '<input type="color" data-f="color" value="' + esc(c.color) + '">') : fld('Colour', '<span style="display:inline-block;width:30px;height:12px;background:' + esc(c.color) + ';border:1px solid #888"></span>');
+    h += isEdit() ? fld('Colour', colorPicker('colorPreset', 'color', c.color, c.id)) : fld('Colour', '<span style="display:inline-block;width:30px;height:12px;background:' + esc(c.color) + ';border:1px solid #888"></span>');
     h += isEdit() ? fld('Status', '<select data-f="status">' + opts(M.CABLE_STATUS.map((s) => [s, s]), c.status) + '</select>') : fld('Status', esc(c.status));
     h += '<div class="btn-row">' + btn('trace', 'Trace connection', 'data-kind="cable" data-id="' + esc(id) + '"', 'primary');
     if (isEdit()) h += btn('reconnect', 'Reconnect end A', 'data-end="a"') + btn('reconnect', 'Reconnect end B', 'data-end="b"') + btn('deleteSel', 'Remove cable', '', 'danger');
@@ -968,7 +977,12 @@
 
   /* ---------------------------------------------------------------- field editing */
   function onFieldChange(el) {
-    const f = el.dataset.f, t = el.dataset.t, val = el.type === 'number' ? el.value : el.value;
+    let f = el.dataset.f;
+    const t = el.dataset.t, val = el.value;
+    if (f === 'colorPreset') {
+      if (val === 'custom') { S.customColorFor = S.sel && S.sel.id; renderRight(); return; }
+      S.customColorFor = null; f = 'color';
+    } else if (f === 'color') S.customColorFor = null;
     const sel = S.sel; if (!sel && !t) return;
     commit('Edit ' + f, (p) => {
       const idx = M.buildIndex(p);
@@ -1121,14 +1135,19 @@
     $('tabDetails').onclick = () => showTab('details'); $('tabTrace').onclick = () => showTab('trace');
     $('zoomIn').onclick = () => zoomAt(1.25); $('zoomOut').onclick = () => zoomAt(0.8); $('zoomFit').onclick = fitMap;
     $('fileInput').onchange = (e) => { const f = e.target.files[0]; e.target.value = ''; if (f) importFile(f); };
+    $('toolbar').addEventListener('change', (e) => {
+      const f = e.target.dataset.f;
+      if (f === 'toolPreset') { if (e.target.value === 'custom') S.customColorFor = '__tool'; else { S.customColorFor = null; S.cableColor = e.target.value; } renderToolbar(); }
+      else if (f === 'toolColor') { S.cableColor = e.target.value; S.customColorFor = null; renderToolbar(); }
+    });
     $('toolbar').onclick = (e) => {
       const a = e.target.closest('button'); if (!a) return;
       if (a.dataset.add) createItem(a.dataset.add);
-      else if (a.dataset.act === 'patchTool') setTool(S.tool && S.tool.type === 'patch' ? null : { type: 'patch', pending: null, color: '#1f77b4', cableType: 'Cat6' });
+      else if (a.dataset.act === 'patchTool') setTool(S.tool && S.tool.type === 'patch' ? null : { type: 'patch', pending: null, cableType: 'Cat6' });
       else if (a.dataset.act === 'newLink') newLink();
       else if (a.dataset.act === 'addMapItems') addExisting();
     };
-    document.addEventListener('change', (e) => { if (e.target.dataset && e.target.dataset.f && isEdit() && !e.target.closest('dialog')) onFieldChange(e.target); });
+    document.addEventListener('change', (e) => { if (e.target.dataset && e.target.dataset.f && isEdit() && !e.target.closest('dialog') && !e.target.closest('#toolbar')) onFieldChange(e.target); });
     document.addEventListener('click', (e) => {
       const a = e.target.closest('[data-act]'); if (!a || a.closest('dialog')) return;
       const d = a.dataset;
@@ -1148,7 +1167,7 @@
         case 'automap': { const id = S.sel.id; commit('Map front to rear', (p) => { const n = M.autoMapPanel(p, id); toast(n + ' mapping(s) added'); }); break; }
         case 'mapPort': mapPort(d.id); break;
         case 'unmap': commit('Remove internal mapping', (p) => M.removeInternalMapping(p, d.id)); break;
-        case 'startPatchFrom': S.tool = { type: 'patch', pending: d.id, color: '#1f77b4', cableType: 'Cat6' }; renderAll(); break;
+        case 'startPatchFrom': S.tool = { type: 'patch', pending: d.id, cableType: 'Cat6' }; renderAll(); break;
         case 'patchTool': break;
         case 'reconnect': S.tool = { type: 'reconnect', cableId: S.sel.id, end: d.end }; renderAll(); break;
         case 'editWiring': editWiring(S.sel.id); break;

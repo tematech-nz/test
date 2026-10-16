@@ -22,6 +22,9 @@ Try it: File -> Load demo project (two rooms, a fixed link between racks, a wall
   Objects move only by their dark drag handle (top-left); selecting never moves anything.
 - **Groups** organise equipment and can nest. Moving a group moves its contents visually; deleting one asks whether
   to keep or delete the contents. Groups never imply connectivity.
+- **Cable colours**: pick white, grey, green, yellow, blue, orange, red or black from the list, or `Custom...` for an RGB
+  picker. The patch cable tool has its own colour list for new cables. Cables are drawn with a thin dark outline so white and
+  yellow stay visible.
 - **Patch cables**: use "Patch cable tool" and tap two ports. Occupied ports and rear terminations are refused.
 - **Fixed links**: installed cabling between two patch panels with N numbered wires, each mapped rear port to rear port.
   Mapping is never assumed; "sequential" is an explicit choice. Endpoints and wires change only through

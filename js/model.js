@@ -9,6 +9,7 @@
   var CABLE_STATUS = ['planned', 'active', 'faulty', 'spare'];
   var WIRE_STATUS = ['connected', 'spare', 'unused', 'faulty'];
   var LINK_STATUS = ['planned', 'installed', 'faulty', 'decommissioned'];
+  var CABLE_COLORS = [['white', '#ffffff'], ['grey', '#8a8f98'], ['green', '#2ca02c'], ['yellow', '#f2c200'], ['blue', '#1f77b4'], ['orange', '#ff7f0e'], ['red', '#d62728'], ['black', '#111111']];
   var PAD = 10;
   var HEADER = 20;
 
@@ -745,7 +746,7 @@
   }
 
   NM.model = {
-    SCHEMA_VERSION: SCHEMA_VERSION, OBJECT_TYPES: OBJECT_TYPES, TYPE_LABELS: TYPE_LABELS,
+    SCHEMA_VERSION: SCHEMA_VERSION, CABLE_COLORS: CABLE_COLORS, OBJECT_TYPES: OBJECT_TYPES, TYPE_LABELS: TYPE_LABELS,
     CABLE_STATUS: CABLE_STATUS, WIRE_STATUS: WIRE_STATUS, LINK_STATUS: LINK_STATUS, PAD: PAD, HEADER: HEADER,
     uid: uid, clone: clone, createProject: createProject, buildIndex: buildIndex, portName: portName, wireName: wireName,
     findContainer: findContainer, parentOf: parentOf, containerChildren: containerChildren, descendants: descendants,

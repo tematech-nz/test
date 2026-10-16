@@ -373,6 +373,30 @@ const ok = (m) => console.log('  ok   ' + m);
     await page.click('#btnUndo'); await page.click('#btnUndo');
   });
 
+
+  await step('cable colour: presets, custom RGB picker, patch tool colour', async () => {
+    const cid = await page.evaluate(() => NetMap.app.S.p.patchCables[0].id);
+    await page.evaluate((id) => NetMap.app.api.select({ kind: 'cable', id }), cid);
+    const color = () => page.evaluate((id) => NetMap.app.S.p.patchCables.find(c => c.id === id).color, cid);
+    assert.strictEqual(await page.locator('#detailsPane input[type="color"]').count(), 0, 'no picker for a preset colour');
+    const names = await page.$$eval('#detailsPane select[data-f="colorPreset"] option', (os) => os.map(o => o.textContent));
+    assert.deepStrictEqual(names, ['white', 'grey', 'green', 'yellow', 'blue', 'orange', 'red', 'black', 'Custom...']);
+    await page.selectOption('#detailsPane select[data-f="colorPreset"]', { label: 'red' });
+    assert.strictEqual(await color(), '#d62728');
+    await page.selectOption('#detailsPane select[data-f="colorPreset"]', { label: 'Custom...' });
+    assert.strictEqual(await page.locator('#detailsPane input[type="color"]').count(), 1, 'RGB picker appears');
+    assert.strictEqual(await color(), '#d62728', 'choosing Custom alone changes nothing');
+    await page.fill('#detailsPane input[type="color"]', '#123456');
+    assert.strictEqual(await color(), '#123456');
+    assert.strictEqual(await page.locator('#detailsPane input[type="color"]').count(), 1, 'stays visible for a non-preset colour');
+    await page.click('#toolbar button[data-act="patchTool"]');
+    await page.selectOption('#toolbar select[data-f="toolPreset"]', { label: 'green' });
+    assert.strictEqual(await page.evaluate(() => NetMap.app.S.cableColor), '#2ca02c');
+    await page.keyboard.press('Escape');
+    await page.click('#btnUndo'); await page.click('#btnUndo');
+    assert.notStrictEqual(await color(), '#123456');
+  });
+
   await step('autosave survives a refresh', async () => {
     await page.click('#btnMode'); // back to view mode flushes the save
     const name = await page.evaluate(() => NetMap.app.S.p.name);
