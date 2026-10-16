@@ -17,7 +17,7 @@ Try it: File -> Load demo project (two rooms, a fixed link between racks, a wall
 ## Using it
 
 - **View mode** (default) is read-only. Search, switch maps, pan/zoom, tap anything for details, and press Trace.
-  On narrow screens details and traces open in a bottom sheet and navigation in a drawer (Menu button).
+  On narrow screens details and traces open in a bottom sheet and navigation in a drawer (Navigation button). On desktop the same button folds the navigation column away to give the map the full width (remembered between visits; searching shows it again).
 - **Edit mode** (Edit button, red banner) adds the toolbar, move/resize handles, property editing and Undo/Redo.
   Objects move only by their dark drag handle (top-left); selecting never moves anything.
 - **Groups** organise equipment and can nest. Moving a group moves its contents visually; deleting one asks whether

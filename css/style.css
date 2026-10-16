@@ -34,7 +34,12 @@ body.mode-edit #stage { outline: 3px solid var(--edit); outline-offset: -3px; }
 #left, #right { background: var(--panel); overflow: auto; min-height: 0; }
 #left { border-right: 1px solid var(--line); }
 #right { border-left: 1px solid var(--line); display: flex; flex-direction: column; }
-.drawer-head, #btnCloseLeft, #btnCloseRight, #btnMenu { display: none; }
+.drawer-head, #btnCloseLeft, #btnCloseRight { display: none; }
+#btnMenu.active { background: var(--accent); color: #fff; }
+@media (min-width: 761px) {
+  body.nav-hidden #app { grid-template-columns: 0 1fr 340px; }
+  body.nav-hidden #left { visibility: hidden; overflow: hidden; border: 0; }
+}
 #left section { padding: 8px 10px; border-bottom: 1px solid var(--line); }
 #left h3, .pane h3 { margin: 0 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
 .list-item { display: flex; align-items: center; gap: 6px; padding: 5px 6px; border-radius: 5px; cursor: pointer; }
@@ -130,7 +135,7 @@ body.view-graph #canvas, body.view-graph #toolbar, body.view-graph #zoomctl, bod
   #app { display: block; position: relative; }
   #topbar { flex-wrap: wrap; padding: 6px 8px; }
   #projTitle { display: none; }
-  #btnMenu { display: inline-block; }
+  #btnMenu.active { background: none; color: inherit; }
   #searchBox { order: 5; flex: 1 1 100%; max-width: none; min-height: 40px; }
   #saveStatus { display: none; }
   body.mode-edit #saveStatus { display: inline; font-size: 11px; }

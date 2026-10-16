@@ -63,6 +63,23 @@ const ok = (m) => console.log('  ok   ' + m);
     await page.fill('#searchBox', '');
   });
 
+  await step('navigation panel folds away on desktop and comes back (remembered)', async () => {
+    assert.ok(await page.isVisible('#left'));
+    const w0 = (await page.locator('#stage').boundingBox()).width;
+    await page.click('#btnMenu');
+    assert.ok(!(await page.isVisible('#left')), 'navigation hidden');
+    assert.ok((await page.locator('#stage').boundingBox()).width > w0 + 200, 'map area took the space');
+    assert.strictEqual(await page.evaluate(() => localStorage.getItem('netmap.navHidden')), '1');
+    await page.fill('#searchBox', 'PC');
+    assert.ok(await page.isVisible('#left'), 'searching reveals the navigation');
+    await page.fill('#searchBox', '');
+    await page.click('#btnMenu');
+    assert.ok(!(await page.isVisible('#left')));
+    await page.click('#btnMenu');
+    assert.ok(await page.isVisible('#left'));
+    assert.strictEqual(await page.evaluate(() => localStorage.getItem('netmap.navHidden')), '0');
+  });
+
   await step('trace from switch port across both maps', async () => {
     const info = await page.evaluate(() => {
       const p = NetMap.app.S.p, sw = p.objects.find(o => o.name === 'Switch A');

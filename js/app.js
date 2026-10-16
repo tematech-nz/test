@@ -600,7 +600,14 @@
   }
   const openRight = () => $('right').classList.add('open');
   const closeRight = () => $('right').classList.remove('open');
-  const openLeft = () => $('left').classList.add('open');
+  /* desktop: the navigation column can be folded away (remembered); phone: it is a slide-in drawer */
+  const isNarrow = () => window.matchMedia && window.matchMedia('(max-width: 760px)').matches;
+  function setNavHidden(on) {
+    document.body.classList.toggle('nav-hidden', !!on);
+    const b = $('btnMenu'); if (b) { b.setAttribute('aria-expanded', on ? 'false' : 'true'); b.classList.toggle('active', !on); }
+    try { localStorage.setItem('netmap.navHidden', on ? '1' : '0'); } catch (_) { /* ignore */ }
+  }
+  const openLeft = () => { if (isNarrow()) $('left').classList.add('open'); else if (document.body.classList.contains('nav-hidden')) setNavHidden(false); };
   const closeLeft = () => $('left').classList.remove('open');
 
   /* preset cable colours plus "Custom..." which reveals the RGB picker */
@@ -1450,7 +1457,8 @@
         if (lk) { S.view = 'map'; renderAll(); startTrace('port', lk.paths[0].aPortId); goTo('port', lk.paths[0].aPortId); }
       }
     });
-    $('btnMenu').onclick = openLeft; $('btnCloseLeft').onclick = closeLeft; $('btnCloseRight').onclick = closeRight;
+    $('btnMenu').onclick = () => { if (isNarrow()) openLeft(); else setNavHidden(!document.body.classList.contains('nav-hidden')); };
+    { let h = false; try { h = localStorage.getItem('netmap.navHidden') === '1'; } catch (_) { /* ignore */ } setNavHidden(h); } $('btnCloseLeft').onclick = closeLeft; $('btnCloseRight').onclick = closeRight;
     $('mapSelect').onchange = (e) => switchMap(e.target.value);
     $('searchBox').oninput = (e) => { S.query = e.target.value; renderLeft(); if (S.query) openLeft(); };
     $('searchBox').onkeydown = (e) => { if (e.key === 'Enter') { const r = M.search(S.p, S.query); if (r[0]) { goTo(r[0].kind, r[0].id); } } };
