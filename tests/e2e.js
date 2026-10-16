@@ -319,6 +319,60 @@ const ok = (m) => console.log('  ok   ' + m);
     assert.ok((await page.locator('#vp rect[data-kind="port"][fill="#ffeb3b"]').count()) >= 24, 'and on the other map');
   });
 
+
+  await step('rack stacking: drop line shows while dragging and the item attaches there', async () => {
+    const info = await page.evaluate(() => {
+      NetMap.app.api.commit('stack test', (p) => {
+        const rack = p.objects.find(o => o.name === 'Rack A');
+        NetMap.builder.addObjectPlaced(p, p.maps[0].id, { type: 'switch', name: 'Stack3', portCount: 8, containerId: rack.id });
+      });
+      const S = NetMap.app.S, pl = (n) => S.p.placements.find(q => q.refId === S.p.objects.find(o => o.name === n).id && q.mapId === S.p.maps[0].id);
+      NetMap.app.api.goTo('object', S.p.objects.find(o => o.name === 'Stack3').id, S.p.maps[0].id);
+      return { zoom: S.p.maps[0].viewport.zoom, ppBottom: pl('PP-A').y + pl('PP-A').h, swTop: pl('Switch A').y, id3: pl('Stack3').id };
+    });
+    const order = () => page.evaluate(() => { const S = NetMap.app.S; return ['PP-A', 'Switch A', 'Stack3'].map(n => S.p.placements.find(q => q.refId === S.p.objects.find(o => o.name === n).id && q.mapId === S.p.maps[0].id)).map((q, i) => [i, q.y]).sort((a, b) => a[1] - b[1]).map(x => x[0]).join(''); });
+    assert.strictEqual(await order(), '012');
+    const h = page.locator('[data-handle="move"][data-pl="' + info.id3 + '"]');
+    const box = await h.boundingBox();
+    const dy = -(await page.evaluate((id) => { const S = NetMap.app.S, q = S.p.placements.find(x => x.id === id), pp = S.p.placements.find(x => x.refId === S.p.objects.find(o => o.name === 'PP-A').id && x.mapId === q.mapId); return q.y - (pp.y + pp.h) + q.h / 2; }, info.id3)) * info.zoom;
+    await page.mouse.move(box.x + 5, box.y + 5); await page.mouse.down();
+    await page.mouse.move(box.x + 5, box.y + 5 + dy, { steps: 10 });
+    await page.waitForTimeout(100);
+    assert.ok((await page.locator('#vp [data-drop="line"]').count()) === 1, 'drop line visible while dragging');
+    await shot('drop-line');
+    await page.mouse.up();
+    await page.waitForTimeout(100);
+    assert.strictEqual(await order(), '021', 'Stack3 attached between PP-A and Switch A');
+    assert.strictEqual(await page.locator('#vp [data-drop="line"]').count(), 0, 'line gone after drop');
+    await page.click('#btnUndo'); await page.click('#btnUndo');
+  });
+
+
+  await step('dropping a panel on top of another moves it to the nearest free spot', async () => {
+    const ids = await page.evaluate(() => {
+      const S = NetMap.app.S;
+      NetMap.app.api.commit('two panels', (p) => {
+        NetMap.builder.addObjectPlaced(p, p.maps[0].id, { type: 'patchpanel', name: 'OvA', portCount: 12 }, 1500, 700);
+        NetMap.builder.addObjectPlaced(p, p.maps[0].id, { type: 'patchpanel', name: 'OvB', portCount: 12 }, 1500, 900);
+      });
+      const pl = (n) => S.p.placements.find(q => q.refId === S.p.objects.find(o => o.name === n).id && q.mapId === S.p.maps[0].id);
+      NetMap.app.api.goTo('object', S.p.objects.find(o => o.name === 'OvB').id, S.p.maps[0].id);
+      return { a: pl('OvA').id, b: pl('OvB').id };
+    });
+    const geo = () => page.evaluate((i) => { const S = NetMap.app.S, a = S.p.placements.find(q => q.id === i.a), b = S.p.placements.find(q => q.id === i.b); return { a, b, zoom: S.p.maps[0].viewport.zoom }; }, ids);
+    const g0 = await geo();
+    const box = await page.locator('[data-handle="move"][data-pl="' + ids.b + '"]').boundingBox();
+    const dy = (g0.a.y + 10 - g0.b.y) * g0.zoom;
+    await page.mouse.move(box.x + 5, box.y + 5); await page.mouse.down();
+    await page.mouse.move(box.x + 5, box.y + 5 + dy, { steps: 8 }); await page.mouse.up();
+    await page.waitForTimeout(100);
+    const g1 = await geo(), A = g1.a, Bp = g1.b;
+    const ov = A.x < Bp.x + Bp.w && Bp.x < A.x + A.w && A.y < Bp.y + Bp.h && Bp.y < A.y + A.h;
+    assert.ok(!ov, 'panels no longer overlap: ' + JSON.stringify([A, Bp]));
+    assert.ok(Math.abs(Bp.y - A.y) < 400, 'close to where it was dropped');
+    await page.click('#btnUndo'); await page.click('#btnUndo');
+  });
+
   await step('autosave survives a refresh', async () => {
     await page.click('#btnMode'); // back to view mode flushes the save
     const name = await page.evaluate(() => NetMap.app.S.p.name);

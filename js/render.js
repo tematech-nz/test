@@ -87,12 +87,13 @@
       var pl = it.box, ref = it.ref, st = STYLE[it.isGroup ? 'group' : ref.type], plId = it.pl.id;
       grow(pl.x, pl.y, pl.w, pl.h);
       var isSel = sel && sel.id === ref.id && (sel.kind === 'group' || sel.kind === 'object');
+      var isDrop = opts.drop && opts.drop.containerId === ref.id;
       var container = it.isGroup || ref.type === 'rack';
       var dim = hl && !container && !hl.objects[ref.id];
       var x = [];
       x.push('<g data-kind="' + (it.isGroup ? 'group' : 'object') + '" data-id="' + esc(ref.id) + '"' + (dim ? ' opacity="0.25"' : '') + '>');
       x.push('<rect data-kind="' + (it.isGroup ? 'group' : 'object') + '" data-id="' + esc(ref.id) + '" x="' + num(pl.x) + '" y="' + num(pl.y) + '" width="' + num(pl.w) + '" height="' + num(pl.h) + '" rx="' + (container ? 6 : (ref.type === 'internet' ? 14 : 3)) + '" fill="' + st.fill + '"' +
-        (hl && container ? ' fill-opacity="0.6"' : '') + ' stroke="' + (isSel ? SEL : st.stroke) + '" stroke-width="' + (isSel ? 3 : 1.5) + '"' + (st.dash ? ' stroke-dasharray="' + st.dash + '"' : '') + '/>');
+        (hl && container ? ' fill-opacity="0.6"' : '') + ' stroke="' + (isDrop ? '#00c853' : (isSel ? SEL : st.stroke)) + '" stroke-width="' + (isDrop ? 4 : (isSel ? 3 : 1.5)) + '"' + (st.dash ? ' stroke-dasharray="' + st.dash + '"' : '') + '/>');
       var tx = pl.x + (editing ? 22 : 6);
       var label = ref.name + (!it.isGroup && ref.type === 'rack' && ref.rackHeight ? ' (' + ref.rackHeight + 'U)' : '');
       x.push('<text x="' + num(tx) + '" y="' + num(pl.y + 14) + '" font-size="12" font-weight="bold" fill="#222" font-family="sans-serif" pointer-events="none">' + esc(trunc(label, Math.floor((pl.w - (tx - pl.x) - 4) / 6.5))) + '</text>');
@@ -221,6 +222,11 @@
       cableParts.push(o);
     });
 
+    if (opts.drop && opts.drop.line) {
+      var ln = opts.drop.line;
+      cableParts.push('<g data-drop="line" pointer-events="none"><path d="M' + num(ln.x) + ' ' + num(ln.y) + 'h' + num(ln.w) + '" stroke="#00c853" stroke-width="4" stroke-linecap="round"/>' +
+        '<path d="M' + num(ln.x) + ' ' + num(ln.y - 5) + 'l7 5l-7 5z M' + num(ln.x + ln.w) + ' ' + num(ln.y - 5) + 'l-7 5l7 5z" fill="#00c853"/></g>');
+    }
     var pad = 40;
     if (!bounds) bounds = { x0: 0, y0: 0, x1: 400, y1: 300 };
     var b = { x: bounds.x0 - pad, y: bounds.y0 - pad, w: bounds.x1 - bounds.x0 + pad * 2, h: bounds.y1 - bounds.y0 + pad * 2 };

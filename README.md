@@ -53,6 +53,11 @@ Try it: File -> Load demo project (two rooms, a fixed link between racks, a wall
 - **Dragging into container edges**: drag an item toward the bottom or right edge of its group or rack and the container
   grows live to hold it (up to about 60 units past the edge). Drag further and the extension disappears again; drop outside
   or inside another container to move it there. Dropping inside the extension keeps the larger container.
+- **Rack stacking**: while you drag equipment over a rack, the rack is outlined green and a green line shows where it will
+  attach (between its neighbours). On drop the rack's equipment is re-stacked top to bottom with it at that position.
+- **No overlaps**: items inside the same container (or at the top level of a map) never overlap. A dropped, newly placed or
+  resized item slides to the nearest free spot; containers grow to hold what is inside and push neighbouring
+  containers away (with their contents), cascading outward.
 - **Selecting a fixed link, wire or patch cable** highlights its ports (yellow) on both ends, on whichever map they appear.
 - **Maps**: the same object can be shown on several maps ("Add existing here"); connections reference the shared
   object and port records. Trace results offer "open <map>" links to continue across maps.

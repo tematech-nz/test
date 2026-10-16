@@ -492,5 +492,106 @@ test('selected fixed link highlights its ports on both panels', () => {
   assert.strictEqual(count(R.renderMap(p, p.maps[0].id, {})), 0);
 });
 
+console.log('Rack stack snapping');
+test('dropSlot finds the insertion line between rack neighbours; restack attaches there', () => {
+  const p = B.buildDemoProject(), mid = p.maps[0].id;
+  const rack = byName(p, 'Rack A'), pp = byName(p, 'PP-A'), sw = byName(p, 'Switch A');
+  const extra = B.addObjectPlaced(p, mid, { type: 'switch', name: 'Extra', portCount: 8, containerId: rack.id });
+  const pl = (o) => M.placementOf(p, mid, o.id);
+  assert.ok(pl(pp).y < pl(sw).y && pl(sw).y < pl(extra).y, 'initial stack: PP-A, Switch A, Extra');
+  // drag Extra up so its centre sits between PP-A and Switch A
+  const drag = pl(extra);
+  drag.y = (pl(pp).y + pl(pp).h + pl(sw).y) / 2 - drag.h / 2;
+  const slot = B.dropSlot(p, drag);
+  assert.strictEqual(slot.containerId, rack.id);
+  assert.strictEqual(slot.index, 1);
+  const gapMid = (pl(pp).y + pl(pp).h + pl(sw).y) / 2;
+  assert.ok(Math.abs(slot.line.y - gapMid) < 0.01, 'line sits under PP-A, above Switch A');
+  B.restack(p, mid, rack.id, extra.id, slot.index);
+  const order = [pp, extra, sw].map(o => pl(o).y);
+  assert.ok(order[0] < order[1] && order[1] < order[2], 'Extra is now between them');
+  assert.ok([pp, extra, sw].every(o => pl(o).x === pl(rack).x + M.PAD), 'aligned in the rack');
+  assert.ok(pl(rack).y + pl(rack).h >= pl(sw).y + pl(sw).h, 'rack still contains everything');
+  // dragged above everything -> index 0; far below the last item inside the rack -> last
+  drag.y = pl(rack).y;
+  assert.strictEqual(B.dropSlot(p, drag).index, 0);
+  assert.strictEqual(M.findContainer(p, extra.id).item.containerId, rack.id);
+});
+test('no snapping for groups or when dragging a rack', () => {
+  const p = B.buildDemoProject(), mid = p.maps[0].id;
+  const rackPl = M.placementOf(p, mid, byName(p, 'Rack A').id), standalone = M.placementOf(p, mid, byName(p, 'PP-Standalone').id);
+  assert.strictEqual(B.dropSlot(p, rackPl), null);
+  standalone.x = 5000; standalone.y = 5000;
+  assert.strictEqual(B.dropSlot(p, standalone), null, 'outside every rack');
+  const g = M.placementOf(p, mid, p.groups[0].id);
+  standalone.x = g.x + g.w - standalone.w - 2; standalone.y = g.y + g.h - standalone.h - 2;
+  assert.ok(!B.dropSlot(p, standalone) || M.findContainer(p, B.dropSlot(p, standalone).containerId).item.type === 'rack');
+  const svg = R.renderMap(p, mid, { drop: { containerId: byName(p, 'Rack A').id, line: { x: 0, y: 0, w: 50 } } }).content;
+  assert.ok(svg.indexOf('data-drop="line"') > 0 && svg.indexOf('#00c853') > 0);
+});
+
+console.log('No overlap');
+function overlapPairs(p) {
+  const par = {}; p.groups.forEach(g => { par[g.id] = g.parentGroupId || null; }); p.objects.forEach(o => { par[o.id] = o.containerId || null; });
+  const bad = [];
+  p.placements.forEach((a, i) => p.placements.forEach((b, j) => {
+    if (j <= i || a.mapId !== b.mapId || par[a.refId] !== par[b.refId]) return;
+    if (a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h) bad.push([a.refId, b.refId]);
+  }));
+  return bad;
+}
+test('demo layout has no overlapping siblings', () => {
+  assert.deepStrictEqual(overlapPairs(B.buildDemoProject()), []);
+});
+test('placing two panels at the same spot separates them', () => {
+  const p = M.createProject('o'), mid = p.maps[0].id;
+  B.addObjectPlaced(p, mid, { type: 'patchpanel', name: 'A', portCount: 24 }, 100, 100);
+  const b = B.addObjectPlaced(p, mid, { type: 'patchpanel', name: 'B', portCount: 24 }, 110, 105);
+  assert.deepStrictEqual(overlapPairs(p), []);
+  const a = M.placementOf(p, mid, byName(p, 'A').id), pb = M.placementOf(p, mid, b.id);
+  assert.ok(Math.abs(pb.x - a.x) + Math.abs(pb.y - a.y) < 400, 'moved to the nearest free spot, not far away');
+});
+test('dropping an item on a sibling inside a container slides it away and grows the container', () => {
+  const p = M.createProject('o'), mid = p.maps[0].id;
+  const g = B.addGroupPlaced(p, mid, { name: 'G' }, 0, 0);
+  const a = B.addObjectPlaced(p, mid, { type: 'switch', name: 'A', portCount: 8, containerId: g.id });
+  const b = B.addObjectPlaced(p, mid, { type: 'switch', name: 'B', portCount: 8, containerId: g.id });
+  const pa = M.placementOf(p, mid, a.id), pb = M.placementOf(p, mid, b.id), pg = M.placementOf(p, mid, g.id);
+  pb.x = pa.x + 4; pb.y = pa.y + 4; // dropped on top of A
+  assert.ok(B.resolveDrop(p, pb.id));
+  assert.deepStrictEqual(overlapPairs(p), []);
+  assert.ok(pb.x >= pg.x + M.PAD && pb.y >= pg.y + M.HEADER, 'never pushed past the container top/left');
+  assert.ok(pb.x + pb.w <= pg.x + pg.w && pb.y + pb.h <= pg.y + pg.h, 'container grew to hold it');
+});
+test('a container that grows pushes its neighbours away, contents included', () => {
+  const p = M.createProject('o'), mid = p.maps[0].id;
+  const g1 = B.addGroupPlaced(p, mid, { name: 'G1' }, 0, 0), g2 = B.addGroupPlaced(p, mid, { name: 'G2' }, 440, 0);
+  const sw = B.addObjectPlaced(p, mid, { type: 'switch', name: 'In2', portCount: 8, containerId: g2.id });
+  const pg1 = M.placementOf(p, mid, g1.id), pg2 = M.placementOf(p, mid, g2.id), psw = M.placementOf(p, mid, sw.id);
+  const rel = psw.x - pg2.x;
+  pg1.w = 600; // user resizes G1 over G2
+  B.settle(p, pg1);
+  assert.deepStrictEqual(overlapPairs(p), []);
+  assert.ok(pg2.x >= pg1.x + pg1.w, 'G2 moved right');
+  assert.strictEqual(psw.x - pg2.x, rel, 'its contents moved with it');
+});
+test('nested growth cascades: rack grows, group grows, neighbouring group moves', () => {
+  const p = M.createProject('o'), mid = p.maps[0].id;
+  const g1 = B.addGroupPlaced(p, mid, { name: 'G1' }, 0, 0), g2 = B.addGroupPlaced(p, mid, { name: 'G2' }, 440, 0);
+  const rack = B.addObjectPlaced(p, mid, { type: 'rack', name: 'R', containerId: g1.id });
+  for (let i = 0; i < 6; i++) B.addObjectPlaced(p, mid, { type: 'patchpanel', name: 'P' + i, portCount: 24, containerId: rack.id });
+  assert.deepStrictEqual(overlapPairs(p), []);
+  const pg1 = M.placementOf(p, mid, g1.id), pg2 = M.placementOf(p, mid, g2.id), pr = M.placementOf(p, mid, rack.id);
+  assert.ok(pg1.y + pg1.h >= pr.y + pr.h && pr.h > 300, 'rack and group grew');
+  assert.ok(pg2.x >= pg1.x + pg1.w || pg2.y >= pg1.y + pg1.h);
+});
+test('refitObject keeps the layout overlap-free', () => {
+  const p = M.createProject('o'), mid = p.maps[0].id;
+  const a = B.addObjectPlaced(p, mid, { type: 'patchpanel', name: 'A', portCount: 8 }, 0, 0);
+  B.addObjectPlaced(p, mid, { type: 'patchpanel', name: 'B', portCount: 8 }, 0, 100);
+  M.setPortCount(p, a.id, 96); B.refitObject(p, a.id);
+  assert.deepStrictEqual(overlapPairs(p), []);
+});
+
 console.log('\n' + passed + ' passed, ' + failed + ' failed');
 process.exit(failed ? 1 : 0);

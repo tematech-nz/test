@@ -10,7 +10,7 @@
     p: null, mapId: null, mode: 'view', sel: null, trace: null, tool: null,
     undo: [], redo: [], unsaved: false, saveErr: null, savedAt: null, lastExport: null,
     drag: null, geo: null, query: '', showIssues: false, issues: [],
-    collapsed: {}, pgroup: null, hoverPort: null, preview: null,
+    collapsed: {}, pgroup: null, hoverPort: null, preview: null, drop: null,
     view: 'map', graph: { from: '', to: '', via: false }
   };
   NM.app = { S: S, M: M }; // exposed for tests
@@ -316,6 +316,7 @@
           dx = snap(p0.ox + dx) - p0.ox; dy = snap(p0.oy + dy) - p0.oy;
           d.items.forEach((it) => { it.q.x = it.ox + dx; it.q.y = it.oy + dy; });
           B.applyExtension(S.p, d.items[0].q.mapId, d.chain, d.items[0].q, EXTEND_ZONE);
+          S.drop = B.dropSlot(S.p, d.items[0].q);
         } else {
           const it = d.items[0];
           it.q.w = Math.max(60, snap(it.ow + dx)); it.q.h = Math.max(40, snap(it.oh + dy));
@@ -338,15 +339,24 @@
       }
     };
     cv.addEventListener('pointerup', up);
-    cv.addEventListener('pointercancel', (e) => { pointers.delete(e.pointerId); gesture = null; pinch = null; if (S.drag) { S.p = JSON.parse(S.drag.snap); S.drag = null; renderAll(); } });
+    cv.addEventListener('pointercancel', (e) => { pointers.delete(e.pointerId); gesture = null; pinch = null; S.drop = null; if (S.drag) { S.p = JSON.parse(S.drag.snap); S.drag = null; renderAll(); } });
     cv.addEventListener('wheel', (e) => { e.preventDefault(); zoomAt(e.deltaY < 0 ? 1.12 : 1 / 1.12, e.clientX, e.clientY); }, { passive: false });
   }
 
   function finishDrag() {
     const d = S.drag; S.drag = null;
+    const slot = S.drop; S.drop = null;
     if (!d.moved) return;
     S.undo.push({ label: d.kind === 'move' ? 'Move' : 'Resize', snap: d.snap }); S.redo = [];
-    if (d.kind === 'move') reassignContainer(d.plId, d);
+    if (d.kind === 'move') {
+      reassignContainer(d.plId, d);
+      const q = S.p.placements.find((x) => x.id === d.plId), c = q && M.findContainer(S.p, q.refId);
+      if (slot && q && c && c.item.containerId === slot.containerId) B.restack(S.p, q.mapId, slot.containerId, q.refId, slot.index);
+      if (q && B.resolveDrop(S.p, d.plId)) toast('Moved to avoid overlapping another item');
+    } else {
+      const q = S.p.placements.find((x) => x.id === d.plId);
+      if (q) B.settle(S.p, q);
+    }
     scheduleSave(); afterChange();
   }
   /* dropping an item with its centre inside another container changes containment (data only; connections untouched) */
@@ -355,15 +365,7 @@
     if (!pl) return;
     const c = M.findContainer(S.p, pl.refId);
     if (!c) return;
-    const cx = pl.x + pl.w / 2, cy = pl.y + pl.h / 2;
-    const banned = {}; banned[pl.refId] = true; M.descendants(S.p, pl.refId).forEach((x) => { banned[x.id] = true; });
-    let best = null;
-    S.p.placements.forEach((q) => {
-      if (q.mapId !== pl.mapId || banned[q.refId]) return;
-      const cc = M.findContainer(S.p, q.refId);
-      if (!cc || (cc.kind === 'object' && cc.item.type !== 'rack')) return;
-      if (cx >= q.x && cx <= q.x + q.w && cy >= q.y && cy <= q.y + q.h && (!best || q.w * q.h < best.w * best.h)) best = q;
-    });
+    const best = B.findDropContainer(S.p, pl);
     const cur = c.kind === 'group' ? c.item.parentGroupId : c.item.containerId;
     const want = best ? best.refId : null;
     if (want === cur) { if (cur) M.growToFit(S.p, pl.mapId, cur); return; }
@@ -404,7 +406,7 @@
     const map = curMap();
     const r = R.renderMap(S.p, map.id, {
       mode: S.mode, selection: S.sel, highlight: S.trace && S.trace.highlight,
-      pendingPortId: S.tool && S.tool.pending, collapsed: S.collapsed,
+      pendingPortId: S.tool && S.tool.pending, collapsed: S.collapsed, drop: S.drop,
       groupPorts: S.pgroup ? S.pgroup.ids : null, preview: S.preview
     });
     S.geo = r;
