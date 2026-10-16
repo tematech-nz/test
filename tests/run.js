@@ -593,5 +593,20 @@ test('refitObject keeps the layout overlap-free', () => {
   assert.deepStrictEqual(overlapPairs(p), []);
 });
 
+test('fixed links attach under the rear ports their wires use, not to the panel box edge', () => {
+  const p = M.createProject('f'), mid = p.maps[0].id;
+  const a = B.addObjectPlaced(p, mid, { type: 'patchpanel', name: 'A', portCount: 15 }, 0, 0);
+  const b = B.addObjectPlaced(p, mid, { type: 'patchpanel', name: 'B', portCount: 15 }, 0, 400);
+  const rr = (o, n) => port(o, n, 'rear').id;
+  M.addFixedLink(p, { aObjectId: a.id, bObjectId: b.id, pairs: [[rr(a, 6), rr(b, 6)], [rr(a, 7), rr(b, 7)], [rr(a, 8), rr(b, 8)]] });
+  const r = R.renderMap(p, mid, {});
+  const g6 = r.portGeo[rr(a, 6)], g8 = r.portGeo[rr(a, 8)], front6 = r.portGeo[port(a, 6, 'front').id];
+  assert.ok(g6.y > front6.y, 'rear row is below the front row');
+  const barY = Math.round((g6.y + g6.h + 5) * 10) / 10;
+  const m = new RegExp('M' + Math.round((g6.x + g6.w / 2) * 10) / 10 + ' ' + barY + 'H' + Math.round((g8.x + g8.w / 2) * 10) / 10).exec(r.content);
+  assert.ok(m, 'bar spans exactly ports 6..8 of the rear row at y=' + barY);
+  assert.ok(r.content.indexOf('M' + Math.round((g6.x + g6.w / 2) * 10) / 10 + ' ' + Math.round((g6.y + g6.h) * 10) / 10 + 'V' + barY) > 0, 'tick from the port down to the bar');
+});
+
 console.log('\n' + passed + ' passed, ' + failed + ' failed');
 process.exit(failed ? 1 : 0);

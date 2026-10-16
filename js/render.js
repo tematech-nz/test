@@ -23,14 +23,6 @@
   function trunc(s, n) { s = String(s); return s.length > n ? s.slice(0, Math.max(1, n - 1)) + '~' : s; }
   function num(v) { return Math.round(v * 10) / 10; }
 
-  function clipToRect(pl, tx, ty) {
-    var cx = pl.x + pl.w / 2, cy = pl.y + pl.h / 2, dx = tx - cx, dy = ty - cy;
-    if (!dx && !dy) return { x: cx, y: cy };
-    var sx = dx ? (pl.w / 2) / Math.abs(dx) : Infinity, sy = dy ? (pl.h / 2) / Math.abs(dy) : Infinity;
-    var s = Math.min(sx, sy);
-    return { x: cx + dx * s, y: cy + dy * s };
-  }
-
   function containerDepth(p, id) {
     var d = 0, c = M.findContainer(p, id), guard = 0;
     while (c && guard++ < 20) {
@@ -154,8 +146,28 @@
       return (o ? o.name + ' / ' + idx.ports[pid].label : '?') + (ms.length ? ' [' + ms.map(function (m) { return idx.maps[m] ? idx.maps[m].name : '?'; }).join(', ') + ']' : ' [not on a map]');
     }
 
-    // fixed links
+    // fixed links: each end attaches to the REAR terminations its wires use (a bar under those ports), not to the panel box
     var pairCount = {};
+    function linkAnchor(l, objId) {
+      var box = byRef[objId];
+      if (!box) return null;
+      var rects = [];
+      l.wires.forEach(function (w) {
+        [w.aPortId, w.bPortId].forEach(function (pid) {
+          var g = pid && portGeo[pid];
+          if (g && g.objId === objId) rects.push(g);
+        });
+      });
+      if (!rects.length) { // nothing mapped yet: use the rear strip of the panel (or its bottom edge)
+        var rear = M.rearPorts(idx.objects[objId]).map(function (pt) { return portGeo[pt.id]; }).filter(Boolean);
+        if (!rear.length) return { x: box.x + box.w / 2, y: box.y + box.h, bar: null, ticks: [] };
+        rects = rear;
+      }
+      var x0 = Math.min.apply(null, rects.map(function (r) { return r.x + r.w / 2; }));
+      var x1 = Math.max.apply(null, rects.map(function (r) { return r.x + r.w / 2; }));
+      var y = Math.max.apply(null, rects.map(function (r) { return r.y + r.h; })) + 5;
+      return { x: (x0 + x1) / 2, y: y, bar: [x0, x1, y], ticks: rects.map(function (r) { return [r.x + r.w / 2, r.y + r.h, y]; }), hidden: rects.every(function (r) { return r.hidden; }) };
+    }
     p.fixedLinks.forEach(function (l) {
       var A = byRef[l.aObjectId], B = byRef[l.bObjectId];
       if (!A && !B) return;
@@ -164,30 +176,41 @@
       var dim = hl && !isHi;
       var label = l.name + ' x' + l.wires.length;
       var o = '<g data-kind="link" data-id="' + esc(l.id) + '"' + (dim ? ' opacity="0.15"' : '') + '>';
-      var x1, y1, x2, y2, ox = 0, oy = 0;
-      if (A && B) {
-        var key = [A.id, B.id].sort().join('|');
+      var anchors = [], d, mx, my;
+      var aA = linkAnchor(l, l.aObjectId), aB = linkAnchor(l, l.bObjectId);
+      if (aA && aB) {
+        var key = [l.aObjectId, l.bObjectId].sort().join('|');
         var n = pairCount[key] = (pairCount[key] || 0) + 1;
-        var acx = A.x + A.w / 2, acy = A.y + A.h / 2, bcx = B.x + B.w / 2, bcy = B.y + B.h / 2;
-        var len = Math.sqrt((bcx - acx) * (bcx - acx) + (bcy - acy) * (bcy - acy)) || 1;
-        ox = -(bcy - acy) / len * (n - 1) * 12; oy = (bcx - acx) / len * (n - 1) * 12;
-        var pa = clipToRect(A, bcx, bcy), pb = clipToRect(B, acx, acy);
-        x1 = pa.x + ox; y1 = pa.y + oy; x2 = pb.x + ox; y2 = pb.y + oy;
+        var cyc = Math.max(aA.y, aB.y) + 34 + (n - 1) * 16; // both ends leave downward and meet below the lower panel
+        d = 'M' + num(aA.x) + ' ' + num(aA.y) + 'C' + num(aA.x) + ' ' + num(cyc) + ' ' + num(aB.x) + ' ' + num(cyc) + ' ' + num(aB.x) + ' ' + num(aB.y);
+        mx = (aA.x + aB.x) / 2; my = (aA.y + 6 * cyc + aB.y) / 8 + 6;
+        grow(Math.min(aA.x, aB.x), Math.min(aA.y, aB.y), Math.abs(aA.x - aB.x), cyc - Math.min(aA.y, aB.y));
+        anchors = [aA, aB];
       } else {
-        var P = A || B, otherId = A ? l.bObjectId : l.aObjectId, other = idx.objects[otherId];
-        var ocount = pairCount['stub' + P.id] = (pairCount['stub' + P.id] || 0) + 1;
-        x1 = P.x + P.w; y1 = P.y + P.h / 2 + (ocount - 1) * 14; x2 = x1 + 70; y2 = y1;
+        var an = aA || aB, otherId = aA ? l.bObjectId : l.aObjectId, other = idx.objects[otherId];
+        var ocount = pairCount['stub' + (aA ? l.aObjectId : l.bObjectId)] = (pairCount['stub' + (aA ? l.aObjectId : l.bObjectId)] || 0) + 1;
+        var sy = an.y + 28 + (ocount - 1) * 14;
+        d = 'M' + num(an.x) + ' ' + num(an.y) + 'L' + num(an.x) + ' ' + num(sy);
+        mx = an.x; my = sy + 12;
         label = label + ' -> ' + (other ? other.name : '?') + (other ? ' [' + (M.mapsFor(p, 'object', other.id).map(function (m) { return idx.maps[m].name; }).join(', ') || 'not on a map') + ']' : '');
+        grow(an.x - 20, an.y, 40, sy - an.y + 20);
+        anchors = [an];
       }
-      grow(Math.min(x1, x2), Math.min(y1, y2), Math.abs(x2 - x1), Math.abs(y2 - y1));
-      var d = 'M' + num(x1) + ' ' + num(y1) + 'L' + num(x2) + ' ' + num(y2);
+      // bar + ticks tie the thick line to the exact rear ports
+      anchors.forEach(function (an) {
+        if (an.bar) {
+          var bar = 'M' + num(an.bar[0]) + ' ' + num(an.bar[2]) + 'H' + num(an.bar[1]);
+          an.ticks.forEach(function (t) { bar += 'M' + num(t[0]) + ' ' + num(t[1]) + 'V' + num(t[2]); });
+          o += '<path d="' + bar + '" stroke="' + (isSel ? SEL : '#37474f') + '" stroke-width="2" fill="none" stroke-linecap="round" pointer-events="none"/>';
+        }
+      });
       o += '<path d="' + d + '" stroke="transparent" stroke-width="16" fill="none" data-kind="link" data-id="' + esc(l.id) + '"/>';
       if (isHi) o += '<path d="' + d + '" stroke="' + HI + '" stroke-width="11" fill="none" opacity="0.7" pointer-events="none"/>';
       o += '<path d="' + d + '" stroke="' + (isSel ? SEL : '#37474f') + '" stroke-width="6" fill="none" stroke-linecap="round" pointer-events="none"/>';
       o += '<path d="' + d + '" stroke="#ffffff" stroke-width="1.6" stroke-dasharray="7 5" fill="none" pointer-events="none"/>';
-      var mx = (x1 + x2) / 2, my = (y1 + y2) / 2, tw = label.length * 5.8 + 8;
-      o += '<rect x="' + num(mx - tw / 2) + '" y="' + num(my - 16) + '" width="' + num(tw) + '" height="13" rx="3" fill="#fff" stroke="#37474f" stroke-width="0.8" pointer-events="none"/>' +
-        '<text x="' + num(mx) + '" y="' + num(my - 6) + '" font-size="10" text-anchor="middle" fill="#222" font-family="sans-serif" pointer-events="none">' + esc(label) + '</text></g>';
+      var tw = label.length * 5.8 + 8;
+      o += '<rect x="' + num(mx - tw / 2) + '" y="' + num(my - 9) + '" width="' + num(tw) + '" height="13" rx="3" fill="#fff" stroke="#37474f" stroke-width="0.8" pointer-events="none"/>' +
+        '<text x="' + num(mx) + '" y="' + num(my + 1) + '" font-size="10" text-anchor="middle" fill="#222" font-family="sans-serif" pointer-events="none">' + esc(label) + '</text></g>';
       cableParts.push(o);
     });
 
