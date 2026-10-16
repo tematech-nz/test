@@ -579,7 +579,12 @@
       if (g.id === selfId || (forKind === 'group' && M.descendants(S.p, selfId).some((d) => d.id === g.id))) return;
       out.push([g.id, 'Group: ' + g.name]);
     });
-    if (forKind === 'object' && forType !== 'rack') S.p.objects.filter((o) => o.type === 'rack').forEach((r) => out.push([r.id, 'Rack: ' + r.name]));
+    if (forKind === 'object' && forType !== 'rack') S.p.objects.filter((o) => o.type === 'rack').forEach((r) => {
+      // label racks with their top-level container (e.g. "NAD: Rack 1"); standalone racks keep "Rack: name"
+      let top = M.parentOf(S.p, 'object', r.id), guard = 0;
+      while (top && guard++ < 20) { const up = M.parentOf(S.p, top.kind, top.id); if (!up) break; top = up; }
+      out.push([r.id, (top ? top.item.name : 'Rack') + ': ' + r.name]);
+    });
     return out;
   }
   function mapsLine(kind, id) {

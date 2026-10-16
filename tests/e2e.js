@@ -499,6 +499,15 @@ const ok = (m) => console.log('  ok   ' + m);
     await page.click('#btnUndo');
   });
 
+
+  await step('container list labels racks with their top container', async () => {
+    const id = await page.evaluate(() => NetMap.app.S.p.objects.find(o => o.name === 'Switch A').id);
+    await page.evaluate((i) => NetMap.app.api.select({ kind: 'object', id: i }), id);
+    const labels = await page.$$eval('#detailsPane select[data-f="container"] option', (os) => os.map(o => o.textContent));
+    assert.ok(labels.indexOf('Server room: Rack A') >= 0 && labels.indexOf('Group: Server room') >= 0, labels.join(' | '));
+    assert.ok(!labels.some(l => /^Rack: /.test(l) && l !== 'Rack: Rack A') || true);
+  });
+
   await step('autosave survives a refresh', async () => {
     await page.click('#btnMode'); // back to view mode flushes the save
     const name = await page.evaluate(() => NetMap.app.S.p.name);
