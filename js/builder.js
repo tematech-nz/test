@@ -427,6 +427,74 @@
     resolveDrop(p, pl.id);
     return { id: item.id, placement: pl };
   }
+  /*
+   * Copy / paste. A clip is a snapshot of an item (with everything inside a group or rack): settings, ports (labels, sections,
+   * port groups, internal mappings) and the layout relative to the item. Connections (patch cables, fixed links) are never
+   * copied, and neither are IP addresses (a copy with the same address would clash on the network).
+   */
+  function copyClip(p, mapId, kind, id) {
+    var c = M.findContainer(p, id);
+    if (!c || c.kind !== kind) return null;
+    var root = M.placementOf(p, mapId, id);
+    var ids = [{ kind: kind, id: id }].concat(M.descendants(p, id).map(function (d) { return { kind: d.kind, id: d.id }; }));
+    var clip = { kind: kind, rootId: id, type: kind === 'object' ? c.item.type : null, groups: [], objects: [], placements: [], mappings: [] };
+    ids.forEach(function (it) {
+      var f = M.findContainer(p, it.id);
+      if (!f) return;
+      var copy = JSON.parse(JSON.stringify(f.item));
+      if (it.kind === 'group') clip.groups.push(copy);
+      else {
+        delete copy.ipAddress; copy.ports.forEach(function (pt) { delete pt.ip; });
+        clip.objects.push(copy);
+        p.internalMappings.forEach(function (m) { if (m.objectId === it.id) clip.mappings.push(JSON.parse(JSON.stringify(m))); });
+      }
+      var q = M.placementOf(p, mapId, it.id);
+      if (q) clip.placements.push({ refId: it.id, kind: it.kind, dx: root ? q.x - root.x : 0, dy: root ? q.y - root.y : 0, w: q.w, h: q.h });
+    });
+    if (!root) { var sz = kind === 'group' ? L.defaultGroupSize() : L.defaultSize(c.item); clip.placements = [{ refId: id, kind: kind, dx: 0, dy: 0, w: sz.w, h: sz.h }]; }
+    return clip;
+  }
+  /* "Switch" -> "Switch (Copy 1)"; copying a copy counts on: "Switch (Copy 2)" */
+  function copyName(p, kind, name) {
+    var base = String(name).replace(/ \(Copy \d+\)$/, ''), list = (kind === 'group' ? p.groups : p.objects), n = 1;
+    function taken(s) { return list.some(function (x) { return x.name === s; }); }
+    while (taken(base + ' (Copy ' + n + ')')) n++;
+    return base + ' (Copy ' + n + ')';
+  }
+  function pasteClipAt(p, mapId, clip, x, y) {
+    var map = {}, host = containerAt(p, mapId, x + 2, y + 2, clip.kind, clip.type);
+    clip.groups.forEach(function (g) { map[g.id] = M.uid('grp'); });
+    clip.objects.forEach(function (o) { map[o.id] = M.uid('obj'); o.ports.forEach(function (pt) { map[pt.id] = M.uid('port'); }); });
+    clip.groups.forEach(function (g) {
+      var n = JSON.parse(JSON.stringify(g));
+      n.id = map[g.id]; n.name = copyName(p, 'group', g.name); n.parentGroupId = g.id === clip.rootId ? null : (map[g.parentGroupId] || null);
+      p.groups.push(n);
+    });
+    clip.objects.forEach(function (o) {
+      var n = JSON.parse(JSON.stringify(o));
+      n.id = map[o.id]; n.name = copyName(p, 'object', o.name); n.containerId = o.id === clip.rootId ? null : (map[o.containerId] || null);
+      n.ports.forEach(function (pt) { pt.id = map[pt.id]; });
+      (n.portGroups || []).forEach(function (g) { g.id = M.uid('pgp'); g.portIds = g.portIds.map(function (i) { return map[i]; }).filter(Boolean); });
+      p.objects.push(n);
+    });
+    clip.mappings.forEach(function (m) { p.internalMappings.push({ id: M.uid('map_i'), objectId: map[m.objectId], aPortId: map[m.aPortId], bPortId: map[m.bPortId] }); });
+    var rootPl = null;
+    clip.placements.forEach(function (q) {
+      var pl = M.addPlacement(p, mapId, q.kind, map[q.refId], x + q.dx, y + q.dy, q.w, q.h);
+      if (q.refId === clip.rootId) rootPl = pl;
+    });
+    var newRoot = map[clip.rootId];
+    if (host) {
+      try { M.setContainer(p, clip.kind, newRoot, host.refId); } catch (e) { host = null; }
+    }
+    if (host) {
+      var hc = M.findContainer(p, host.refId);
+      if (hc.kind === 'object') { var slot = dropSlot(p, rootPl, null); if (slot) restack(p, mapId, host.refId, newRoot, slot.index); }
+      M.growToFit(p, mapId, host.refId);
+    }
+    resolveDrop(p, rootPl.id);
+    return { id: newRoot, placement: rootPl };
+  }
   /* 'Switch 1' -> 'Switch 2', 'PC' -> 'PC 2', 'AP-07' -> 'AP-08' */
   function nextName(name) {
     var m = /^(.*?)(\d+)$/.exec(String(name));
@@ -436,6 +504,6 @@
     return m[1] + n;
   }
 
-  NM.builder = { containerAt: containerAt, placeNewAt: placeNewAt, nextName: nextName, applyFullWidth: applyFullWidth, applyFullWidthFor: applyFullWidthFor, minPlacementSize: minPlacementSize, normalizeSizes: normalizeSizes, alignToGrid: alignToGrid, fitMinimum: fitMinimum, resolveDrop: resolveDrop, settle: settle, findDropContainer: findDropContainer, dropSlot: dropSlot, restack: restack, captureChain: captureChain, restoreChain: restoreChain, applyExtension: applyExtension, refitObject: refitObject, placeItem: placeItem, addGroupPlaced: addGroupPlaced, addObjectPlaced: addObjectPlaced, buildDemoProject: buildDemoProject };
+  NM.builder = { containerAt: containerAt, placeNewAt: placeNewAt, copyClip: copyClip, pasteClipAt: pasteClipAt, copyName: copyName, nextName: nextName, applyFullWidth: applyFullWidth, applyFullWidthFor: applyFullWidthFor, minPlacementSize: minPlacementSize, normalizeSizes: normalizeSizes, alignToGrid: alignToGrid, fitMinimum: fitMinimum, resolveDrop: resolveDrop, settle: settle, findDropContainer: findDropContainer, dropSlot: dropSlot, restack: restack, captureChain: captureChain, restoreChain: restoreChain, applyExtension: applyExtension, refitObject: refitObject, placeItem: placeItem, addGroupPlaced: addGroupPlaced, addObjectPlaced: addObjectPlaced, buildDemoProject: buildDemoProject };
   if (typeof module !== 'undefined' && module.exports) module.exports = NM.builder;
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -1268,6 +1268,36 @@ console.log('Placing new items');
 test('nextName counts up: trailing numbers keep their width, plain names get a 2', () => {
   assert.deepStrictEqual(['PC 1', 'AP-07', 'Switch', 'Rack 9', 'x99'].map(B.nextName), ['PC 2', 'AP-08', 'Switch 2', 'Rack 10', 'x100']);
 });
+test('copy / paste: settings and contents are copied with "(Copy N)" names; connections and IPs are not', () => {
+  const p = M.createProject('c'), mid = p.maps[0].id;
+  const rack = B.addObjectPlaced(p, mid, { type: 'rack', name: 'Rack A' }, 0, 0);
+  const pp = B.addObjectPlaced(p, mid, { type: 'patchpanel', name: 'PP', portCount: 24, straight: true, containerId: rack.id });
+  const sw = B.addObjectPlaced(p, mid, { type: 'switch', name: 'SW', portCount: 8, ipAddress: '10.0.0.2', containerId: rack.id });
+  pp.ports[0].description = 'desk 1';
+  M.addPortGroup(p, pp.id, { name: 'to office', color: '#2ca02c', portsText: '1-4', side: 'rear' });
+  const pc = B.addObjectPlaced(p, mid, { type: 'generic', name: 'PC', portCount: 1, ipAddress: '10.0.0.9' }, 600, 0);
+  M.addPatchCable(p, { aPortId: pc.ports[0].id, bPortId: sw.ports[0].id });
+  const clip = B.copyClip(p, mid, 'object', rack.id);
+  const first = B.pasteClipAt(p, mid, clip, 400, 400), second = B.pasteClipAt(p, mid, clip, 800, 400);
+  const r1 = M.findContainer(p, first.id).item, r2 = M.findContainer(p, second.id).item;
+  assert.strictEqual(r1.name, 'Rack A (Copy 1)'); assert.strictEqual(r2.name, 'Rack A (Copy 2)');
+  const kids = (id) => p.objects.filter(o => o.containerId === id);
+  assert.deepStrictEqual(kids(r1.id).map(o => o.name).sort(), ['PP (Copy 1)', 'SW (Copy 1)']);
+  const pp2 = kids(r1.id).find(o => o.type === 'patchpanel'), sw2 = kids(r1.id).find(o => o.type === 'switch');
+  assert.strictEqual(pp2.ports.length, pp.ports.length); assert.strictEqual(pp2.ports[0].description, 'desk 1');
+  assert.ok(pp2.ports.every(x => pp.ports.every(y => y.id !== x.id)), 'new port ids');
+  assert.strictEqual(pp2.portGroups.length, 1); assert.ok(pp2.portGroups[0].portIds.every(i => pp2.ports.some(x => x.id === i)), 'port group follows the copied ports');
+  assert.strictEqual(p.internalMappings.filter(m => m.objectId === pp2.id).length, 24, 'internal mapping copied');
+  assert.ok(!sw2.ipAddress, 'IP not copied');
+  assert.strictEqual(p.patchCables.length, 1, 'no connections copied');
+  assert.ok(M.placementOf(p, mid, pp2.id) && M.placementOf(p, mid, pp2.id).x >= first.placement.x, 'contents placed inside the copy');
+  const rpl = first.placement, ppl = M.placementOf(p, mid, pp2.id);
+  assert.ok(ppl.x >= rpl.x && ppl.x + ppl.w <= rpl.x + rpl.w && ppl.y + ppl.h <= rpl.y + rpl.h);
+  const cp = B.pasteClipAt(p, mid, B.copyClip(p, mid, 'object', pc.id), 600, 300);
+  assert.strictEqual(M.findContainer(p, cp.id).item.name, 'PC (Copy 1)'); assert.ok(!M.findContainer(p, cp.id).item.ipAddress);
+  assert.deepStrictEqual(overlapPairs(p), []);
+  assert.deepStrictEqual(M.validateProject(p).filter(i => i.severity === 'error'), []);
+});
 test('alignToGrid puts an old project on the grid, keeps it overlap-free and readable, once per project', () => {
   const p = M.createProject('old'), mid = p.maps[0].id, g = p.settings.gridSize;
   p.settings.gridSize = 1; // build off-grid, like an old file

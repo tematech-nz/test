@@ -121,6 +121,21 @@ const ok = (m) => console.log('  ok   ' + m);
     await shot('edit-mode');
   });
 
+  await step('copy and paste: Ctrl+C, Ctrl+V places "(Copy N)" at the cursor without connections', async () => {
+    const info = await page.evaluate(() => { const S = NetMap.app.S; const o = S.p.objects.find(x => x.type === 'switch' && S.p.placements.some(q => q.refId === x.id && q.mapId === S.mapId)) || S.p.objects.find(x => x.type === 'switch'); S.sel = { kind: 'object', id: o.id }; return { id: o.id, name: o.name, n: S.p.objects.length, cables: S.p.patchCables.length }; });
+    await page.keyboard.press('Control+c');
+    assert.ok(await page.evaluate(() => !!NetMap.app.S.clip), 'copied');
+    await page.keyboard.press('Control+v');
+    assert.ok(await page.evaluate(() => !!NetMap.app.S.place), 'paste follows the cursor');
+    await page.mouse.move(500, 600); await page.mouse.move(510, 610);
+    await page.mouse.click(510, 610); await page.waitForTimeout(150);
+    const res = await page.evaluate((i) => { const S = NetMap.app.S; const o = S.p.objects[S.p.objects.length - 1]; return { name: o.name, n: S.p.objects.length, cables: S.p.patchCables.length, sel: S.sel && S.sel.id === o.id, placed: !!S.p.placements.find(q => q.refId === o.id) }; }, info);
+    assert.strictEqual(res.name, info.name.replace(/ \(Copy \d+\)$/, '') + ' (Copy 1)');
+    assert.strictEqual(res.n, info.n + 1); assert.strictEqual(res.cables, info.cables); assert.ok(res.sel && res.placed);
+    await page.click('#btnUndo');
+    assert.strictEqual(await page.evaluate(() => NetMap.app.S.p.objects.length), info.n);
+  });
+
   await step('hidden navigation stays hidden when clicking the map or changing mode', async () => {
     await page.click('#btnMenu');
     assert.ok(!(await page.isVisible('#left')));

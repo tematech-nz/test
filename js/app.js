@@ -657,6 +657,7 @@
     trace: 'Highlight the complete physical path through this item, across patch panels, fixed links and maps',
     'reconnect:a': 'Move end A of this patch cable to a different port: click this, then click the new port on the map. The circled port is the end that moves.',
     'reconnect:b': 'Move end B of this patch cable to a different port: click this, then click the new port on the map. The circled port is the end that moves.',
+    duplicate: 'Copy this item (with everything inside it) and place the copy where you click. Settings are copied, connections and IP addresses are not. Ctrl+C / Ctrl+V does the same.',
     deleteSel: 'Delete the selected item (you will be asked to confirm and shown what else is removed)',
     deleteCable: 'Remove this patch cable; both ports become free',
     editWiring: 'Change installed wiring: endpoints, wire mappings, add or delete wires. Changes are reviewed before they are applied.',
@@ -720,7 +721,7 @@
       fld('Inside', g.parentGroupId ? esc(idx.groups[g.parentGroupId].name) : '-');
     h += fld('On maps', mapsLine('group', id));
     h += '<h3>Contents (' + kids.length + ')</h3>' + (kids.map((k) => '<div class="list-item" data-act="goto" data-kind="' + k.kind + '" data-id="' + esc(k.id) + '">' + esc((k.kind === 'group' ? idx.groups[k.id] : idx.objects[k.id]).name) + '</div>').join('') || '<div class="sub">Empty. Groups only organise equipment; they never connect ports.</div>');
-    if (isEdit()) h += '<div class="btn-row">' + placeButtons(id, 'group') + btn('deleteSel', 'Delete group...', '', 'danger') + '</div>';
+    if (isEdit()) h += '<div class="btn-row">' + placeButtons(id, 'group') + btn('duplicate', 'Copy / duplicate', 'data-kind="group" data-id="' + esc(id) + '"') + btn('deleteSel', 'Delete group...', '', 'danger') + '</div>';
     return h;
   }
   function placeButtons(id, kind) {
@@ -805,7 +806,7 @@
     }
     h += pgroupSection(o);
     if (isEdit()) {
-      h += '<div class="btn-row">' + placeButtons(id, 'object') + (M.isTermination(o) ? btn('automap', 'Map front N <-> rear N') + btn('newLinkFrom', 'Fixed link from here...') : '') +
+      h += '<div class="btn-row">' + placeButtons(id, 'object') + btn('duplicate', 'Copy / duplicate', 'data-kind="object" data-id="' + esc(id) + '"') + (M.isTermination(o) ? btn('automap', 'Map front N <-> rear N') + btn('newLinkFrom', 'Fixed link from here...') : '') +
         btn('deleteSel', 'Delete...', '', 'danger') + '</div>';
       if (M.isTermination(o)) h += '<div class="sub">Internal mappings: ' + S.p.internalMappings.filter((m) => m.objectId === id).length + ' documented. Tracing only follows documented mappings.</div>';
     }
@@ -1072,6 +1073,12 @@
   /* ---- placing a new item: it follows the cursor, a click drops it, Ctrl+click keeps going with incrementing names ---- */
   function ghostMarkup(pl) {
     const temp = M.createProject('ghost'), mid = temp.maps[0].id;
+    if (pl.clip) {
+      try {
+        const root = B.pasteClipAt(temp, mid, pl.clip, 0, 0).placement, r = R.renderMap(temp, mid, { mode: 'view' });
+        return { svg: r.content, w: root.w, h: root.h };
+      } catch (e) { return { svg: '', w: 160, h: 60 }; }
+    }
     try {
       const spec = Object.assign({}, pl.spec);
       if (pl.name) spec.name = pl.name;
@@ -1087,6 +1094,26 @@
     S.place.w = g.w; S.place.h = g.h; $('ghostInner').innerHTML = g.svg;
     $('ghost').style.display = 'none'; // shown once the cursor is over the map
     renderAll(); closeRight(); closeLeft();
+  }
+  /* copy / paste: Ctrl+C remembers the selected item (with its contents); Ctrl+V / Duplicate puts a copy under the cursor */
+  function copySelection(kind, id, quiet) {
+    const sel = kind ? { kind: kind, id: id } : S.sel;
+    if (!sel || (sel.kind !== 'object' && sel.kind !== 'group')) { if (!quiet) toast('Select an item to copy', true); return false; }
+    const clip = B.copyClip(S.p, curMap().id, sel.kind, sel.id);
+    if (!clip) return false;
+    S.clip = clip;
+    if (!quiet) toast('Copied ' + M.findContainer(S.p, sel.id).item.name + ' - Ctrl+V to paste (connections and IP addresses are not copied)');
+    return true;
+  }
+  function pasteStart() {
+    if (!S.clip) { toast('Nothing copied yet: select an item and press Ctrl+C', true); return; }
+    S.tool = null; clearPgroup();
+    S.place = { kind: S.clip.kind, clip: S.clip, spec: {}, type: S.clip.type, name: '', count: 0, pos: null, host: null };
+    const g = ghostMarkup(S.place);
+    S.place.w = g.w; S.place.h = g.h; $('ghostInner').innerHTML = g.svg;
+    $('ghost').style.display = 'none';
+    renderAll(); closeRight(); closeLeft();
+    toast('Click to place the copy - Ctrl+click for more, Esc to stop');
   }
   function cancelPlace() {
     if (!S.place) return;
@@ -1108,11 +1135,12 @@
     const pt = toMap(e.clientX, e.clientY);
     const x = snap(pt.x), y = snap(pt.y), keep = e.ctrlKey || e.metaKey;
     const spec = Object.assign({}, pl.spec); if (pl.name) spec.name = pl.name; else delete spec.name;
-    const r = commit('Create ' + pl.type, (p) => B.placeNewAt(p, curMap().id, pl.kind, spec, x, y).id);
+    const r = commit(pl.clip ? 'Paste copy' : 'Create ' + pl.type, (p) => (pl.clip ? B.pasteClipAt(p, curMap().id, pl.clip, x, y) : B.placeNewAt(p, curMap().id, pl.kind, spec, x, y)).id);
     if (!r || r === true) { cancelPlace(); return; }
     pl.count++;
     if (keep) { // next copy: same settings, name counts up
-      if (pl.name) pl.name = B.nextName(pl.name);
+      if (pl.clip) { /* names count on by themselves */ }
+      else if (pl.name) pl.name = B.nextName(pl.name);
       else { const it = M.findContainer(S.p, r); pl.name = it ? B.nextName(it.item.name) : ''; }
       const g = ghostMarkup(pl); pl.w = g.w; pl.h = g.h; $('ghostInner').innerHTML = g.svg;
       pl.host = null; moveGhost(e);
@@ -1515,6 +1543,7 @@
         case 'addToMap': commit('Add to map', (p) => { const pos = viewCentre(); B.placeItem(p, curMap().id, d.kind, d.id, pos.x, pos.y, true); }); break;
         case 'removeFromMap': commit('Remove from map', (p) => { p.placements = p.placements.filter((q) => !(q.mapId === curMap().id && q.refId === d.id)); }); break;
         case 'deleteSel': deleteSelection(); break;
+        case 'duplicate': if (copySelection(d.kind, d.id, true)) pasteStart(); break;
         case 'deleteCable': { S.sel = { kind: 'cable', id: d.id }; deleteSelection(); break; }
         case 'customColor': {
           S.customColorFor = d.owner;
@@ -1584,6 +1613,8 @@
       if (e.key === 'Escape') { if (S.place) cancelPlace(); else if (S.pgroup) { clearPgroup(); renderAll(); } else if (S.tool) cancelTool(); else if (S.trace) clearTrace(); else if (S.sel) { S.sel = null; renderAll(); } }
       else if (isEdit() && !typing && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); }
       else if (isEdit() && !typing && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') { e.preventDefault(); redo(); }
+      else if (isEdit() && !typing && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c') { if (S.sel && (S.sel.kind === 'object' || S.sel.kind === 'group')) { e.preventDefault(); copySelection(); } }
+      else if (isEdit() && !typing && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v') { if (S.clip) { e.preventDefault(); pasteStart(); } }
       else if (isEdit() && !typing && (e.key === 'Delete')) deleteSelection();
       else if (isEdit() && !typing && !e.ctrlKey && !e.metaKey && !e.altKey && S.pgroup && (e.key === 'g' || e.key === 'G')) { e.preventDefault(); nameSelectedPorts(); }
       else if (!typing && !e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'w' || e.key === 'W')) { e.preventDefault(); startWire(); }
