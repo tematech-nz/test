@@ -304,9 +304,9 @@
     const v = await formDlg('Name port group', [
       { k: 'name', label: 'Name', v: '', hint: g.ids.length + ' port(s) on ' + o.name + '. Examples: "to rack office", "L1".' },
       { k: 'color', label: 'Colour', type: 'select', opts: M.CABLE_COLORS.filter((c) => c[0] !== 'white').map((c) => [c[1], c[0]]), v: '#1f77b4' }
-    ], 'Create group', '', (vals) => (vals.name.trim() ? null : 'Give the group a name'));
+    ].concat(M.isTermination(o) ? [] : [{ k: 'deviceKind', label: 'Plugged-in device', type: 'select', opts: [['', 'none - just a label']].concat(M.DEVICE_KINDS.map((k) => [k[0], k[1]])), v: '', hint: 'Pick a type to mark these ports as occupied by that equipment (e.g. 16 cameras) without adding each one.' }]), 'Create group', '', (vals) => (vals.name.trim() ? null : 'Give the group a name'));
     if (!v) return;
-    const created = commit('Add port group', (p) => M.addPortGroup(p, g.objId, { name: v.name, color: v.color, portIds: g.ids }));
+    const created = commit('Add port group', (p) => M.addPortGroup(p, g.objId, { name: v.name, color: v.color, portIds: g.ids, deviceKind: v.deviceKind || undefined }));
     clearPgroup();
     if (created && created !== true) { S.sel = { kind: 'pgroup', id: created.id }; showTab('details'); openRight(); }
     renderAll();
@@ -752,6 +752,8 @@
     const u = idx.portUse[pt.id], m = idx.mapByPort[pt.id], parts = [];
     if (u && u.kind === 'patch') { const c = idx.cables[u.id]; parts.push(lnk('cable', c.id, c.name) + ' -> ' + esc(M.portName(S.p, u.other, idx))); }
     if (u && u.kind === 'wire') { const l = idx.links[u.linkId], w = idx.wires[u.id]; parts.push(lnk('wire', w.id, l.name + ' w' + w.number) + ' -> ' + esc(M.portName(S.p, u.other, idx))); }
+    const ps = M.pseudoOf(o, pt.id);
+    if (ps) parts.push('<span class="tag">occupied by ' + esc(ps.name) + '</span> <span class="sub">(a ' + esc(M.DEVICE_KINDS.find((k) => k[0] === ps.deviceKind)[1].toLowerCase()) + ', not modelled individually)</span>');
     if (m) parts.push('<span class="tag">mapped to ' + esc(idx.ports[m.other].side + ' ' + idx.ports[m.other].label) + '</span>');
     return parts.length ? parts.join('<br>') : '<span class="sub">free</span>';
   }
@@ -853,6 +855,10 @@
     let h = '<h3>Port group</h3>' + fld('On', lnk('object', o.id, o.name)) + inp('Name', 'pgName', g.name, g.id);
     h += isEdit() ? fld('Colour', colorPicker('pgPreset', 'pgColor', g.color, 'pg:' + g.id, { noOption: true, dt: g.id })) : fld('Colour', '<span class="swatch" style="background:' + esc(g.color) + '"></span>');
     h += inp('Ports', 'pgPorts', portsText(o, g, side), g.id, 'placeholder="7-14, 17"') + fld('Count', g.portIds.length + (side ? ' (' + side + ')' : ''));
+    if (!M.isTermination(o) && o.type !== 'rack' && o.type !== 'internet') {
+      h += isEdit() ? fld('Plugged-in device', '<select data-f="pgDevice" data-t="' + esc(g.id) + '">' + opts([['', 'none - just a label']].concat(M.DEVICE_KINDS.map((k) => [k[0], k[1]])), g.deviceKind || '') + '</select>' +
+        '<div class="sub">Marks these ports as occupied by that kind of equipment without adding each one (e.g. 16 cameras). The graph shows one "' + esc(g.name) + ' x' + g.portIds.length + '" endpoint on ' + esc(o.name) + '.</div>') : (g.deviceKind ? fld('Plugged-in device', esc(M.DEVICE_KINDS.find((k) => k[0] === g.deviceKind)[1]) + ' x' + g.portIds.length) : '');
+    }
     if (isEdit()) h += '<div class="sub">Ports as numbers and ranges, e.g. 7-14, 17. A port belongs to one group.</div>';
     h += '<div class="btn-row">';
     if (isEdit()) {
@@ -869,7 +875,8 @@
     if (isEdit()) {
       h += '<div class="sub" style="margin-top:6px">New group: <input type="text" id="pgNewName" placeholder="name" style="width:9em"> ports <input type="text" id="pgNewPorts" placeholder="7-14, 17" style="width:7em">' +
         (M.isTermination(o) ? ' <select id="pgNewSide"><option value="rear">rear</option><option value="front">front</option></select>' : '') +
-        ' <select id="pgNewColor">' + opts(M.CABLE_COLORS.filter((c) => c[0] !== 'white').map((c) => [c[1], c[0]]), '#1f77b4') + '</select> ' + btn('addPGroup', 'Add') + '</div>';
+        ' <select id="pgNewColor">' + opts(M.CABLE_COLORS.filter((c) => c[0] !== 'white').map((c) => [c[1], c[0]]), '#1f77b4') + '</select> ' +
+        (M.isTermination(o) || o.type === 'rack' || o.type === 'internet' ? '' : '<select id="pgNewDevice" title="Plugged-in device: marks the ports as occupied by that kind of equipment">' + opts([['', 'no device']].concat(M.DEVICE_KINDS.map((k) => [k[0], k[1]])), '') + '</select> ') + btn('addPGroup', 'Add') + '</div>';
       h += '<div class="sub">Tip: Ctrl+click ports, then press G to name them as a group.</div>';
     }
     return h;
@@ -1385,6 +1392,7 @@
         const fg = M.findPortGroup(p, sel.id), side = fg && groupSide(fg.obj, fg.group);
         if (f === 'pgName') M.updatePortGroup(p, sel.id, { name: val });
         else if (f === 'pgColor') M.updatePortGroup(p, sel.id, { color: val });
+        else if (f === 'pgDevice') M.updatePortGroup(p, sel.id, { deviceKind: val });
         else if (f === 'pgPorts') M.updatePortGroup(p, sel.id, { portsText: val, side: side || undefined });
       } else if (sel.kind === 'link') M.updateLinkMeta(p, sel.id, { [f]: val });
     });
@@ -1580,7 +1588,7 @@
         }
         case 'addPGroup': {
           const id = S.sel.id, side = $('pgNewSide') ? $('pgNewSide').value : undefined;
-          const spec = { name: $('pgNewName').value, portsText: $('pgNewPorts').value, side: side, color: $('pgNewColor').value };
+          const spec = { name: $('pgNewName').value, portsText: $('pgNewPorts').value, side: side, color: $('pgNewColor').value, deviceKind: $('pgNewDevice') ? $('pgNewDevice').value || undefined : undefined };
           const g = commit('Add port group', (p) => M.addPortGroup(p, id, spec));
           if (g && g !== true) { S.sel = { kind: 'pgroup', id: g.id }; renderAll(); }
           break;

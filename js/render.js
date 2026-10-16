@@ -135,13 +135,13 @@
           rects.forEach(function (r) { var k = Math.round(r.y); (rows[k] = rows[k] || []).push(r); });
           Object.keys(rows).map(Number).sort(function (a, b) { return a - b; }).forEach(function (k, i) {
             var rs = rows[k], x0 = Math.min.apply(null, rs.map(function (r) { return r.x; })) - 3, x1 = Math.max.apply(null, rs.map(function (r) { return r.x + r.w; })) + 3, h = rs[0].h + 6;
-            x.push('<g data-kind="pgroup" data-id="' + esc(g.id) + '"><title>' + esc(g.name + ' (' + g.portIds.length + ' ports)') + '</title><rect data-kind="pgroup" data-id="' + esc(g.id) + '" x="' + num(pl.x + x0) + '" y="' + num(pl.y + k - 3) + '" width="' + num(x1 - x0) + '" height="' + num(h) + '" rx="4" fill="' + esc(g.color) + '" fill-opacity="0.32" stroke="' + (gsel ? SEL : esc(g.color)) + '" stroke-width="' + (gsel ? 3 : 1.6) + '"/></g>');
+            x.push('<g data-kind="pgroup" data-id="' + esc(g.id) + '"><title>' + esc(g.name + ' (' + g.portIds.length + ' ports' + (g.deviceKind ? ', ' + M.deviceKindInfo(g.deviceKind)[1].toLowerCase() + ' plugged in' : '') + ')') + '</title><rect data-kind="pgroup" data-id="' + esc(g.id) + '" x="' + num(pl.x + x0) + '" y="' + num(pl.y + k - 3) + '" width="' + num(x1 - x0) + '" height="' + num(h) + '" rx="4" fill="' + esc(g.color) + '" fill-opacity="0.32" stroke="' + (gsel ? SEL : esc(g.color)) + '" stroke-width="' + (gsel ? 3 : 1.6) + '"/></g>');
             if (i === 0) {
               // centred above the whole group (kept inside the equipment)
-              var tw = String(g.name).length * 5.4 + 8, gx0 = Math.min.apply(null, rects.map(function (r) { return r.x; })) - 3, gx1 = Math.max.apply(null, rects.map(function (r) { return r.x + r.w; })) + 3;
+              var label = g.name + (g.deviceKind ? ' x' + g.portIds.length : ''), tw = String(label).length * 5.4 + 8, gx0 = Math.min.apply(null, rects.map(function (r) { return r.x; })) - 3, gx1 = Math.max.apply(null, rects.map(function (r) { return r.x + r.w; })) + 3;
               var tx = Math.max(2, Math.min((gx0 + gx1) / 2 - tw / 2, pl.w - tw - 2));
               x.push('<g data-kind="pgroup" data-id="' + esc(g.id) + '"><rect data-kind="pgroup" data-id="' + esc(g.id) + '" x="' + num(pl.x + tx) + '" y="' + num(pl.y + k - 15) + '" width="' + num(tw) + '" height="11" rx="3" fill="' + esc(g.color) + '" stroke="#37474f" stroke-width="0.6"/>' +
-                '<text x="' + num(pl.x + tx + 4) + '" y="' + num(pl.y + k - 6.5) + '" font-size="8.5" font-weight="bold" fill="#111" font-family="sans-serif" pointer-events="none">' + esc(g.name) + '</text></g>');
+                '<text x="' + num(pl.x + tx + 4) + '" y="' + num(pl.y + k - 6.5) + '" font-size="8.5" font-weight="bold" fill="#111" font-family="sans-serif" pointer-events="none">' + esc(label) + '</text></g>');
             }
           });
         });

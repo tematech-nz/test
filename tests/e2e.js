@@ -136,6 +136,30 @@ const ok = (m) => console.log('  ok   ' + m);
     assert.strictEqual(await page.evaluate(() => NetMap.app.S.p.objects.length), info.n);
   });
 
+  await step('pseudo-device: a port group "Cameras" shows as one endpoint in the graph and in the group panel', async () => {
+    const gid = await page.evaluate(() => {
+      const A = NetMap.app, M = NetMap.model;
+      const sw = A.S.p.objects.find((o) => o.type === 'switch' && o.ports.length >= 8 && !(o.portGroups || []).length);
+      if (!sw) return null;
+      const ids = A.S.p.patchCables.reduce((s, c) => { s[c.aPortId] = 1; s[c.bPortId] = 1; return s; }, {});
+      const free = sw.ports.filter((pt) => !ids[pt.id] && !A.S.p.fixedLinks.some((l) => l.wires.some((w) => w.aPortId === pt.id || w.bPortId === pt.id))).slice(0, 3).map((pt) => pt.id);
+      if (free.length < 2) return null;
+      const g = A.commit('pseudo test', (p) => M.addPortGroup(p, sw.id, { name: 'Cameras', color: '#2ca02c', portIds: free, deviceKind: 'camera' }));
+      A.S.sel = { kind: 'pgroup', id: g.id };
+      return g.id;
+    });
+    if (!gid) return;
+    await page.evaluate(() => document.getElementById('btnGraph').click());
+    await page.waitForTimeout(200);
+    const gvText = await page.evaluate(() => document.getElementById('graphView').innerText);
+    assert.ok(/Cameras x\d/.test(gvText), 'graph shows the pseudo-device: ' + gvText.slice(0, 80));
+    await page.evaluate(() => document.getElementById('btnGraph').click());
+    await page.waitForTimeout(100);
+    await page.evaluate(() => { NetMap.app.S.graph.from = ''; NetMap.app.S.graph.to = ''; });
+    assert.ok(await page.evaluate(() => /Plugged-in device/.test(document.getElementById('detailsPane').innerText)), 'group panel offers the plugged-in device');
+    await page.click('#btnUndo');
+  });
+
   await step('hidden navigation stays hidden when clicking the map or changing mode', async () => {
     await page.click('#btnMenu');
     assert.ok(!(await page.isVisible('#left')));

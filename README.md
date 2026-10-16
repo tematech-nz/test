@@ -122,6 +122,9 @@ Try it: File -> Load demo project (two rooms, a fixed link between racks, a wall
 - **Folded sections and stacking**: the layout uses an item's drawn height, so you can drop an item right under one whose Front/Rear
   section is folded. In edit mode, items stacked directly under an item (touching it, or one grid step away) follow it down or up
   when it is unfolded or folded, together with what is stacked under them in turn (one undo step).
+- **Pseudo-devices** (e.g. 16 cameras without 16 entries): make a port group (Ctrl+click ports, G, or "New group" in the equipment panel) and
+  pick a **Plugged-in device** type, or set it later in the group's panel. The ports count as occupied (no patch cables), the map tag reads
+  `Cameras x16`, and the Graph view shows one dashed endpoint "Cameras x16" connected to the switch. Clear the type to make the ports ordinary again.
 - **Copy / paste**: select an item in edit mode and press **Ctrl+C**, then **Ctrl+V** (or use **Copy / duplicate** in the details
   panel): the copy follows the pointer and a click drops it (Ctrl+click for more). The copy is named `Name (Copy N)` and gets the same
   settings: ports and labels, sections, port groups, internal mappings, colours. Racks and groups are copied with everything inside.

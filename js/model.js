@@ -237,6 +237,26 @@
     return { ids: out, errors: errors };
   }
   /* spec: {name, color, portIds | (portsText + side)}; ports already in another group of the object move to this one */
+  /*
+   * Pseudo-devices: a port group can stand for equipment that is plugged into those ports without being modelled one by one
+   * ("Cameras", 16 ports). group.deviceKind (a DEVICE_KINDS id) marks it; the ports count as occupied and the topology graph
+   * shows one endpoint "Cameras x16" hanging off the equipment.
+   */
+  function checkPseudo(p, o, ids, kind) {
+    if (!kind) return;
+    if (isTermination(o) || o.type === 'rack' || o.type === 'internet') throw new Error('Only switches, routers and generic devices can have devices plugged into their ports');
+    var idx = buildIndex(p);
+    ids.forEach(function (id) { if (idx.portUse[id]) throw new Error('Port ' + portName(p, id, idx) + ' already has a cable; remove it before marking the port as occupied by a device'); });
+  }
+  function validKind(k) { return !k || DEVICE_KINDS.some(function (d) { return d[0] === k; }); }
+  /* the pseudo-device group a port belongs to, or null */
+  function pseudoOf(o, portId) { var g = portGroupOf(o, portId); return g && g.deviceKind ? g : null; }
+  /* [{ obj, group, count }] for every pseudo-device group in the project */
+  function pseudoDevices(p) {
+    var out = [];
+    p.objects.forEach(function (o) { (o.portGroups || []).forEach(function (g) { if (g.deviceKind) out.push({ obj: o, group: g, count: g.portIds.length }); }); });
+    return out;
+  }
   function addPortGroup(p, objectId, spec) {
     var o = buildIndex(p).objects[objectId];
     if (!o) throw new Error('Object not found');
@@ -247,9 +267,12 @@
     if (!ids.length) throw new Error('Choose at least one port for the group');
     var name = String(spec.name || '').trim();
     if (!name) throw new Error('Give the group a name');
+    if (!validKind(spec.deviceKind)) throw new Error('Unknown device type');
+    checkPseudo(p, o, ids, spec.deviceKind);
     o.portGroups = o.portGroups || [];
     o.portGroups.forEach(function (g) { g.portIds = g.portIds.filter(function (x) { return ids.indexOf(x) < 0; }); });
     var grp = { id: uid('pgp'), name: name, color: spec.color || '#1f77b4', portIds: ids };
+    if (spec.deviceKind) grp.deviceKind = spec.deviceKind;
     o.portGroups.push(grp);
     prunePortGroups(o);
     return grp;
@@ -260,10 +283,16 @@
     var g = f.group, o = f.obj;
     if (patch.name !== undefined) { if (!String(patch.name).trim()) throw new Error('Give the group a name'); g.name = String(patch.name).trim(); }
     if (patch.color !== undefined) g.color = patch.color;
+    if (patch.deviceKind !== undefined) {
+      if (!validKind(patch.deviceKind)) throw new Error('Unknown device type');
+      checkPseudo(p, o, g.portIds, patch.deviceKind);
+      if (patch.deviceKind) g.deviceKind = patch.deviceKind; else delete g.deviceKind;
+    }
     if (patch.portsText !== undefined) {
       var r = parsePortRange(o, patch.portsText, patch.side);
       if (r.errors.length) throw new Error(r.errors.join('; '));
       if (!r.ids.length) throw new Error('A group needs at least one port (delete it to remove it)');
+      checkPseudo(p, o, r.ids, g.deviceKind);
       o.portGroups.forEach(function (x) { if (x !== g) x.portIds = x.portIds.filter(function (i) { return r.ids.indexOf(i) < 0; }); });
       g.portIds = r.ids;
       prunePortGroups(o);
@@ -536,6 +565,10 @@
     if (aPortId === bPortId) return 'Cannot connect a port to itself';
     if (a.side === 'rear' || b.side === 'rear') return 'Rear panel terminations take fixed links, not patch cables';
     var ids = [aPortId, bPortId];
+    for (var k = 0; k < 2; k++) {
+      var po = idx.portObj[ids[k]], pg = po && pseudoOf(po, ids[k]);
+      if (pg) return 'Port ' + portName(p, ids[k], idx) + ' is marked as occupied by "' + pg.name + '"; remove it from that group first';
+    }
     for (var i = 0; i < 2; i++) {
       var u = idx.portUse[ids[i]];
       if (u && !(u.kind === 'patch' && u.id === ignoreCableId)) return 'Port ' + portName(p, ids[i], idx) + ' is already occupied';
@@ -875,6 +908,7 @@
       (o.portGroups || []).forEach(function (g) {
         var own = {}; o.ports.forEach(function (pt) { own[pt.id] = true; });
         if (g.portIds.some(function (x) { return !own[x]; })) add('warning', 'BAD_PORT_GROUP', 'Port group "' + g.name + '" on "' + o.name + '" refers to a missing port', 'object', o.id);
+        if (g.deviceKind && g.portIds.some(function (x) { return idx.portUse[x]; })) add('warning', 'PSEUDO_CABLED', 'Port group "' + g.name + '" on "' + o.name + '" stands for plugged-in devices but some of its ports also have cables', 'object', o.id);
       });
       var unused = o.ports.filter(function (pt) { return !idx.portUse[pt.id] && !idx.mapByPort[pt.id]; }).length;
       if (o.ports.length && unused) add('info', 'UNUSED_PORTS', unused + ' of ' + o.ports.length + ' terminations on "' + o.name + '" are unused', 'object', o.id);
@@ -999,7 +1033,7 @@
     findContainer: findContainer, groupOf: groupOf, parentOf: parentOf, containerChildren: containerChildren, descendants: descendants,
     addPlacement: addPlacement, placementOf: placementOf, placementGroup: placementGroup, movePlacement: movePlacement,
     growToFit: growToFit, mapsFor: mapsFor, addGroup: addGroup, addObject: addObject, setContainer: setContainer,
-    setPortCount: setPortCount, findPortGroup: findPortGroup, parsePortRange: parsePortRange, addPortGroup: addPortGroup, updatePortGroup: updatePortGroup, deletePortGroup: deletePortGroup, portGroupOf: portGroupOf, prunePortGroups: prunePortGroups, hasDeviceIp: hasDeviceIp, hasPortIp: hasPortIp, setDeviceIp: setDeviceIp, effectivePortIp: effectivePortIp, ipList: ipList, setPortIp: setPortIp, IP_ERROR: IP_ERROR, setDeviceKind: setDeviceKind, isTermination: isTermination, DEVICE_KINDS: DEVICE_KINDS, deviceKindInfo: deviceKindInfo, typeLabel: typeLabel, accessPorts: accessPorts, validSectionRows: validSectionRows, setUplinkPorts: setUplinkPorts, setSwitchLayout: setSwitchLayout, setFullWidth: setFullWidth, setSectionSize: setSectionSize, validSectionSizes: validSectionSizes, defaultSectionSize: defaultSectionSize, effectiveSectionSize: effectiveSectionSize, setRouterPorts: setRouterPorts, isValidIp: isValidIp, canConnectPatch: canConnectPatch, addPatchCable: addPatchCable,
+    setPortCount: setPortCount, findPortGroup: findPortGroup, parsePortRange: parsePortRange, addPortGroup: addPortGroup, updatePortGroup: updatePortGroup, deletePortGroup: deletePortGroup, portGroupOf: portGroupOf, prunePortGroups: prunePortGroups, hasDeviceIp: hasDeviceIp, pseudoOf: pseudoOf, pseudoDevices: pseudoDevices, hasPortIp: hasPortIp, setDeviceIp: setDeviceIp, effectivePortIp: effectivePortIp, ipList: ipList, setPortIp: setPortIp, IP_ERROR: IP_ERROR, setDeviceKind: setDeviceKind, isTermination: isTermination, DEVICE_KINDS: DEVICE_KINDS, deviceKindInfo: deviceKindInfo, typeLabel: typeLabel, accessPorts: accessPorts, validSectionRows: validSectionRows, setUplinkPorts: setUplinkPorts, setSwitchLayout: setSwitchLayout, setFullWidth: setFullWidth, setSectionSize: setSectionSize, validSectionSizes: validSectionSizes, defaultSectionSize: defaultSectionSize, effectiveSectionSize: effectiveSectionSize, setRouterPorts: setRouterPorts, isValidIp: isValidIp, canConnectPatch: canConnectPatch, addPatchCable: addPatchCable,
     updatePatchCable: updatePatchCable, deletePatchCable: deletePatchCable, addInternalMapping: addInternalMapping,
     removeInternalMapping: removeInternalMapping, autoMapPanel: autoMapPanel, rearPorts: rearPorts,
     sequentialPorts: sequentialPorts, addFixedLink: addFixedLink, updateLinkMeta: updateLinkMeta,

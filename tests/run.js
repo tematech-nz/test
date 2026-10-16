@@ -1296,6 +1296,33 @@ console.log('Placing new items');
 test('nextName counts up: trailing numbers keep their width, plain names get a 2', () => {
   assert.deepStrictEqual(['PC 1', 'AP-07', 'Switch', 'Rack 9', 'x99'].map(B.nextName), ['PC 2', 'AP-08', 'Switch 2', 'Rack 10', 'x100']);
 });
+test('pseudo-devices: ports marked as occupied by cameras show up in the graph without 16 real devices', () => {
+  const p = M.createProject('ps'), mid = p.maps[0].id;
+  const sw = M.addObject(p, { type: 'switch', name: 'POE', portCount: 24 });
+  const rt = M.addObject(p, { type: 'router', name: 'R', wanPorts: 1, lanPorts: 2 });
+  M.addPatchCable(p, { aPortId: rt.ports.find(x => x.role === 'lan').id, bPortId: sw.ports[23].id });
+  const g = M.addPortGroup(p, sw.id, { name: 'Cameras', color: '#2ca02c', portsText: '1-16', deviceKind: 'camera' });
+  assert.strictEqual(g.deviceKind, 'camera');
+  assert.strictEqual(M.pseudoOf(sw, sw.ports[0].id).id, g.id);
+  assert.strictEqual(M.pseudoDevices(p).length, 1);
+  assert.strictEqual(p.objects.length, 2, 'no extra entities');
+  // occupied: no patch cable on those ports, and the other way round
+  assert.throws(() => M.addPatchCable(p, { aPortId: sw.ports[0].id, bPortId: rt.ports.filter(x => x.role === 'lan')[1].id }), /occupied by "Cameras"/);
+  assert.throws(() => M.addPortGroup(p, sw.id, { name: 'X', portsText: '24', deviceKind: 'pc' }), /already has a cable/);
+  assert.throws(() => M.addPortGroup(p, sw.id, { name: 'X', portsText: '20', deviceKind: 'nope' }), /Unknown device/);
+  assert.throws(() => M.updatePortGroup(p, g.id, { deviceKind: 'nope' }), /Unknown device/);
+  // the graph view shows "Cameras x16" hanging off the switch
+  const html = NM.graphview.render(p, { from: rt.id, to: '', via: false });
+  assert.ok(html.indexOf('Cameras x16') > 0 && html.indexOf('pseudo-device') > 0 && html.indexOf('not modelled individually') > 0);
+  assert.ok(R.svgDocument(p, mid).length > 0);
+  // switching it off makes the ports ordinary again
+  M.updatePortGroup(p, g.id, { deviceKind: '' });
+  assert.strictEqual(M.pseudoOf(sw, sw.ports[0].id), null);
+  assert.ok(NM.graphview.render(p, { from: rt.id, to: '', via: false }).indexOf('Cameras x16') < 0);
+  M.updatePortGroup(p, g.id, { deviceKind: 'camera' });
+  const clone = M.clone ? M.clone(p) : JSON.parse(JSON.stringify(p));
+  assert.strictEqual(M.importProject(JSON.stringify(clone)).project.objects.find(o => o.name === 'POE').portGroups[0].deviceKind, 'camera', 'survives export/import');
+});
 test('a new item dropped into a free gap between two rack items stays there; a drop touching a neighbour still inserts', () => {
   const p = M.createProject('gap'), mid = p.maps[0].id;
   const rack = B.addObjectPlaced(p, mid, { type: 'rack', name: 'R' }, 0, 0);

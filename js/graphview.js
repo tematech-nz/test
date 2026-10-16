@@ -37,7 +37,20 @@
     // layered layout: column = hop distance from root; unreachable devices in a last column
     var cols = [], pos = {};
     tree.order.forEach(function (n) { (cols[n.depth] = cols[n.depth] || []).push(n.id); });
+    // pseudo-devices (port groups standing for plugged-in equipment, e.g. "Cameras x16") hang off their equipment one column further
+    var pseudo = {}, pseudoList = [];
+    M.pseudoDevices(p).forEach(function (d) {
+      if (!graph.nodes[d.obj.id]) return;
+      var ps = { id: 'ps:' + d.group.id, parent: d.obj.id, name: d.group.name + ' x' + d.count, kind: M.deviceKindInfo(d.group.deviceKind)[1], count: d.count, color: d.group.color, objName: d.obj.name };
+      (pseudo[d.obj.id] = pseudo[d.obj.id] || []).push(ps); pseudoList.push(ps);
+    });
+    var depthOf = {};
+    tree.order.forEach(function (n) { depthOf[n.id] = n.depth; });
+    tree.order.forEach(function (n) { (pseudo[n.id] || []).forEach(function (ps) { (cols[n.depth + 1] = cols[n.depth + 1] || []).push(ps.id); }); });
     if (tree.unreachable.length) cols.push(tree.unreachable);
+    var tail = [];
+    tree.unreachable.forEach(function (id) { (pseudo[id] || []).forEach(function (ps) { tail.push(ps.id); }); });
+    if (tail.length) cols.push(tail);
     var maxRows = 0;
     cols.forEach(function (c, ci) {
       c.forEach(function (id, ri) { pos[id] = { x: 16 + ci * (NW + XG), y: 16 + ri * (NH + YG) }; });
@@ -62,6 +75,22 @@
         '<path d="' + d + '" fill="none" stroke="' + (best[l.id] ? '#d32f2f' : (hi ? '#ff9800' : (inTree ? '#37474f' : '#90a4ae'))) + '" stroke-width="' + (best[l.id] ? 4 : (hi ? 3.2 : 2)) + '"' + (inTree || hi ? '' : ' stroke-dasharray="5 4"') + '/>';
       if (l.paths.length > 1) svg += '<text x="' + ((ax + bx) / 2) + '" y="' + ((ay + by) / 2 - 4) + '" font-size="10" text-anchor="middle" fill="#222" stroke="#fff" stroke-width="3" paint-order="stroke" font-family="sans-serif">x' + l.paths.length + '</text>';
       svg += '</g>';
+    });
+    pseudoList.forEach(function (ps) {
+      var A = pos[ps.parent], B = pos[ps.id];
+      if (!A || !B) return;
+      var faded = dim && !hiNode[ps.parent], ax = A.x + NW, ay = A.y + NH / 2, bx = B.x, by = B.y + NH / 2;
+      if (B.x < A.x) { ax = A.x; bx = B.x + NW; }
+      svg += '<g' + (faded ? ' opacity="0.2"' : '') + '><title>' + esc(ps.objName + ' <-> ' + ps.name + '\n' + ps.count + ' port(s) occupied by ' + ps.kind.toLowerCase() + ' (not modelled individually)') + '</title><path d="M' + ax + ' ' + ay + 'C' + (ax + (bx - ax) / 2) + ' ' + ay + ' ' + (ax + (bx - ax) / 2) + ' ' + by + ' ' + bx + ' ' + by + '" fill="none" stroke="' + esc(ps.color) + '" stroke-width="2.5" stroke-dasharray="2 3"/>' +
+        '<text x="' + ((ax + bx) / 2) + '" y="' + ((ay + by) / 2 - 4) + '" font-size="10" text-anchor="middle" fill="#222" stroke="#fff" stroke-width="3" paint-order="stroke" font-family="sans-serif">x' + ps.count + '</text></g>';
+    });
+    pseudoList.forEach(function (ps) {
+      var P = pos[ps.id]; if (!P) return;
+      var faded = dim && !hiNode[ps.parent];
+      svg += '<g' + (faded ? ' opacity="0.25"' : '') + '><title>' + esc(ps.name + ' (' + ps.kind + ')\nPlugged into ' + ps.objName + '; not modelled individually: paths do not pass through') + '</title>' +
+        '<rect x="' + P.x + '" y="' + P.y + '" width="' + NW + '" height="' + NH + '" rx="6" fill="#fafafa" stroke="' + esc(ps.color) + '" stroke-width="2" stroke-dasharray="6 3"/>' +
+        '<text x="' + (P.x + 8) + '" y="' + (P.y + 21) + '" font-size="13" font-weight="bold" fill="#111" font-family="sans-serif">' + esc(ps.name.length > 22 ? ps.name.slice(0, 21) + '~' : ps.name) + '</text>' +
+        '<text x="' + (P.x + 8) + '" y="' + (P.y + 36) + '" font-size="10" fill="#444" font-family="sans-serif">' + esc(ps.kind + ' - pseudo-device') + '</text></g>';
     });
     graph.order.forEach(function (id) {
       var n = graph.nodes[id], P = pos[id], c = COLORS[n.type] || COLORS.generic;
@@ -104,6 +133,7 @@
         html += '<div class="gv-tn" style="margin-left:' + (n.depth * 18) + 'px">' + (n.depth ? '&boxur; ' : '') + nameLink(n.id) +
           ' <span class="tag">' + esc(graph.nodes[n.id].label) + '</span>' + (n.link ? ' <span class="sub">via ' + esc(viaText(n.link)) + '</span>' : '') +
           (n.depth && !graph.nodes[n.id].transit ? ' <span class="sub">(endpoint)</span>' : '') + '</div>';
+        (pseudo[n.id] || []).forEach(function (ps) { html += '<div class="gv-tn" style="margin-left:' + ((n.depth + 1) * 18) + 'px">&boxur; ' + esc(ps.name) + ' <span class="tag">' + esc(ps.kind) + '</span> <span class="sub">plugged into ' + esc(ps.objName) + ' (not modelled individually)</span></div>'; });
       });
       html += '</div>';
       if (tree.unreachable.length) html += '<h3>Not reachable (' + tree.unreachable.length + ')</h3>' + tree.unreachable.map(function (id) { return '<div class="gv-tn">' + nameLink(id) + '</div>'; }).join('');
