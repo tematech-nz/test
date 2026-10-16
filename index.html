@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>NetMap - physical network documentation</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body class="mode-view">
+<header id="topbar">
+  <button id="btnMenu" class="icon-btn" title="Maps, objects and search" aria-label="Open menu">Menu</button>
+  <div id="projTitle" title="Project name">NetMap</div>
+  <select id="mapSelect" title="Switch map" aria-label="Current map"></select>
+  <input id="searchBox" type="search" placeholder="Search ports, cables, objects..." aria-label="Search">
+  <span id="saveStatus" role="status"></span>
+  <span class="edit-only"><button id="btnUndo" title="Undo (Ctrl+Z)">Undo</button><button id="btnRedo" title="Redo (Ctrl+Y)">Redo</button></span>
+  <button id="btnFile" title="Import, export and project actions">File</button>
+  <button id="btnMode" class="primary" title="Switch between view and edit mode">Edit</button>
+</header>
+<div id="editBanner" class="edit-only" role="status">EDIT MODE - changes modify the infrastructure model. Moving things never changes connections.</div>
+<div id="app">
+  <aside id="left" aria-label="Navigation">
+    <div class="drawer-head"><strong>Navigation</strong><button id="btnCloseLeft" class="icon-btn">Close</button></div>
+    <section id="searchResults"></section>
+    <section id="mapList"></section>
+    <section id="objectList"></section>
+    <section id="issueList"></section>
+  </aside>
+  <main id="stage">
+    <svg id="canvas" xmlns="http://www.w3.org/2000/svg" aria-label="Network map"><g id="vp"></g></svg>
+    <div id="toolbar" class="edit-only"></div>
+    <div id="zoomctl">
+      <button id="zoomIn" aria-label="Zoom in">+</button>
+      <button id="zoomOut" aria-label="Zoom out">-</button>
+      <button id="zoomFit" aria-label="Fit map">Fit</button>
+    </div>
+    <div id="toolHint" hidden></div>
+    <div id="emptyHint" hidden></div>
+  </main>
+  <aside id="right" aria-label="Details">
+    <div class="tabs">
+      <button id="tabDetails" class="tab active">Details</button>
+      <button id="tabTrace" class="tab">Trace</button>
+      <button id="btnCloseRight" class="icon-btn">Close</button>
+    </div>
+    <div id="detailsPane" class="pane"></div>
+    <div id="tracePane" class="pane" hidden></div>
+  </aside>
+</div>
+<dialog id="dlg"></dialog>
+<div id="toast" role="alert"></div>
+<input type="file" id="fileInput" accept=".json,application/json" hidden>
+<script src="js/model.js"></script>
+<script src="js/layout.js"></script>
+<script src="js/trace.js"></script>
+<script src="js/render.js"></script>
+<script src="js/exporters.js"></script>
+<script src="js/builder.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
