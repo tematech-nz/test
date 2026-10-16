@@ -857,7 +857,23 @@ const ok = (m) => console.log('  ok   ' + m);
     await page.waitForTimeout(150);
     const pairs = await page.evaluate(() => { const S = NetMap.app.S, l = S.p.fixedLinks[S.p.fixedLinks.length - 1], idx = NetMap.model.buildIndex(S.p); return l.wires.map((w) => idx.ports[w.aPortId].label + '-' + idx.ports[w.bPortId].label); });
     assert.deepStrictEqual(pairs, ['5-2', '6-3', '7-4', '8-5']);
-    await page.click('#btnUndo'); await page.click('#btnUndo');
+    // the far end got a group of its own, linked to "block": same name to start with, renamed independently
+    const gl = await page.evaluate(() => { const M = NetMap.model, p = NetMap.app.S.p, a = p.objects.find((o) => o.name === 'GP-A').portGroups.find((g) => g.name === 'block'), q = M.peerGroup(p, a.id); return q && { aId: a.id, bId: q.group.id, bName: q.group.name, bObj: q.obj.name, n: q.group.portIds.length }; });
+    assert.ok(gl && gl.bName === 'block' && gl.bObj === 'GP-B' && gl.n === 4, JSON.stringify(gl));
+    await page.evaluate((g) => { NetMap.app.commit('rename far end', (p) => NetMap.model.updatePortGroup(p, g.bId, { name: 'from rack 1' })); }, gl);
+    assert.ok((await page.evaluate((g) => NetMap.app.S.p.objects.find((o) => o.name === 'GP-A').portGroups.find((x) => x.id === g.aId).name, gl)) === 'block', 'this end keeps its own name');
+    assert.ok(/-(&gt;|>) from rack 1 on GP-B/.test(await page.evaluate(() => document.getElementById('vp').innerHTML)), 'hover text names the other end');
+    // GP-B lives on another map: tapping "block" takes me there and selects the linked group
+    const m2 = await page.evaluate(() => { const A = NetMap.app, M = NetMap.model, B = NetMap.builder, id = M.uid('map'); let moved; A.commit('second map', (p) => { p.maps.push({ id: id, name: 'Far map', location: '', viewport: { x: 0, y: 0, zoom: 1 } }); B.relocate(p, id, 'object', p.objects.find((o) => o.name === 'GP-B').id, 40, 40, A.S.mapId); }); return id; });
+    await page.evaluate((g) => {
+      const r = document.querySelector('#vp rect[data-kind="pgroup"][data-id="' + g.aId + '"]'), o = { bubbles: true, pointerId: 78, pointerType: 'mouse', button: 0, clientX: 5, clientY: 5 };
+      r.dispatchEvent(new PointerEvent('pointerdown', o)); r.dispatchEvent(new PointerEvent('pointerup', o));
+    }, gl);
+    await page.waitForTimeout(200);
+    const nav = await page.evaluate(() => ({ map: NetMap.app.S.mapId, sel: NetMap.app.S.sel }));
+    assert.strictEqual(nav.map, m2, 'jumped to the other map'); assert.deepStrictEqual(nav.sel, { kind: 'pgroup', id: gl.bId });
+    await page.selectOption('#mapSelect', await page.evaluate((m) => NetMap.app.S.p.maps.find((x) => x.id !== m).id, m2));
+    for (let i = 0; i < 4; i++) await page.click('#btnUndo');
   });
 
   await step('W hotkey: one-shot wire from the selected port keeps the new cable selected; plain W toggles the repeating tool', async () => {

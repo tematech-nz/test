@@ -548,6 +548,7 @@
       if (it.kind === 'group') clip.groups.push(copy);
       else {
         delete copy.ipAddress; copy.ports.forEach(function (pt) { delete pt.ip; });
+        (copy.portGroups || []).forEach(function (g) { delete g.peerId; }); // a copy is not linked to the original's far end
         clip.objects.push(copy);
         p.internalMappings.forEach(function (m) { if (m.objectId === it.id) clip.mappings.push(JSON.parse(JSON.stringify(m))); });
       }

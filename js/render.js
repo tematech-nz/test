@@ -68,6 +68,13 @@
     (opts.ringPorts || []).forEach(function (id) { ringSet[id] = true; });
     var prev = opts.preview || null;
     if (prev) prev.ids.forEach(function (id) { prevSet[id] = true; });
+    // other end of a linked group: "-> 'b' on Panel B (Map 1)"
+    function peerText(g) {
+      var q = g.peerId ? M.peerGroup(p, g.id) : null;
+      if (!q) return '';
+      var maps = M.mapsFor(p, 'object', q.obj.id).map(function (m) { return idx.maps[m] ? idx.maps[m].name : ''; }).filter(Boolean);
+      return '\n-> ' + q.group.name + ' on ' + q.obj.name + (maps.length ? ' (' + maps.join(', ') + ')' : '') + (M.placementOf(p, mapId, q.obj.id) ? '' : ' - click to go there');
+    }
     items.forEach(function (it) {
       var pl = it.pl, coll = (!exporting && !it.isGroup && opts.collapsed && opts.collapsed[pl.id]) || null;
       it.coll = coll;
@@ -137,7 +144,7 @@
           rects.forEach(function (r) { var k = Math.round(r.y); (rows[k] = rows[k] || []).push(r); });
           Object.keys(rows).map(Number).sort(function (a, b) { return a - b; }).forEach(function (k, i) {
             var rs = rows[k], x0 = Math.min.apply(null, rs.map(function (r) { return r.x; })) - 3, x1 = Math.max.apply(null, rs.map(function (r) { return r.x + r.w; })) + 3, h = rs[0].h + 6;
-            x.push('<g data-kind="pgroup" data-id="' + esc(g.id) + '"><title>' + esc(g.name + ' (' + g.portIds.length + ' ports' + (g.deviceKind ? ', ' + M.deviceKindInfo(g.deviceKind)[1].toLowerCase() + ' plugged in' : '') + ')') + '</title><rect data-kind="pgroup" data-id="' + esc(g.id) + '" x="' + num(pl.x + x0) + '" y="' + num(pl.y + k - 3) + '" width="' + num(x1 - x0) + '" height="' + num(h) + '" rx="4" fill="' + esc(g.color) + '" fill-opacity="0.32" stroke="' + (gsel ? SEL : esc(g.color)) + '" stroke-width="' + (gsel ? 3 : 1.6) + '"/></g>');
+            x.push('<g data-kind="pgroup" data-id="' + esc(g.id) + '"><title>' + esc(g.name + ' (' + g.portIds.length + ' ports' + (g.deviceKind ? ', ' + M.deviceKindInfo(g.deviceKind)[1].toLowerCase() + ' plugged in' : '') + ')' + peerText(g)) + '</title><rect data-kind="pgroup" data-id="' + esc(g.id) + '" x="' + num(pl.x + x0) + '" y="' + num(pl.y + k - 3) + '" width="' + num(x1 - x0) + '" height="' + num(h) + '" rx="4" fill="' + esc(g.color) + '" fill-opacity="0.32" stroke="' + (gsel ? SEL : esc(g.color)) + '" stroke-width="' + (gsel ? 3 : 1.6) + '"/></g>');
             if (i === 0) {
               // centred above the whole group (kept inside the equipment)
               var label = g.name + (g.deviceKind ? ' x' + g.portIds.length : ''), tw = String(label).length * 5.4 + 8, gx0 = Math.min.apply(null, rects.map(function (r) { return r.x; })) - 3, gx1 = Math.max.apply(null, rects.map(function (r) { return r.x + r.w; })) + 3;

@@ -1353,6 +1353,29 @@ test('ghost copies mirror the real item on another map; relocate moves it with i
   assert.ok(!ns.ghost && ns.x - rr.x === sp.x - rp.x && ns.y - rr.y === sp.y - rp.y, 'contents keep their offsets');
   assert.deepStrictEqual(overlapPairs(p), []);
 });
+test('linked port groups: two ends, own names, peer info in the tooltip, unlink on delete, not copied', () => {
+  const p = M.createProject('lg'), m1 = p.maps[0].id;
+  const m2 = M.uid('map'); p.maps.push({ id: m2, name: 'Floor 2', location: '', viewport: { x: 0, y: 0, zoom: 1 } });
+  const a = B.addObjectPlaced(p, m1, { type: 'patchpanel', name: 'PP-A', portCount: 8, straight: true }, 40, 40);
+  const b = B.addObjectPlaced(p, m2, { type: 'patchpanel', name: 'PP-B', portCount: 8, straight: true }, 40, 40);
+  const ga = M.addPortGroup(p, a.id, { name: 'a', color: '#2ca02c', portsText: '1-4', side: 'rear' });
+  const gb = M.addPortGroup(p, b.id, { name: 'b', color: '#d62728', portsText: '5-8', side: 'rear' });
+  assert.strictEqual(M.peerGroup(p, ga.id), null);
+  M.linkPortGroups(p, ga.id, gb.id);
+  assert.strictEqual(M.peerGroup(p, ga.id).group.id, gb.id); assert.strictEqual(M.peerGroup(p, gb.id).group.id, ga.id);
+  M.updatePortGroup(p, gb.id, { name: 'renamed on map 2' });
+  assert.strictEqual(ga.name, 'a', 'each end has its own name');
+  const svg1 = R.renderMap(p, m1, {}).content;
+  assert.ok(svg1.indexOf('-&gt; renamed on map 2 on PP-B (Floor 2) - click to go there') > 0 || svg1.indexOf('-> renamed on map 2 on PP-B (Floor 2) - click to go there') > 0, 'map 1 hover names the far end and the map');
+  assert.ok(R.renderMap(p, m2, {}).content.indexOf('a on PP-A') > 0, 'and the other way round');
+  const clip = B.copyClip(p, m1, 'object', a.id);
+  assert.ok(clip.objects[0].portGroups.every(g => !g.peerId), 'a copy is not linked to the far end');
+  M.deletePortGroup(p, ga.id);
+  assert.strictEqual(gb.peerId, undefined, 'deleting one end unlinks the other');
+  M.linkPortGroups(p, M.addPortGroup(p, a.id, { name: 'x', portsText: '1-2', side: 'rear' }).id, gb.id);
+  M.unlinkPortGroup(p, gb.id); assert.strictEqual(M.peerGroup(p, gb.id), null);
+  gb.peerId = 'pgp_missing'; assert.ok(M.validateProject(p).some(i => i.code === 'BAD_PEER'));
+});
 test('route optimisation: a route 1 > 3 > 2 is flagged when a fixed link 1-2 has free wires', () => {
   const p = M.createProject('ro');
   const sw = M.addObject(p, { type: 'switch', name: 'SW', portCount: 8 }), pc = M.addObject(p, { type: 'generic', name: 'PC', portCount: 1 });

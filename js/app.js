@@ -351,7 +351,12 @@
     if (!pv || !pv.ok) { toast(pv ? pv.text : 'Hover the ports of another patch panel first', true); return; }
     const pairs = g.ids.map((x, i) => [x, pv.ids[i]]);
     clearPgroup();
-    const r = commit('Create fixed link', (p) => M.addFixedLink(p, { aObjectId: g.objId, bObjectId: pv.objId, pairs: pairs }).id);
+    const f0 = g.gid && M.findPortGroup(S.p, g.gid), whole = f0 && M.rearPorts(f0.obj).filter((pt) => f0.group.portIds.indexOf(pt.id) >= 0).length === g.ids.length;
+    const r = commit('Create fixed link', (p) => {
+      const link = M.addFixedLink(p, { aObjectId: g.objId, bObjectId: pv.objId, pairs: pairs });
+      if (whole) linkFarGroup(p, g.gid, pv.objId, pv.ids);
+      return link.id;
+    });
     if (r && r !== true) { toast('Created fixed link - edit its properties on the right'); select({ kind: 'link', id: r }); }
   }
 
@@ -408,6 +413,13 @@
       return;
     }
     if (!el) { S.sel = null; closeRight(); renderAll(); return; }
+    if (kind === 'pgroup' && !(ev && ev.shiftKey)) { // a linked group whose other end is on another map: go there (Shift+click selects this end instead)
+      const q = M.peerGroup(S.p, id);
+      if (q && !M.placementOf(S.p, S.mapId, q.obj.id)) {
+        const m = M.mapsFor(S.p, 'object', q.obj.id)[0];
+        if (m) { goTo('pgroup', q.group.id, m); toast('Linked group: "' + q.group.name + '" on ' + q.obj.name + ' (Shift+click selects this end)'); return; }
+      }
+    }
     select({ kind: kind, id: id });
   }
 
@@ -871,10 +883,17 @@
         '<div class="sub">Marks these ports as occupied by that kind of equipment without adding each one (e.g. 16 cameras). The graph shows one "' + esc(g.name) + ' x' + g.portIds.length + '" endpoint on ' + esc(o.name) + '.</div>') : (g.deviceKind ? fld('Plugged-in device', esc(M.DEVICE_KINDS.find((k) => k[0] === g.deviceKind)[1]) + ' x' + g.portIds.length) : '');
     }
     if (isEdit()) h += '<div class="sub">Ports as numbers and ranges, e.g. 7-14, 17. A port belongs to one group.</div>';
+    const peer = M.peerGroup(S.p, g.id);
+    if (peer) {
+      const pm = M.mapsFor(S.p, 'object', peer.obj.id).map((m) => (S.p.maps.find((x) => x.id === m) || {}).name).filter(Boolean).join(', ');
+      h += fld('Linked to', '<a class="lnk" data-act="goto" data-kind="pgroup" data-id="' + esc(peer.group.id) + '">' + esc(peer.group.name) + '</a> on ' + esc(peer.obj.name) + (pm ? ' <span class="sub">(' + esc(pm) + ')</span>' : '')) +
+        '<div class="sub">The other end of the same cable group. Each end has its own name and colour; hover shows the other end and clicking it jumps there when it is on another map.</div>';
+    }
     h += '<div class="btn-row">';
     if (isEdit()) {
       const rear = o.ports.filter((pt) => g.portIds.indexOf(pt.id) >= 0 && pt.side === 'rear');
       if (M.isTermination(o) && rear.length) h += btn('linkFromGroup', 'Fixed link from this group...', 'data-id="' + esc(g.id) + '"');
+      if (peer) h += btn('unlinkPGroup', 'Unlink from other end', 'data-id="' + esc(g.id) + '"');
       h += btn('deletePGroup', 'Delete group', 'data-id="' + esc(g.id) + '"', 'danger');
     }
     return h + '</div>';
@@ -1228,6 +1247,14 @@
    * shown (click a group name to pick its free ports). Ports pair up in the order they were picked, so 1,3,5,7 on one panel can
    * join 1-4 on the other. Without any pick it falls back to "N wires" (sequential or unmapped).
    */
+  /* far end of a link made from a group: a new group on the other panel with the same name and colour, linked to the first */
+  function linkFarGroup(p, gid, objId, portIds) {
+    const src = M.findPortGroup(p, gid);
+    if (!src) return null;
+    const dst = M.addPortGroup(p, objId, { name: src.group.name, color: src.group.color, portIds: portIds.slice() });
+    M.linkPortGroups(p, gid, dst.id);
+    return dst;
+  }
   async function newLink(prefA) {
     const panels = S.p.objects.filter((o) => M.isTermination(o));
     if (panels.length < 2) { toast('Create at least two patch panels (or a panel and a wall socket) first', true); return; }
@@ -1342,9 +1369,20 @@
     });
     if (v !== 'ok') return;
     const picked = st.sel.a.length > 0;
-    const r = commit('Create fixed link', (p) => M.addFixedLink(p, picked
-      ? { aObjectId: st.a, bObjectId: st.b, pairs: st.sel.a.map((id, i) => [id, st.sel.b[i]]), cableType: st.cableType, length: st.length, route: st.route }
-      : { aObjectId: st.a, bObjectId: st.b, wireCount: st.n, mapping: st.mapping, cableType: st.cableType, length: st.length, route: st.route }).id);
+    // a link made from a port group gives the far end a group of its own, linked to the first (own names, hover and click-through)
+    const fromG = picked && st.place && (() => {
+      const f = M.findPortGroup(S.p, st.place.gid), side = st.place.from;
+      if (!f || f.obj.id !== st[side]) return null;
+      const rear = M.rearPorts(f.obj).filter((pt) => f.group.portIds.indexOf(pt.id) >= 0).map((pt) => pt.id);
+      return rear.length === st.sel[side].length && rear.every((id) => st.sel[side].indexOf(id) >= 0) ? { gid: f.group.id, side: side } : null;
+    })();
+    const r = commit('Create fixed link', (p) => {
+      const link = M.addFixedLink(p, picked
+        ? { aObjectId: st.a, bObjectId: st.b, pairs: st.sel.a.map((id, i) => [id, st.sel.b[i]]), cableType: st.cableType, length: st.length, route: st.route }
+        : { aObjectId: st.a, bObjectId: st.b, wireCount: st.n, mapping: st.mapping, cableType: st.cableType, length: st.length, route: st.route });
+      if (fromG) linkFarGroup(p, fromG.gid, st[otherSide(fromG.side)], st.sel[otherSide(fromG.side)]);
+      return link.id;
+    });
     if (r && r !== true) select({ kind: 'link', id: r });
   }
 
@@ -1786,12 +1824,13 @@
           if (g && g !== true) { S.sel = { kind: 'pgroup', id: g.id }; renderAll(); }
           break;
         }
+        case 'unlinkPGroup': commit('Unlink port groups', (p) => M.unlinkPortGroup(p, d.id)); break;
         case 'deletePGroup': { const f = M.findPortGroup(S.p, d.id), oid = f && f.obj.id; commit('Delete port group', (p) => M.deletePortGroup(p, d.id)); if (oid) { S.sel = { kind: 'object', id: oid }; renderAll(); } break; }
         case 'linkFromGroup': {
           const f = M.findPortGroup(S.p, d.id), idx = M.buildIndex(S.p);
           const ids = f.group.portIds.filter((pid) => idx.ports[pid].side === 'rear' && !idx.portUse[pid]);
           if (!ids.length) { toast('No free rear ports in this group', true); break; }
-          S.pgroup = { objId: f.obj.id, ids: ids, last: ids[ids.length - 1] }; S.hoverPort = null; S.preview = null;
+          S.pgroup = { objId: f.obj.id, ids: ids, last: ids[ids.length - 1], gid: f.group.id }; S.hoverPort = null; S.preview = null;
           renderAll(); toast(ids.length + ' port(s) ready: hover another panel or socket and click to link'); break;
         }
         case 'applyUplinks': { const n = parseInt($('upInput').value, 10), id = S.sel.id; commit('Set uplink ports', (p) => { M.setUplinkPorts(p, id, n); B.refitObject(p, id); }); break; }

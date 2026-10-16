@@ -315,9 +315,34 @@
     }
     return g;
   }
+  /*
+   * Linked groups: the two ends of a fixed link made from a group ("to rack office" on panel A / "from rack 1" on panel B) are
+   * port groups that point at each other (peerId). Each end keeps its own name and colour; hovering one names the other, and
+   * clicking it can jump to the other end, even on another map.
+   */
+  function peerGroup(p, groupId) {
+    var f = findPortGroup(p, groupId);
+    if (!f || !f.group.peerId) return null;
+    var q = findPortGroup(p, f.group.peerId);
+    return q && q.group.peerId === groupId ? q : null;
+  }
+  function linkPortGroups(p, aGroupId, bGroupId) {
+    var a = findPortGroup(p, aGroupId), b = findPortGroup(p, bGroupId);
+    if (!a || !b || aGroupId === bGroupId) throw new Error('Port group not found');
+    unlinkPortGroup(p, aGroupId); unlinkPortGroup(p, bGroupId);
+    a.group.peerId = bGroupId; b.group.peerId = aGroupId;
+  }
+  function unlinkPortGroup(p, groupId) {
+    var f = findPortGroup(p, groupId);
+    if (!f) return;
+    var q = f.group.peerId && findPortGroup(p, f.group.peerId);
+    delete f.group.peerId;
+    if (q && q.group.peerId === groupId) delete q.group.peerId;
+  }
   function deletePortGroup(p, groupId) {
     var f = findPortGroup(p, groupId);
     if (!f) return;
+    unlinkPortGroup(p, groupId);
     f.obj.portGroups = f.obj.portGroups.filter(function (g) { return g.id !== groupId; });
     if (!f.obj.portGroups.length) delete f.obj.portGroups;
   }
@@ -924,6 +949,7 @@
       (o.portGroups || []).forEach(function (g) {
         var own = {}; o.ports.forEach(function (pt) { own[pt.id] = true; });
         if (g.portIds.some(function (x) { return !own[x]; })) add('warning', 'BAD_PORT_GROUP', 'Port group "' + g.name + '" on "' + o.name + '" refers to a missing port', 'object', o.id);
+        if (g.peerId && !findPortGroup(p, g.peerId)) add('warning', 'BAD_PEER', 'Port group "' + g.name + '" on "' + o.name + '" is linked to a group that no longer exists', 'object', o.id);
         if (g.deviceKind && g.portIds.some(function (x) { return idx.portUse[x]; })) add('warning', 'PSEUDO_CABLED', 'Port group "' + g.name + '" on "' + o.name + '" stands for plugged-in devices but some of its ports also have cables', 'object', o.id);
       });
       var unused = o.ports.filter(function (pt) { return !idx.portUse[pt.id] && !idx.mapByPort[pt.id]; }).length;
@@ -1049,7 +1075,7 @@
     findContainer: findContainer, groupOf: groupOf, parentOf: parentOf, containerChildren: containerChildren, descendants: descendants,
     addPlacement: addPlacement, placementOf: placementOf, placementGroup: placementGroup, movePlacement: movePlacement,
     growToFit: growToFit, mapsFor: mapsFor, addGroup: addGroup, addObject: addObject, setContainer: setContainer,
-    setPortCount: setPortCount, findPortGroup: findPortGroup, parsePortRange: parsePortRange, addPortGroup: addPortGroup, updatePortGroup: updatePortGroup, deletePortGroup: deletePortGroup, portGroupOf: portGroupOf, prunePortGroups: prunePortGroups, hasDeviceIp: hasDeviceIp, realPlacement: realPlacement, syncGhosts: syncGhosts, pseudoOf: pseudoOf, pseudoDevices: pseudoDevices, hasPortIp: hasPortIp, setDeviceIp: setDeviceIp, effectivePortIp: effectivePortIp, ipList: ipList, setPortIp: setPortIp, IP_ERROR: IP_ERROR, setDeviceKind: setDeviceKind, isTermination: isTermination, DEVICE_KINDS: DEVICE_KINDS, deviceKindInfo: deviceKindInfo, typeLabel: typeLabel, accessPorts: accessPorts, validSectionRows: validSectionRows, setUplinkPorts: setUplinkPorts, setSwitchLayout: setSwitchLayout, setFullWidth: setFullWidth, setSectionSize: setSectionSize, validSectionSizes: validSectionSizes, defaultSectionSize: defaultSectionSize, effectiveSectionSize: effectiveSectionSize, setRouterPorts: setRouterPorts, isValidIp: isValidIp, canConnectPatch: canConnectPatch, addPatchCable: addPatchCable,
+    setPortCount: setPortCount, findPortGroup: findPortGroup, parsePortRange: parsePortRange, addPortGroup: addPortGroup, updatePortGroup: updatePortGroup, deletePortGroup: deletePortGroup, portGroupOf: portGroupOf, prunePortGroups: prunePortGroups, hasDeviceIp: hasDeviceIp, peerGroup: peerGroup, linkPortGroups: linkPortGroups, unlinkPortGroup: unlinkPortGroup, realPlacement: realPlacement, syncGhosts: syncGhosts, pseudoOf: pseudoOf, pseudoDevices: pseudoDevices, hasPortIp: hasPortIp, setDeviceIp: setDeviceIp, effectivePortIp: effectivePortIp, ipList: ipList, setPortIp: setPortIp, IP_ERROR: IP_ERROR, setDeviceKind: setDeviceKind, isTermination: isTermination, DEVICE_KINDS: DEVICE_KINDS, deviceKindInfo: deviceKindInfo, typeLabel: typeLabel, accessPorts: accessPorts, validSectionRows: validSectionRows, setUplinkPorts: setUplinkPorts, setSwitchLayout: setSwitchLayout, setFullWidth: setFullWidth, setSectionSize: setSectionSize, validSectionSizes: validSectionSizes, defaultSectionSize: defaultSectionSize, effectiveSectionSize: effectiveSectionSize, setRouterPorts: setRouterPorts, isValidIp: isValidIp, canConnectPatch: canConnectPatch, addPatchCable: addPatchCable,
     updatePatchCable: updatePatchCable, deletePatchCable: deletePatchCable, addInternalMapping: addInternalMapping,
     removeInternalMapping: removeInternalMapping, autoMapPanel: autoMapPanel, rearPorts: rearPorts,
     sequentialPorts: sequentialPorts, addFixedLink: addFixedLink, updateLinkMeta: updateLinkMeta,

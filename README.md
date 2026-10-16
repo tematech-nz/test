@@ -130,6 +130,10 @@ Try it: File -> Load demo project (two rooms, a fixed link between racks, a wall
   **Placing a group**: click an unconnected port group's name on one panel (groups with connected ports are greyed out) - its ports are
   selected and "Place selected group" is enabled on the other panel; every run of free consecutive ports where the group fits turns
   green, the exact ports under the pointer light up (red when they do not fit), and a click there pairs them.
+  **Linked groups**: a link made from a group gives the far end a group of its own (same name and colour to start with) on the other panel,
+  and the two point at each other. Rename or recolour each end independently; hovering one shows the other end ("-> from rack 1 on Panel B
+  (Floor 2)"), and clicking it jumps to the other end when that panel is on another map (Shift+click selects this end instead). The group's
+  panel shows "Linked to" with a link and an Unlink button; deleting one end unlinks the other; copies of a panel are not linked.
 - **Route optimisation** (File > Find shorter routes...): lists physical routes that detour through panels (for example panel 1 > panel 3 > panel 2) although
   a fixed link with spare or unused wires already joins two of their panels directly (panel 1 - panel 2). Each entry shows the current
   route, the shortcut link, the panels it would skip and its free wires, with a button to jump to the link. Faulty and decommissioned links are not suggested.

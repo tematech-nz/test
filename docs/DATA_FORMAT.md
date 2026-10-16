@@ -43,7 +43,8 @@ cannot break a connection. Files use LF line endings and are written with 2-spac
 - Any equipment with ports may carry `portGroups`: `[{ "id", "name", "color", "portIds": [...] }]` (a port is in at most one
   group; visual/organisational). A group of a switch, router or generic device may also carry `deviceKind` (a device type id such as
   `camera`): a **pseudo-device** - the ports are occupied by that many unmodelled devices; the topology graph shows one endpoint
-  "<name> x<ports>" and patch cables cannot be added to those ports.
+  "<name> x<ports>" and patch cables cannot be added to those ports. A group may also carry `peerId`: the id of the linked group at the
+  other end of a fixed link made from it (both groups carry each other's id; names and colours are independent).
 - Any port may carry an optional `description` (free text label shown on hover and in descriptions); `label` is the number
   drawn on the port's face.
 - Patch panels have `front` and `rear` ports and an optional `sectionSize` (ports per visual section; must divide the
