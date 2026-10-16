@@ -2,7 +2,7 @@
 (function (g) {
   'use strict';
   var NM = g.NetMap = g.NetMap || {};
-  if (typeof require === 'function') { if (!NM.model) require('./model.js'); if (!NM.layout) require('./layout.js'); }
+  if (typeof require === 'function') { if (!NM.model) require('./model.js'); if (!NM.layout) require('./layout.js'); if (!NM.icons) require('./icons.js'); }
   var M = NM.model, L = NM.layout;
 
   var STYLE = {
@@ -93,8 +93,18 @@
       var tx = pl.x + (editing ? 22 : 6);
       var label = ref.name + (!it.isGroup && ref.type === 'rack' && ref.rackHeight ? ' (' + ref.rackHeight + 'U)' : '');
       x.push('<text x="' + num(tx) + '" y="' + num(pl.y + 14) + '" font-size="12" font-weight="bold" fill="#222" font-family="sans-serif" pointer-events="none">' + esc(trunc(label, Math.floor((pl.w - (tx - pl.x) - 4) / 6.5))) + '</text>');
-      if (!it.isGroup && (ref.type === 'router' || ref.type === 'internet') && ref.ipAddress) {
-        x.push('<text x="' + num(pl.x + pl.w - 5) + '" y="' + num(pl.y + 14) + '" font-size="9" text-anchor="end" fill="#0d47a1" font-family="sans-serif" pointer-events="none">' + esc(ref.ipAddress) + '</text>');
+      if (!it.isGroup && ref.type === 'generic' && ref.deviceKind && NM.icons) {
+        var isz = ref.ports.length ? 28 : 44;
+        x.push(NM.icons.svg(ref.deviceKind, num(pl.x + 6), num(ref.ports.length ? pl.y + 22 : pl.y + 20 + Math.max(0, (pl.h - 20 - isz) / 2)), isz));
+      }
+      if (opts.alerts && opts.alerts[ref.id]) {
+        x.push('<g pointer-events="none"><title>' + esc(opts.alerts[ref.id]) + '</title><circle cx="' + num(pl.x + pl.w - 2) + '" cy="' + num(pl.y + 2) + '" r="8" fill="#d32f2f" stroke="#fff" stroke-width="1.5"/><text x="' + num(pl.x + pl.w - 2) + '" y="' + num(pl.y + 6) + '" font-size="12" font-weight="bold" text-anchor="middle" fill="#fff" font-family="sans-serif">!</text></g>');
+      }
+      if (!it.isGroup && ref.type === 'switch' && ref.portIsolation) {
+        x.push('<text x="' + num(pl.x + pl.w - 5) + '" y="' + num(pl.y + 13) + '" font-size="8" text-anchor="end" fill="#b71c1c" font-family="sans-serif" pointer-events="none">PORT ISOLATION</text>');
+      }
+      if (!it.isGroup && M.hasDeviceIp(ref) && ref.ipAddress) {
+        x.push('<text x="' + num(pl.x + pl.w - (ref.portIsolation ? 82 : 5)) + '" y="' + num(pl.y + 14) + '" font-size="9" text-anchor="end" fill="#0d47a1" font-family="sans-serif" pointer-events="none">' + esc(ref.ipAddress) + '</text>');
       }
       if (it.lay) {
         if (it.lay.sections.length) {
@@ -112,7 +122,24 @@
           });
         }
         (it.lay.groups || []).forEach(function (gp) {
-          x.push('<rect x="' + num(pl.x + gp.x) + '" y="' + num(pl.y + gp.y) + '" width="' + num(gp.w) + '" height="' + num(gp.h) + '" rx="3" fill="#ffffff" fill-opacity="0.7" stroke="' + (gp.side === 'rear' ? '#d9a35a' : '#cdb86a') + '" stroke-width="0.8" pointer-events="none"/>');
+          x.push('<rect x="' + num(pl.x + gp.x) + '" y="' + num(pl.y + gp.y) + '" width="' + num(gp.w) + '" height="' + num(gp.h) + '" rx="3" fill="#ffffff" fill-opacity="0.7" stroke="' + (gp.side === 'rear' ? '#d9a35a' : (gp.side === 'uplink' ? '#8e6bbf' : '#cdb86a')) + '" stroke-width="' + (gp.side === 'uplink' ? 1.4 : 0.8) + '" pointer-events="none"/>');
+        });
+        (ref.portGroups || []).forEach(function (g) {
+          // colour-coded band behind the group's ports, one per row, with the name tag above the first row
+          var rects = g.portIds.map(function (id) { return it.lay.ports[id]; }).filter(function (r) { return r && !r.hidden; });
+          if (!rects.length) return;
+          var rows = {}, gsel = sel && sel.kind === 'pgroup' && sel.id === g.id;
+          rects.forEach(function (r) { var k = Math.round(r.y); (rows[k] = rows[k] || []).push(r); });
+          Object.keys(rows).map(Number).sort(function (a, b) { return a - b; }).forEach(function (k, i) {
+            var rs = rows[k], x0 = Math.min.apply(null, rs.map(function (r) { return r.x; })) - 3, x1 = Math.max.apply(null, rs.map(function (r) { return r.x + r.w; })) + 3, h = rs[0].h + 6;
+            x.push('<g data-kind="pgroup" data-id="' + esc(g.id) + '"><title>' + esc(g.name + ' (' + g.portIds.length + ' ports)') + '</title><rect data-kind="pgroup" data-id="' + esc(g.id) + '" x="' + num(pl.x + x0) + '" y="' + num(pl.y + k - 3) + '" width="' + num(x1 - x0) + '" height="' + num(h) + '" rx="4" fill="' + esc(g.color) + '" fill-opacity="0.32" stroke="' + (gsel ? SEL : esc(g.color)) + '" stroke-width="' + (gsel ? 3 : 1.6) + '"/></g>');
+            if (i === 0) {
+              var tw = String(g.name).length * 5.4 + 8, minX = it.lay.sections.length ? 66 : Math.min(pl.w - tw - 4, 12 + String(ref.name).length * 6.5);
+              var tx = Math.max(x0, minX); tx = Math.min(tx, pl.w - tw - 2);
+              x.push('<g data-kind="pgroup" data-id="' + esc(g.id) + '"><rect data-kind="pgroup" data-id="' + esc(g.id) + '" x="' + num(pl.x + tx) + '" y="' + num(pl.y + k - 15) + '" width="' + num(tw) + '" height="11" rx="3" fill="' + esc(g.color) + '" stroke="#37474f" stroke-width="0.6"/>' +
+                '<text x="' + num(pl.x + tx + 4) + '" y="' + num(pl.y + k - 6.5) + '" font-size="8.5" font-weight="bold" fill="#111" font-family="sans-serif" pointer-events="none">' + esc(g.name) + '</text></g>');
+            }
+          });
         });
         ref.ports.forEach(function (pt) {
           var r = it.lay.ports[pt.id]; if (!r) return;
@@ -122,15 +149,17 @@
           var use = idx.portUse[pt.id], mapped = idx.mapByPort[pt.id];
           var fill = use ? (use.kind === 'patch' ? '#bbdefb' : '#ffe0b2') : (mapped ? '#f5f5f5' : '#ffffff');
           if (!use && pt.role === 'wan') fill = '#fff3f1';
+          if (!use && pt.role === 'uplink') fill = '#ede7f6';
           var isHi = hl && hl.ports[pt.id], isSelPort = sel && sel.kind === 'port' && sel.id === pt.id, isPending = opts.pendingPortId === pt.id;
           if (isHi) fill = HI;
           var stroke = isPending ? '#d500f9' : (isSelPort ? SEL : '#444'), sw = isPending || isSelPort ? 2.5 : 1;
           if (selPorts[pt.id]) { fill = '#ffeb3b'; stroke = '#e65100'; sw = 2.5; }
           if (groupSet[pt.id]) { fill = '#e1bee7'; stroke = '#8e24aa'; sw = 2.5; }
           if (prevSet[pt.id]) { fill = prev.ok ? '#c8e6c9' : '#ffcdd2'; stroke = prev.ok ? '#2e7d32' : '#c62828'; sw = 2.5; }
-          x.push('<g data-kind="port" data-id="' + esc(pt.id) + '"><title>' + esc(ref.name + ' / ' + pt.label + (pt.side === 'rear' ? ' (rear)' : '') + (pt.role ? ' (' + pt.role.toUpperCase() + ')' : '') + (pt.ip ? ' ' + pt.ip : '')) + '</title>' +
+          var netBar = pt.networkColor ? '<rect x="' + num(abs.x) + '" y="' + num(abs.y + abs.h - 4) + '" width="' + num(abs.w) + '" height="4" rx="1" fill="' + esc(pt.networkColor) + '" stroke="#333" stroke-width="0.6" pointer-events="none"/>' : '';
+          x.push('<g data-kind="port" data-id="' + esc(pt.id) + '"><title>' + esc(ref.name + ' / ' + pt.label + (pt.side === 'rear' ? ' (rear)' : '') + (pt.role ? ' (' + pt.role.toUpperCase() + ')' : '') + (pt.description ? ' - ' + pt.description : '') + (M.portGroupOf(ref, pt.id) ? ' [' + M.portGroupOf(ref, pt.id).name + ']' : '') + (pt.ip ? ' ' + pt.ip : '')) + '</title>' +
             '<rect data-kind="port" data-id="' + esc(pt.id) + '" x="' + num(abs.x) + '" y="' + num(abs.y) + '" width="' + num(abs.w) + '" height="' + num(abs.h) + '" rx="2" fill="' + fill + '" stroke="' + stroke + '" stroke-width="' + sw + '"' + (pt.side === 'rear' ? ' stroke-dasharray="3 1"' : '') + '/>' +
-            '<text x="' + num(abs.x + abs.w / 2) + '" y="' + num(abs.y + abs.h / 2 + 3) + '" font-size="' + num(Math.min(9, abs.h * 0.55)) + '" text-anchor="middle" fill="#111" font-family="sans-serif" pointer-events="none">' + esc(trunc(pt.label, Math.max(1, Math.floor(abs.w / 5.5)))) + '</text></g>');
+            '<text x="' + num(abs.x + abs.w / 2) + '" y="' + num(abs.y + abs.h / 2 + 3) + '" font-size="' + num(Math.min(9, abs.h * 0.55)) + '" text-anchor="middle" fill="#111" font-family="sans-serif" pointer-events="none">' + esc(trunc(pt.label, Math.max(1, Math.floor(abs.w / 5.5)))) + '</text>' + netBar + '</g>');
         });
       }
       if (editing) {

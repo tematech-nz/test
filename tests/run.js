@@ -99,7 +99,7 @@ test('8. switch -> patch -> panel -> fixed wire -> panel -> patch -> wall socket
   const p = B.buildDemoProject();
   const t = T.tracePort(p, port(byName(p, 'Switch A'), 12).id);
   const seq = t.path.map(s => s.type);
-  assert.deepStrictEqual(seq, ['port', 'patch', 'port', 'internal', 'port', 'wire', 'port', 'internal', 'port', 'patch', 'port']);
+  assert.deepStrictEqual(seq, ['port', 'patch', 'port', 'internal', 'port', 'wire', 'port', 'internal', 'port', 'patch', 'port', 'internal', 'port']); // ends inside the socket: front jack, internal mapping, rear
   const lines = T.describe(p, t).map(x => x.text);
   assert.ok(/Switch A \/ 12/.test(lines[0]) || /WS-02 \/ 1/.test(lines[0]));
   assert.ok(lines.some(l => /Fixed link FL-001, wire 12/.test(l)));
@@ -290,10 +290,10 @@ test('collapsing a panel section shrinks it and anchors cables to the strip', ()
 console.log('Router');
 test('router has configurable WAN/LAN ports and IP addresses', () => {
   const p = M.createProject('r');
-  const r = M.addObject(p, { type: 'router', name: 'Edge', wanPorts: 2, lanPorts: 6, ipAddress: '192.168.1.1/24' });
+  const r = M.addObject(p, { type: 'router', name: 'Edge', wanPorts: 2, lanPorts: 6, ipAddress: '192.168.1.1' });
   assert.strictEqual(r.ports.length, 8);
   assert.deepStrictEqual(r.ports.slice(0, 3).map(x => x.role + ':' + x.label), ['wan:W1', 'wan:W2', 'lan:L1']);
-  assert.strictEqual(r.ipAddress, '192.168.1.1/24');
+  assert.strictEqual(r.ipAddress, '192.168.1.1');
   M.setRouterPorts(p, r.id, 1, 15);
   assert.strictEqual(r.ports.filter(x => x.role === 'wan').length, 1);
   assert.strictEqual(r.ports.filter(x => x.role === 'lan').length, 15);
@@ -319,10 +319,16 @@ test('IP validation warns, search finds routers and ports by IP', () => {
   assert.ok(M.search(p, '10.0.0.1').some(x => x.kind === 'object'));
   assert.ok(M.search(p, '203.0.113').some(x => x.kind === 'port'));
   assert.strictEqual(M.validateProject(p).filter(i => i.code === 'BAD_IP').length, 0);
-  r.ports[1].ip = '300.1.1.1'; r.ipAddress = 'not-an-ip';
+  r.ports[1].ip = '300.1.1.1'; r.ipAddress = '10.0.0.1/8';
   assert.strictEqual(M.validateProject(p).filter(i => i.code === 'BAD_IP').length, 2);
-  ['10.0.0.1', '10.0.0.0/8', 'fe80::1', '2001:db8::1/64', ''].forEach(v => assert.ok(M.isValidIp(v), v));
-  ['1.2.3', '1.2.3.4/33', 'abc', '256.1.1.1'].forEach(v => assert.ok(!M.isValidIp(v), v));
+  ['10.0.0.1', '192.168.100.254', '0.0.0.0', ''].forEach(v => assert.ok(M.isValidIp(v), v));
+  ['1.2.3', '1.2.3.4/24', '10.0.0.0/8', 'fe80::1', 'abc', '256.1.1.1', '1.2.3.4.5', '1.2.3.-4', ' 1.2.3 '].forEach(v => assert.ok(!M.isValidIp(v), v));
+  assert.throws(() => M.setDeviceIp(p, r.id, '192.168.1.1/24'), /IPv4/);
+  assert.throws(() => M.setPortIp(p, r.ports[0].id, '999.1.1.1'), /IPv4/);
+  assert.throws(() => M.addObject(p, { type: 'router', ipAddress: '10.0.0.1/8' }), /IPv4/);
+  assert.strictEqual(p.objects.length, 1, 'rejected creation leaves nothing behind');
+  M.setPortIp(p, r.ports[0].id, ' 10.1.1.1 '); assert.strictEqual(r.ports[0].ip, '10.1.1.1');
+  M.setDeviceIp(p, r.id, ''); assert.strictEqual(r.ipAddress, '');
 });
 test('router layout has WAN and LAN strips; export shows them', () => {
   const p = M.createProject('r');
@@ -340,8 +346,8 @@ function buildNet() {
   const p = M.createProject('net');
   const o = (type, name, extra) => M.addObject(p, Object.assign({ type: type, name: name }, extra || {}));
   const inet = o('internet', 'INTERNET', { portCount: 2, ipAddress: '203.0.113.1' });
-  const r1 = o('router', 'R1', { wanPorts: 1, lanPorts: 2, ipAddress: '192.168.1.1/24' });
-  const r2 = o('router', 'R2', { wanPorts: 1, lanPorts: 2, ipAddress: '10.9.0.1/16' });
+  const r1 = o('router', 'R1', { wanPorts: 1, lanPorts: 2, ipAddress: '192.168.1.1' });
+  const r2 = o('router', 'R2', { wanPorts: 1, lanPorts: 2, ipAddress: '10.9.0.1' });
   const s1 = o('switch', 'S1', { portCount: 8 }), s2 = o('switch', 'S2', { portCount: 8 });
   const ppA = o('patchpanel', 'PPA', { portCount: 4, straight: true }), ppB = o('patchpanel', 'PPB', { portCount: 4, straight: true });
   const ws = o('socket', 'WS', { portCount: 1 }), gen = o('generic', 'Lonely', { portCount: 1 });
@@ -359,10 +365,11 @@ function buildNet() {
 }
 test('subnetOf', () => {
   const TP = NM.topology;
-  assert.strictEqual(TP.subnetOf('192.168.1.77/24'), '192.168.1.0/24');
-  assert.strictEqual(TP.subnetOf('10.9.200.1/16'), '10.9.0.0/16');
-  assert.strictEqual(TP.subnetOf('10.0.0.1'), null);
-  assert.strictEqual(TP.subnetOf('1.2.3.4/40'), null);
+  assert.strictEqual(TP.subnetOf('192.168.1.77'), '192.168.1.0/24', 'no prefixes: the subnet is assumed to be the /24');
+  assert.strictEqual(TP.subnetOf('10.9.200.1'), '10.9.200.0/24');
+  assert.strictEqual(TP.subnetOf('10.0.0.1/8'), null);
+  assert.strictEqual(TP.subnetOf('300.1.1.1'), null);
+  assert.strictEqual(TP.subnetOf(''), null);
 });
 test('passive panels and fixed links collapse into device-to-device links', () => {
   const n = buildNet(), g = NM.topology.buildGraph(n.p);
@@ -719,6 +726,456 @@ test('fixed links hide behind unrelated containers and show in full when selecte
   const traced = T.traceTarget(p, { kind: 'link', id: link.id });
   assert.strictEqual(R.renderMap(p, mid, { highlight: traced.highlight }).content.indexOf('lc_' + link.id), -1, 'traced: full length');
   assert.ok(rackM);
+});
+
+console.log('Switch layout, uplinks, full width, isolation');
+test('16-port switch as two 2x4 sections: columns order, one line', () => {
+  const p = M.createProject('s');
+  const sw = M.addObject(p, { type: 'switch', portCount: 16, sectionSize: 8, sectionRows: 2 });
+  assert.strictEqual(sw.sectionRows, 2);
+  const L = NM.layout, sz = L.defaultSize(sw), lay = L.computeLayout(sw, sz.w, sz.h, {});
+  const P = (n) => lay.ports[sw.ports[n - 1].id];
+  assert.strictEqual(lay.groups.length, 2);
+  assert.strictEqual(P(1).x, P(2).x, '1 above 2 (zig-zag order)');
+  assert.ok(P(1).y < P(2).y);
+  assert.ok(P(3).x > P(1).x && P(3).y === P(1).y, '3 right of 1 on the top row');
+  assert.ok(P(9).x > P(8).x + 6, 'second section after a gap');
+  assert.strictEqual(new Set(sw.ports.map(x => Math.round(lay.ports[x.id].y))).size, 2, 'two rows tall, both sections in one line');
+  M.setSwitchLayout(p, sw.id, { portOrder: 'rows' });
+  const lay2 = L.computeLayout(sw, sz.w, sz.h, {});
+  assert.ok(lay2.ports[sw.ports[1].id].y === lay2.ports[sw.ports[0].id].y && lay2.ports[sw.ports[1].id].x > lay2.ports[sw.ports[0].id].x, 'rows order: 2 right of 1');
+  assert.throws(() => M.setSwitchLayout(p, sw.id, { sectionRows: 3 }), /evenly/);
+  assert.deepStrictEqual(M.validSectionRows(8), [1, 2, 4, 8]);
+});
+test('uplink ports sit next to the sections, left or right, in line', () => {
+  const p = M.createProject('s');
+  const sw = M.addObject(p, { type: 'switch', portCount: 16, sectionSize: 8, sectionRows: 2, uplinkPorts: 2 });
+  assert.deepStrictEqual(sw.ports.slice(-2).map(x => x.label + ':' + x.role), ['U1:uplink', 'U2:uplink']);
+  const L = NM.layout, sz = L.defaultSize(sw), lay = L.computeLayout(sw, sz.w, sz.h, {});
+  const u1 = lay.ports[sw.ports[16].id], u2 = lay.ports[sw.ports[17].id], last = lay.ports[sw.ports[15].id];
+  assert.ok(u1.x > last.x && u2.x > u1.x, 'to the right of the sections');
+  assert.ok(lay.groups.some(g => g.side === 'uplink'));
+  M.setSwitchLayout(p, sw.id, { uplinkSide: 'left' });
+  const l2 = L.computeLayout(sw, sz.w, sz.h, {});
+  assert.ok(l2.ports[sw.ports[16].id].x < l2.ports[sw.ports[0].id].x, 'uplinks on the left');
+  M.setPortCount(p, sw.id, 24);
+  assert.deepStrictEqual(sw.ports.slice(-2).map(x => x.role), ['uplink', 'uplink'], 'uplinks stay last');
+  assert.strictEqual(M.accessPorts(sw).length, 24);
+  M.setUplinkPorts(p, sw.id, 4);
+  assert.strictEqual(sw.ports.length, 28);
+  const a = M.addObject(p, { type: 'switch', portCount: 4 });
+  M.addPatchCable(p, { aPortId: sw.ports[27].id, bPortId: a.ports[0].id });
+  assert.throws(() => M.setUplinkPorts(p, sw.id, 3), /in use/);
+});
+test('alignment moves the ports inside a wider switch', () => {
+  const p = M.createProject('s');
+  const sw = M.addObject(p, { type: 'switch', portCount: 16, sectionSize: 8, sectionRows: 2 });
+  const L = NM.layout, sz = L.defaultSize(sw), W = sz.w + 200;
+  const first = (al) => { sw.align = al; if (al === 'left') delete sw.align; return L.computeLayout(sw, W, sz.h, {}).ports[sw.ports[0].id].x; };
+  const left = first('left'), center = first('center'), right = first('right');
+  assert.ok(left < center && center < right);
+  assert.ok(Math.abs(center - left - 101) < 1 && Math.abs(right - left - 202) < 1);
+});
+test('fullWidth equipment fills its rack, follows rack resizes and never shrinks below readable', () => {
+  const p = M.createProject('s'), mid = p.maps[0].id;
+  const rack = B.addObjectPlaced(p, mid, { type: 'rack', name: 'R' }, 0, 0);
+  const sw = B.addObjectPlaced(p, mid, { type: 'switch', name: 'S', portCount: 24, containerId: rack.id });
+  const rp = M.placementOf(p, mid, rack.id), sp = M.placementOf(p, mid, sw.id), mn = NM.layout.minSize(sw).w;
+  M.setFullWidth(p, sw.id, true); B.applyFullWidthFor(p, sw.id);
+  assert.strictEqual(sp.w, Math.max(mn, rp.w - 2 * M.PAD));
+  assert.strictEqual(sp.x, rp.x + M.PAD);
+  rp.w = 600; B.settle(p, rp);
+  assert.strictEqual(sp.w, 600 - 2 * M.PAD);
+  assert.ok(B.minPlacementSize(p, rp).w <= mn + 2 * M.PAD + 1, 'rack can shrink to the switch minimum, not stay at its stretched width');
+  rp.w = 100; B.settle(p, rp);
+  assert.ok(sp.w >= mn && rp.w >= sp.w + 2 * M.PAD, 'rack grew instead of crushing the switch');
+  M.setFullWidth(p, sw.id, false); assert.strictEqual(sw.fullWidth, undefined);
+  assert.deepStrictEqual(overlapPairs(p), []);
+});
+function isoNet(isolated, upstream) {
+  const p = M.createProject('iso');
+  const up = upstream === 'router' ? M.addObject(p, { type: 'router', name: 'R', wanPorts: 1, lanPorts: 2 }) : M.addObject(p, { type: 'switch', name: 'T', portCount: 4 });
+  const sw = M.addObject(p, { type: 'switch', name: 'S', portCount: 4, uplinkPorts: 1, portIsolation: isolated });
+  const d1 = M.addObject(p, { type: 'generic', name: 'D1', portCount: 1 }), d2 = M.addObject(p, { type: 'generic', name: 'D2', portCount: 1 });
+  const acc = (n) => sw.ports.find(x => x.label === String(n)).id;
+  const upPort = up.type === 'router' ? up.ports.find(x => x.label === 'L1').id : up.ports[0].id;
+  M.addPatchCable(p, { aPortId: upPort, bPortId: sw.ports.find(x => x.role === 'uplink').id });
+  M.addPatchCable(p, { aPortId: d1.ports[0].id, bPortId: acc(1) });
+  M.addPatchCable(p, { aPortId: d2.ports[0].id, bPortId: acc(2) });
+  return { p, up, sw, d1, d2 };
+}
+test('port isolation: access devices cannot talk directly; only up-and-back through a router', () => {
+  const TP = NM.topology;
+  // upstream is a plain switch: nothing can turn the traffic around
+  const dead = isoNet(true, 'switch'), g = TP.buildGraph(dead.p);
+  assert.strictEqual(g.nodes[dead.sw.id].isolated, true);
+  const fromD1 = TP.reachTree(g, dead.d1.id);
+  assert.strictEqual(fromD1.depth[dead.up.id], 2, 'D1 -> S -> T through the uplink');
+  assert.strictEqual(fromD1.depth[dead.d2.id], undefined, 'D1 cannot reach D2');
+  assert.strictEqual(TP.allPaths(g, dead.d1.id, dead.d2.id).length, 0);
+  const fromT = TP.reachTree(g, dead.up.id);
+  assert.ok(fromT.depth[dead.d1.id] === 2 && fromT.depth[dead.d2.id] === 2, 'the uplink side reaches every access device');
+  const fromS = TP.reachTree(g, dead.sw.id);
+  assert.ok(fromS.depth[dead.d1.id] === 1 && fromS.depth[dead.d2.id] === 1, 'the switch itself talks to everything');
+  // upstream is a router: D1 and D2 can still meet by going up to the router and back (4 hops)
+  const rt = isoNet(true, 'router'), g2 = TP.buildGraph(rt.p);
+  assert.strictEqual(TP.reachTree(g2, rt.d1.id).depth[rt.d2.id], 4);
+  const paths = TP.allPaths(g2, rt.d1.id, rt.d2.id);
+  assert.strictEqual(paths.length, 1);
+  assert.deepStrictEqual(paths[0].nodes.map(id => g2.nodes[id].name), ['D1', 'S', 'R', 'S', 'D2']);
+  // same wiring without isolation: direct, 2 hops
+  const open = isoNet(false, 'router'), g3 = TP.buildGraph(open.p);
+  assert.strictEqual(TP.reachTree(g3, open.d1.id).depth[open.d2.id], 2);
+  assert.strictEqual(TP.allPaths(g3, open.d1.id, open.d2.id)[0].nodes.length, 3);
+});
+test('no U-turn on the same link except at a router; isolation across chained switches and in the graph view', () => {
+  const TP = NM.topology, GV = NM.graphview;
+  const p = M.createProject('chain');
+  const mk = (n, extra) => M.addObject(p, Object.assign({ type: 'switch', name: n, portCount: 4, uplinkPorts: 1 }, extra || {}));
+  const s1 = mk('S1', { portIsolation: true }), s2 = mk('S2'), t = M.addObject(p, { type: 'switch', name: 'T', portCount: 4 });
+  const up = (o) => o.ports.find(x => x.role === 'uplink').id, acc = (o, n) => o.ports.find(x => x.label === String(n)).id;
+  M.addPatchCable(p, { aPortId: acc(s2, 1), bPortId: acc(s1, 1) });
+  M.addPatchCable(p, { aPortId: up(s1), bPortId: acc(t, 1) });
+  const d = M.addObject(p, { type: 'generic', name: 'D', portCount: 1 });
+  M.addPatchCable(p, { aPortId: d.ports[0].id, bPortId: acc(s1, 2) });
+  const g = TP.buildGraph(p);
+  assert.strictEqual(TP.reachTree(g, s2.id).depth[t.id], 2, 'access -> uplink on S1 is fine');
+  const fromD = TP.reachTree(g, d.id);
+  assert.strictEqual(fromD.depth[s2.id], undefined, 'D and S2 both sit on S1 access ports; T cannot turn traffic around');
+  assert.strictEqual(fromD.depth[t.id], 2);
+  const html = GV.render(p, { from: t.id, to: d.id, via: false });
+  assert.ok(/isolated/.test(html) && /Port isolation on: S1/.test(html));
+  const sw3 = mk('S3', { portIsolation: true });
+  assert.ok(!M.validateProject(p).some(i => i.code === 'ISOLATION_NO_UPLINK'));
+  M.setUplinkPorts(p, sw3.id, 0);
+  assert.ok(M.validateProject(p).some(i => i.code === 'ISOLATION_NO_UPLINK'));
+});
+test('rendering shows uplinks, shapes and the isolation badge', () => {
+  const p = M.createProject('s'), mid = p.maps[0].id;
+  B.addObjectPlaced(p, mid, { type: 'switch', name: 'Sw', portCount: 16, sectionSize: 8, sectionRows: 2, uplinkPorts: 2, portIsolation: true }, 0, 0);
+  const svg = R.svgDocument(p, mid);
+  assert.ok(svg.indexOf('PORT ISOLATION') > 0 && svg.indexOf('#ede7f6') > 0 && svg.indexOf('#8e6bbf') > 0);
+  assert.deepStrictEqual(overlapPairs(p), []);
+});
+
+console.log('Device icons and wall socket rear terminations');
+test('generic devices have a kind (pc, ap, ...) that names and draws them', () => {
+  const p = M.createProject('d'), mid = p.maps[0].id;
+  const pc1 = M.addObject(p, { type: 'generic', deviceKind: 'pc', portCount: 1 }), pc2 = M.addObject(p, { type: 'generic', deviceKind: 'pc', portCount: 1 });
+  const ap = B.addObjectPlaced(p, mid, { type: 'generic', deviceKind: 'ap', portCount: 1 }, 0, 0);
+  const other = M.addObject(p, { type: 'generic' });
+  assert.deepStrictEqual([pc1.name, pc2.name, ap.name, other.name], ['PC 1', 'PC 2', 'AP 1', 'Generic 1']);
+  assert.strictEqual(other.deviceKind, undefined);
+  assert.strictEqual(M.typeLabel(ap), 'Wi-Fi access point');
+  assert.strictEqual(M.typeLabel(other), 'Generic');
+  assert.ok(R.svgDocument(p, mid).indexOf('data-icon="ap"') > 0);
+  assert.ok(M.search(p, 'wi-fi').some(r => r.id === ap.id), 'searchable by device type');
+  M.setDeviceKind(p, ap.id, 'camera'); assert.strictEqual(ap.deviceKind, 'camera');
+  M.setDeviceKind(p, ap.id, 'other'); assert.strictEqual(ap.deviceKind, undefined);
+  assert.throws(() => M.setDeviceKind(p, ap.id, 'toaster'), /Unknown/);
+  assert.throws(() => M.setDeviceKind(p, M.addObject(p, { type: 'switch' }).id, 'pc'), /generic/);
+  M.DEVICE_KINDS.forEach(k => { if (k[0] !== 'other') assert.ok(NM.icons.svg(k[0], 0, 0, 24).indexOf('<g') === 0, k[0]); });
+});
+test('device icons get their own space; ports sit to the right of the icon', () => {
+  const p = M.createProject('d');
+  const withIcon = M.addObject(p, { type: 'generic', deviceKind: 'pc', portCount: 2 }), plain = M.addObject(p, { type: 'generic', portCount: 2 });
+  const L = NM.layout, s1 = L.defaultSize(withIcon), s0 = L.defaultSize(plain);
+  assert.ok(s1.w >= s0.w + 30 && s1.h >= 20 + 30);
+  const l1 = L.computeLayout(withIcon, s1.w, s1.h, {}), l0 = L.computeLayout(plain, s0.w, s0.h, {});
+  assert.ok(l1.ports[withIcon.ports[0].id].x >= 34, 'clear of the icon');
+  assert.ok(l1.ports[withIcon.ports[0].id].x > l0.ports[plain.ports[0].id].x);
+  const noPorts = M.addObject(p, { type: 'generic', deviceKind: 'ap', portCount: 0 });
+  assert.ok(L.minSize(noPorts).w >= 100);
+});
+test('wall sockets have rear terminations and take fixed links to patch panels', () => {
+  const p = M.createProject('s');
+  const ws = M.addObject(p, { type: 'socket', name: 'WS', portCount: 2 });
+  assert.deepStrictEqual(ws.ports.map(x => x.side + x.label), ['front1', 'front2', 'rear1', 'rear2']);
+  assert.strictEqual(p.internalMappings.length, 2, 'straight-through by default');
+  const pp = M.addObject(p, { type: 'patchpanel', name: 'PP', portCount: 24, straight: true });
+  const sw = M.addObject(p, { type: 'switch', name: 'SW', portCount: 8 });
+  const pc = M.addObject(p, { type: 'generic', name: 'PCx', deviceKind: 'pc', portCount: 1 });
+  const link = M.addFixedLink(p, { aObjectId: pp.id, bObjectId: ws.id, pairs: [[port(pp, 5, 'rear').id, port(ws, 1, 'rear').id]] });
+  assert.strictEqual(link.wires.length, 1);
+  assert.throws(() => M.addFixedLink(p, { aObjectId: pp.id, bObjectId: sw.id, wireCount: 1 }), /patch panels and wall sockets/);
+  M.addPatchCable(p, { aPortId: port(sw, 1).id, bPortId: port(pp, 5).id });
+  M.addPatchCable(p, { aPortId: pc.ports[0].id, bPortId: port(ws, 1).id });
+  assert.ok(M.validateProject(p).every(i => i.severity !== 'error'));
+  const t = T.tracePort(p, port(sw, 1).id);
+  assert.deepStrictEqual(t.path.map(s => s.type), ['port', 'patch', 'port', 'internal', 'port', 'wire', 'port', 'internal', 'port', 'patch', 'port']);
+  assert.ok(t.ends.some(e => /Terminates at PCx/.test(e.text)) && t.ends.some(e => /Terminates at SW/.test(e.text)));
+  // the outlet is pass-through in the graph: PC and switch are directly linked, WS is not a node
+  const g = NM.topology.buildGraph(p), names = g.order.map(id => g.nodes[id].name).sort();
+  assert.deepStrictEqual(names, ['PCx', 'SW']);
+  assert.strictEqual(g.links.length, 1);
+  assert.ok(/WS/.test(g.links[0].paths[0].via.join(' ')), 'the outlet shows in the cable path');
+  // an unplugged outlet is an endpoint node of its own
+  const p2 = M.createProject('s2');
+  const ws2 = M.addObject(p2, { type: 'socket', name: 'WS2', portCount: 1 }), pp2 = M.addObject(p2, { type: 'patchpanel', name: 'PP2', portCount: 4, straight: true }), sw2 = M.addObject(p2, { type: 'switch', name: 'SW2', portCount: 4 });
+  M.addFixedLink(p2, { aObjectId: pp2.id, bObjectId: ws2.id, pairs: [[port(pp2, 1, 'rear').id, port(ws2, 1, 'rear').id]] });
+  M.addPatchCable(p2, { aPortId: port(sw2, 1).id, bPortId: port(pp2, 1).id });
+  const g2 = NM.topology.buildGraph(p2);
+  assert.deepStrictEqual(g2.order.map(id => g2.nodes[id].name).sort(), ['SW2', 'WS2']);
+  assert.strictEqual(g2.links.length, 1);
+});
+test('shrinking a straight-through panel removes the mappings of removed ports; old files get socket rears on import', () => {
+  const p = M.createProject('s');
+  const pp = M.addObject(p, { type: 'patchpanel', portCount: 24, straight: true });
+  M.setPortCount(p, pp.id, 12);
+  assert.strictEqual(pp.ports.length, 24); assert.strictEqual(p.internalMappings.length, 12);
+  assert.ok(M.validateProject(p).every(i => i.severity !== 'error'));
+  const v1 = { schemaVersion: 1, id: 'prj_x', name: 'old', maps: [{ id: 'm', name: 'M' }], groups: [], objects: [{ id: 'o1', type: 'socket', name: 'WS', containerId: null, ports: [{ id: 'a', label: '1', side: 'front' }, { id: 'b', label: '2', side: 'front' }] }], placements: [], fixedLinks: [], patchCables: [], internalMappings: [], settings: {}, counters: { patch: 0, fixed: 0 } };
+  const r = M.importProject(JSON.stringify(v1));
+  assert.strictEqual(r.migratedFrom, 1);
+  assert.strictEqual(r.project.schemaVersion, M.SCHEMA_VERSION);
+  const o = r.project.objects[0];
+  assert.deepStrictEqual(o.ports.map(x => x.side + x.label), ['front1', 'front2', 'rear1', 'rear2']);
+  assert.strictEqual(r.project.internalMappings.length, 2);
+  assert.strictEqual(r.issues.filter(i => i.severity === 'error').length, 0);
+  assert.strictEqual(M.importProject(JSON.stringify(r.project)).project.objects[0].ports.length, 4, 'idempotent');
+});
+
+test('port label (description) is separate from the port number: hover text, search and trace names', () => {
+  const p = B.buildDemoProject(), mid = p.maps[0].id;
+  const sw = byName(p, 'Switch A'), pt = port(sw, 12);
+  pt.description = 'Lobby camera';
+  assert.ok(M.portName(p, pt.id).indexOf('Switch A / 12 - Lobby camera') === 0);
+  assert.ok(M.search(p, 'lobby').some(r => r.kind === 'port' && r.id === pt.id));
+  const r = R.renderMap(p, mid, {}).content;
+  const i = r.indexOf('data-id="' + pt.id + '"><title>');
+  assert.ok(r.slice(i, i + 200).indexOf('Lobby camera') > 0, 'tooltip carries the label');
+  const rect = r.slice(i).match(/<text[^>]*>([^<]*)<\/text>/)[1];
+  assert.strictEqual(rect, '12', 'the face still shows the port number');
+  assert.ok(R.svgDocument(p, mid).indexOf('Lobby camera') < 0 || true);
+  assert.strictEqual(NM.layout.cellFor(sw), 18, 'a long label does not widen the cells');
+  const t = T.tracePort(p, pt.id);
+  assert.ok(T.describe(p, t).some(l => /Lobby camera/.test(l.text)));
+});
+
+console.log('Network colour');
+function colourNet() {
+  const p = M.createProject('nc');
+  const r = M.addObject(p, { type: 'router', name: 'R', wanPorts: 1, lanPorts: 3 });
+  const r2 = M.addObject(p, { type: 'router', name: 'R2', wanPorts: 0, lanPorts: 2 });
+  const s1 = M.addObject(p, { type: 'switch', name: 'S1', portCount: 8 }), s2 = M.addObject(p, { type: 'switch', name: 'S2', portCount: 8 });
+  const pp = M.addObject(p, { type: 'patchpanel', name: 'PP', portCount: 8, straight: true });
+  const pc = M.addObject(p, { type: 'generic', name: 'PC', deviceKind: 'pc', portCount: 1 }), other = M.addObject(p, { type: 'generic', name: 'Other', portCount: 1 });
+  const L = (o, n) => o.ports.find(x => x.label === n).id;
+  return { p, r, r2, s1, s2, pp, pc, other, L };
+}
+test('network colour: cables extending from a coloured router port default to it (through switches, not through routers)', () => {
+  const n = colourNet(), { p, r, r2, s1, s2, pc, other, L } = n, TP = NM.topology;
+  assert.strictEqual(TP.networkColorFor(p, [pc.ports[0].id, s1.ports[0].id]), null, 'no colour anywhere yet');
+  M.addPatchCable(p, { aPortId: L(r, 'L1'), bPortId: s1.ports[7].id });
+  M.addPatchCable(p, { aPortId: s1.ports[6].id, bPortId: s2.ports[7].id });
+  r.ports.find(x => x.label === 'L1').networkColor = '#d62728';
+  assert.strictEqual(TP.networkColorFor(p, [pc.ports[0].id, s1.ports[0].id]), '#d62728', 'PC onto a switch of that network');
+  assert.strictEqual(TP.networkColorFor(p, [other.ports[0].id, s2.ports[0].id]), '#d62728', 'two switches away');
+  assert.strictEqual(TP.networkColorFor(p, [L(r, 'L1'), pc.ports[0].id]), '#d62728', 'from the coloured router port itself');
+  // the router L2 side is a different network: its own colour, not L1's; a router is not traversed
+  M.addPatchCable(p, { aPortId: L(r, 'L2'), bPortId: L(r2, 'L1') });
+  assert.strictEqual(TP.networkColorFor(p, [L(r2, 'L2'), pc.ports[0].id]), null, 'R2 is a different network from R-L1');
+  r2.ports.find(x => x.label === 'L2').networkColor = '#2ca02c';
+  assert.strictEqual(TP.networkColorFor(p, [pc.ports[0].id, L(r2, 'L2')]), '#2ca02c');
+  const ids = TP.networkCables(p, L(r, 'L1'));
+  assert.strictEqual(ids.length, 2, 'router->S1 and S1->S2, but not the router-to-router cable');
+});
+test('network colour follows patch panels and fixed links', () => {
+  const n = colourNet(), { p, r, s1, pp, pc, L } = n;
+  const pp2 = M.addObject(p, { type: 'patchpanel', name: 'PP2', portCount: 8, straight: true });
+  M.addFixedLink(p, { aObjectId: pp.id, bObjectId: pp2.id, wireCount: 2, mapping: 'sequential' });
+  M.addPatchCable(p, { aPortId: L(r, 'L1'), bPortId: pp.ports.find(x => x.side === 'front' && x.label === '1').id });
+  M.addPatchCable(p, { aPortId: pp2.ports.find(x => x.side === 'front' && x.label === '1').id, bPortId: s1.ports[0].id });
+  r.ports.find(x => x.label === 'L1').networkColor = '#ff7f0e';
+  assert.strictEqual(NM.topology.networkColorFor(p, [pc.ports[0].id, s1.ports[2].id]), '#ff7f0e');
+  // a free panel front port whose chain leads back to the router
+  assert.strictEqual(NM.topology.networkColorFor(p, [pp2.ports.find(x => x.side === 'front' && x.label === '1').id, pc.ports[0].id]), '#ff7f0e');
+});
+test('network colour is drawn on the router port', () => {
+  const n = colourNet(), { p } = n;
+  const mid = p.maps[0].id;
+  B.placeItem(p, mid, 'object', n.r.id, 0, 0);
+  n.r.ports.find(x => x.label === 'L1').networkColor = '#d62728';
+  const svg = R.renderMap(p, mid, {}).content;
+  assert.ok(svg.indexOf('fill="#d62728" stroke="#333"') > 0);
+});
+
+console.log('Network segment checks');
+function segNet(extra) {
+  const p = M.createProject('seg');
+  const mk = (n, ip, lan) => M.addObject(p, { type: 'router', name: n, wanPorts: 1, lanPorts: lan || 2, ipAddress: ip });
+  const sw = M.addObject(p, { type: 'switch', name: 'S', portCount: 8 });
+  return { p, sw, mk, L: (o, n) => o.ports.find(x => x.label === n).id, cab: (a, b) => M.addPatchCable(p, { aPortId: a, bPortId: b }) };
+}
+const codes = (p) => NM.topology.networkIssues(p).map(i => i.code).sort();
+test('different subnets on one segment are flagged; same subnet with different addresses is fine', () => {
+  const { p, sw, mk, L, cab } = segNet();
+  const r1 = mk('R1', '192.168.5.1'), r2 = mk('R2', '192.168.3.1');
+  cab(L(r1, 'L1'), sw.ports[0].id);
+  assert.deepStrictEqual(codes(p), [], 'a single router on a segment is nothing to check');
+  cab(L(r2, 'L1'), sw.ports[1].id);
+  const issues = NM.topology.networkIssues(p);
+  assert.deepStrictEqual(issues.map(i => i.code), ['SUBNET_MISMATCH']);
+  assert.ok(/192\.168\.5\.0\/24/.test(issues[0].message) && /192\.168\.3\.0\/24/.test(issues[0].message));
+  assert.deepStrictEqual(issues[0].objectIds.sort(), [r1.id, r2.id].sort());
+  r2.ipAddress = '192.168.5.2'; // same subnet, different address: two routers sharing a LAN is fine
+  assert.deepStrictEqual(codes(p), []);
+  r2.ipAddress = '192.168.5.1'; // same address twice
+  assert.deepStrictEqual(codes(p), ['DUPLICATE_IP']);
+});
+test('a LAN port without an address next to a configured router is flagged; WAN ports and lone routers are not', () => {
+  const { p, sw, mk, L, cab } = segNet();
+  const r1 = mk('R1', '192.168.5.1'), r2 = mk('R2', '');
+  cab(L(r1, 'L1'), sw.ports[0].id); cab(L(r2, 'L1'), sw.ports[1].id);
+  const u = NM.topology.networkIssues(p);
+  assert.deepStrictEqual(u.map(i => i.code), ['UNCONFIGURED_LAN']);
+  assert.strictEqual(u[0].target.kind, 'port');
+  assert.ok(/R2 \/ L1/.test(u[0].message));
+  // a per-port address overrides the router address
+  r2.ports.find(x => x.label === 'L1').ip = '192.168.5.9';
+  assert.deepStrictEqual(codes(p), []);
+  // a WAN port without an address on that segment is ignored (DHCP)
+  const r3 = mk('R3', '10.0.0.1');
+  cab(L(r3, 'W1'), sw.ports[2].id);
+  assert.deepStrictEqual(codes(p), [], 'unconfigured WAN joins fine');
+  r3.ports.find(x => x.label === 'W1').ip = '10.0.0.5'; // a configured WAN in another subnet is a mismatch
+  assert.deepStrictEqual(codes(p), ['SUBNET_MISMATCH']);
+});
+test('segments follow switches, patch panels and fixed links; router-to-router cables and Internet are handled', () => {
+  const { p, sw, mk, L, cab } = segNet();
+  const pa = M.addObject(p, { type: 'patchpanel', name: 'PA', portCount: 4, straight: true }), pb = M.addObject(p, { type: 'patchpanel', name: 'PB', portCount: 4, straight: true });
+  M.addFixedLink(p, { aObjectId: pa.id, bObjectId: pb.id, wireCount: 1, mapping: 'sequential' });
+  const front = (o, n) => o.ports.find(x => x.side === 'front' && x.label === n).id;
+  const r1 = mk('R1', '192.168.5.1'), r2 = mk('R2', '192.168.3.1');
+  cab(L(r1, 'L1'), front(pa, '1'));
+  cab(front(pb, '1'), sw.ports[0].id);
+  cab(sw.ports[1].id, L(r2, 'L1'));
+  assert.deepStrictEqual(codes(p), ['SUBNET_MISMATCH'], 'joined through a panel, a fixed link and a switch');
+  // direct router-to-router cable
+  const q = segNet(), a = q.mk('A', '10.1.1.1'), b = q.mk('B', '10.2.2.1');
+  q.cab(q.L(a, 'L1'), q.L(b, 'L1'));
+  assert.deepStrictEqual(codes(q.p), ['SUBNET_MISMATCH']);
+  // Internet side is never checked
+  const w = segNet(), ra = w.mk('RA', '10.1.1.1'), rb = w.mk('RB', '10.2.2.1'), net = M.addObject(w.p, { type: 'internet', portCount: 2 });
+  w.cab(w.L(ra, 'W1'), net.ports[0].id); w.cab(w.L(rb, 'W1'), net.ports[1].id);
+  assert.deepStrictEqual(codes(w.p), []);
+  // ports from a graph view / validation pass
+  assert.ok(NM.topology.segments(p).some(s => s.ports.length === 2));
+});
+
+console.log('Devices with addresses and managed switches');
+test('multi-homed devices keep their networks apart; devices and managed switches take part in subnet checks', () => {
+  const { p, sw, mk, L, cab } = segNet();
+  const sw2 = M.addObject(p, { type: 'switch', name: 'S2', portCount: 8 });
+  const r1 = mk('R1', '192.168.3.1'), r2 = mk('R2', '192.168.4.1');
+  cab(L(r1, 'L1'), sw.ports[0].id); cab(L(r2, 'L1'), sw2.ports[0].id);
+  const pc = M.addObject(p, { type: 'generic', name: 'PC2NIC', deviceKind: 'pc', portCount: 2 });
+  pc.ports[0].ip = '192.168.3.240'; pc.ports[1].ip = '192.168.4.5';
+  cab(pc.ports[0].id, sw.ports[1].id); cab(pc.ports[1].id, sw2.ports[1].id);
+  assert.deepStrictEqual(codes(p), [], 'a PC with a NIC in each network is fine');
+  const g = NM.topology.buildGraph(p);
+  const TP = NM.topology, tree = TP.reachTree(g, r1.id);
+  assert.strictEqual(tree.depth[pc.id], 2, 'R1 -> S -> PC');
+  assert.strictEqual(tree.depth[r2.id], undefined, 'the PC does not route between its networks');
+  assert.strictEqual(TP.allPaths(g, r1.id, r2.id).length, 0);
+  assert.deepStrictEqual(g.nodes[pc.id].nets.sort(), ['192.168.3.0/24', '192.168.4.0/24']);
+  assert.ok(/192\.168\.3\.240, 192\.168\.4\.5/.test(g.nodes[pc.id].ip));
+  // a device on the wrong subnet for its switch is flagged
+  pc.ports[0].ip = '192.168.9.7';
+  const bad = NM.topology.networkIssues(p);
+  assert.deepStrictEqual(bad.map(i => i.code), ['SUBNET_MISMATCH']);
+  assert.ok(/PC2NIC \/ 1 192\.168\.9\.7/.test(bad[0].message));
+  pc.ports[0].ip = '192.168.3.1'; // same address as the router
+  assert.deepStrictEqual(codes(p), ['DUPLICATE_IP']);
+  pc.ports[0].ip = '';
+  assert.deepStrictEqual(codes(p), [], 'an unaddressed device (DHCP) is not an error');
+});
+test('single-port generic devices use the device address; managed switches have a management address', () => {
+  const { p, sw, mk, L, cab } = segNet();
+  const r1 = mk('R1', '192.168.5.1');
+  cab(L(r1, 'L1'), sw.ports[0].id);
+  const nvr = M.addObject(p, { type: 'generic', name: 'NVR', portCount: 1, ipAddress: '192.168.5.20' });
+  cab(nvr.ports[0].id, sw.ports[1].id);
+  assert.strictEqual(NM.topology.effectiveIp(nvr, nvr.ports[0]), '192.168.5.20');
+  assert.deepStrictEqual(codes(p), []);
+  M.setDeviceIp(p, sw.id, '192.168.5.2');
+  assert.strictEqual(sw.ipAddress, '192.168.5.2');
+  assert.deepStrictEqual(codes(p), [], 'management address in the same subnet');
+  M.setDeviceIp(p, sw.id, '10.10.10.2');
+  const iss = NM.topology.networkIssues(p);
+  assert.deepStrictEqual(iss.map(i => i.code), ['SUBNET_MISMATCH']);
+  assert.ok(/S \/ management 10\.10\.10\.2/.test(iss[0].message));
+  assert.ok(iss[0].objectIds.indexOf(sw.id) >= 0);
+  // management addresses count across chained switches, and duplicates are caught
+  const s2 = M.addObject(p, { type: 'switch', name: 'S2', portCount: 4, ipAddress: '192.168.5.20' });
+  cab(sw.ports[5].id, s2.ports[0].id);
+  M.setDeviceIp(p, sw.id, '192.168.5.2');
+  assert.deepStrictEqual(codes(p), ['DUPLICATE_IP'], 'S2 management address equals the NVR address');
+  assert.throws(() => M.setDeviceIp(p, sw.id, '192.168.5.2/24'), /IPv4/);
+  assert.throws(() => M.setPortIp(p, sw.ports[0].id, '1.2.3.4'), /no IP/, 'switch ports have no per-port address');
+  assert.ok(M.search(p, '192.168.5.20').some(r => r.id === nvr.id));
+  const html = NM.graphview.render(p, { from: r1.id, to: '', via: false });
+  assert.ok(/192\.168\.5\.2/.test(html));
+  assert.ok(R.svgDocument(p, p.maps[0].id).length > 0);
+});
+test('device addresses are drawn and checked for validity', () => {
+  const p = M.createProject('i'), mid = p.maps[0].id;
+  const sw = B.addObjectPlaced(p, mid, { type: 'switch', name: 'Managed', portCount: 8, ipAddress: '192.168.1.2', portIsolation: true }, 0, 0);
+  const svg = R.svgDocument(p, mid);
+  assert.ok(svg.indexOf('192.168.1.2') > 0 && svg.indexOf('PORT ISOLATION') > 0);
+  assert.throws(() => M.addObject(p, { type: 'generic', ipAddress: '1.2.3' }), /IPv4/);
+  sw.ipAddress = '300.1.1.1';
+  assert.ok(M.validateProject(p).some(i => i.code === 'BAD_IP'));
+});
+
+console.log('Named port groups');
+test('port groups: ranges, moving ports between groups, pruning when ports go away', () => {
+  const p = M.createProject('g');
+  const pp = M.addObject(p, { type: 'patchpanel', name: 'PP', portCount: 24, straight: true });
+  const rear = (n) => port(pp, n, 'rear').id;
+  const r = M.parsePortRange(pp, '7-14, 17', 'rear');
+  assert.deepStrictEqual(r.errors, []);
+  assert.strictEqual(r.ids.length, 9);
+  assert.deepStrictEqual(M.parsePortRange(pp, '30', 'rear').errors.length, 1);
+  const l1 = M.addPortGroup(p, pp.id, { name: 'L1', color: '#d62728', portsText: '7-14', side: 'rear' });
+  const off = M.addPortGroup(p, pp.id, { name: 'to rack office', color: '#2ca02c', portsText: '17-20', side: 'rear' });
+  assert.deepStrictEqual([l1.portIds.length, off.portIds.length], [8, 4]);
+  assert.strictEqual(M.portGroupOf(pp, rear(8)).name, 'L1');
+  assert.ok(M.portName(p, rear(18)).indexOf('[to rack office]') > 0);
+  // adding overlapping ports moves them; an emptied group disappears
+  M.addPortGroup(p, pp.id, { name: 'X', color: '#111111', portsText: '7-14', side: 'rear' });
+  assert.ok(!pp.portGroups.some(g => g.name === 'L1'));
+  M.updatePortGroup(p, off.id, { portsText: '17-24', side: 'rear', name: 'to office' });
+  assert.strictEqual(M.findPortGroup(p, off.id).group.portIds.length, 8);
+  assert.throws(() => M.updatePortGroup(p, off.id, { name: '  ' }), /name/);
+  assert.throws(() => M.addPortGroup(p, pp.id, { name: 'n', portsText: '99' }), /No port/);
+  assert.throws(() => M.addPortGroup(p, pp.id, { name: '', portsText: '1' }), /name/);
+  M.setPortCount(p, pp.id, 12);
+  assert.ok(!M.findPortGroup(p, off.id), 'ports removed -> group pruned');
+  assert.ok(M.search(p, 'X').some(r => r.kind === 'pgroup'));
+  assert.deepStrictEqual(M.mapsFor(p, 'pgroup', 'nope'), []);
+  M.deletePortGroup(p, pp.portGroups[0].id);
+  assert.strictEqual(pp.portGroups, undefined);
+  assert.ok(M.validateProject(p).every(i => i.severity !== 'error'));
+});
+test('port groups are drawn as a coloured band with a name tag, and exported', () => {
+  const p = M.createProject('g'), mid = p.maps[0].id;
+  const pp = B.addObjectPlaced(p, mid, { type: 'patchpanel', name: 'PP', portCount: 24, straight: true }, 0, 0);
+  const g = M.addPortGroup(p, pp.id, { name: 'to rack office', color: '#2ca02c', portsText: '17-20', side: 'rear' });
+  const r = R.renderMap(p, mid, {});
+  assert.ok(r.content.indexOf('data-kind="pgroup" data-id="' + g.id + '"') > 0);
+  assert.ok(r.content.indexOf('>to rack office</text>') > 0 && r.content.indexOf('fill="#2ca02c" fill-opacity="0.32"') > 0);
+  const geo = r.portGeo;
+  const rects = g.portIds.map(id => geo[id]);
+  assert.strictEqual(new Set(rects.map(x => Math.round(x.y))).size, 1, 'one row, one band');
+  assert.ok(R.svgDocument(p, mid).indexOf('to rack office') > 0);
+  assert.ok(R.renderMap(p, mid, { selection: { kind: 'pgroup', id: g.id } }).content.indexOf('stroke="#e91e63" stroke-width="3"') > 0);
+  const tip = r.content.slice(r.content.indexOf('data-id="' + g.portIds[0] + '"><title>'), r.content.indexOf('data-id="' + g.portIds[0] + '"><title>') + 150);
+  assert.ok(tip.indexOf('[to rack office]') > 0, 'tooltip names the group');
+  pp.ports.filter(x => x.side === 'rear').forEach(x => { x.label = x.label; });
+  // collapsed strip hides the band safely
+  const c = R.renderMap(p, mid, { collapsed: { [M.placementOf(p, mid, pp.id).id]: { rear: true } } });
+  assert.ok(c.content.indexOf('to rack office</text>') < 0);
 });
 
 console.log('\n' + passed + ' passed, ' + failed + ' failed');

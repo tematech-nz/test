@@ -1,4 +1,4 @@
-# NetMap data format (schema version 1)
+# NetMap data format (schema version 3)
 
 A project is one JSON object. All records have stable, unique string IDs (prefix + random hex, for example
 `obj_9f2c...`). Names, labels and coordinates are never used as identifiers, so renaming or moving something
@@ -24,11 +24,26 @@ cannot break a connection. Files use LF line endings and are written with 2-spac
 ```
 
 - `type` is one of `rack`, `patchpanel`, `switch`, `router`, `internet`, `socket`, `generic`.
+- Generic equipment may carry `deviceKind` (`pc`, `laptop`, `ap`, `camera`, `printer`, `phone`, `server`; omitted = other), which only
+  selects the icon and default name.
 - `containerId` points at a group, or at a rack (racks hold patch panels, switches and generic objects).
 - `internet` objects (ISP / upstream) have ordinary front ports and an optional `ipAddress` (public IP or circuit note).
 - Routers have an optional `ipAddress` and ports with `"role": "wan"|"lan"` (labels `W1..`, `L1..`) and an optional
-  per-port `"ip"`. IPs are free text (IPv4 with optional /prefix, or IPv6); invalid values produce validation warnings.
-- Switches may also carry `sectionSize` (omitted = plain rows).
+  per-port `"ip"`. IPs are plain IPv4 strings without a prefix (schema 3 strips a `/nn` from older files); the subnet used for network warnings is assumed to be the /24. Invalid values produce validation warnings.
+- Switches may carry (all optional, omitted = default): `sectionSize` (ports per section; omitted = plain rows),
+  `sectionRows` (rows per section, default 1), `portOrder` (`rows`|`columns`, default `columns` when sectionRows > 1),
+  `align` (`center`|`right`), `uplinkSide` (`left`), `uplinkRows`, and `portIsolation` (true). Uplink ports are ports with
+  `"role": "uplink"` (labels `U1..`), always listed after the access ports; `sectionSize` counts access ports only.
+- Any object inside a rack or group may carry `fullWidth: true` (stretch to the container's inner width).
+- Wall sockets, like patch panels, have `front` and `rear` ports with internal mappings (schema 2; files from schema 1 get rear
+  ports and straight-through mappings added when imported). Fixed links join patch panels and wall sockets.
+- Generic devices and switches may carry `ipAddress` (devices: used for a single-port device, per-port `ip` otherwise; switches: the
+  management / web interface address). A segment is a set of devices joined by switches; routers and generic devices never bridge.
+- Router ports may carry `networkColor` (hex), the default colour for patch cables extending from them.
+- Any equipment with ports may carry `portGroups`: `[{ "id", "name", "color", "portIds": [...] }]` (a port is in at most one
+  group; purely visual/organisational).
+- Any port may carry an optional `description` (free text label shown on hover and in descriptions); `label` is the number
+  drawn on the port's face.
 - Patch panels have `front` and `rear` ports and an optional `sectionSize` (ports per visual section; must divide the
   per-side port count, otherwise the automatic split is used). It is cosmetic and never affects connectivity. All other equipment has `front` ports only.
 - A **placement** is the visual position of a group or object on one map. The same record may have placements

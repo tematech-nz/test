@@ -224,7 +224,7 @@ const ok = (m) => console.log('  ok   ' + m);
     await page.evaluate(() => NetMap.app.api.commit('internet', (p) => {
       const M = NetMap.model, B = NetMap.builder;
       const inet = B.addObjectPlaced(p, p.maps[0].id, { type: 'internet', name: 'INTERNET', ipAddress: '203.0.113.1' }, 900, 40);
-      const r = B.addObjectPlaced(p, p.maps[0].id, { type: 'router', name: 'Edge', wanPorts: 1, lanPorts: 2, ipAddress: '192.168.1.1/24' }, 900, 140);
+      const r = B.addObjectPlaced(p, p.maps[0].id, { type: 'router', name: 'Edge', wanPorts: 1, lanPorts: 2, ipAddress: '192.168.1.1' }, 900, 140);
       const sw = p.objects.find(o => o.name === 'Switch A');
       M.addPatchCable(p, { aPortId: inet.ports[0].id, bPortId: r.ports[0].id });
       M.addPatchCable(p, { aPortId: r.ports[1].id, bPortId: sw.ports.find(x => x.label === '5').id });
@@ -557,6 +557,369 @@ const ok = (m) => console.log('  ok   ' + m);
     await page.click('#btnUndo'); await page.click('#btnUndo'); await page.click('#btnUndo');
   });
 
+
+  await step('switch: 2x4 sections, uplinks, alignment, full width and port isolation from the properties panel', async () => {
+    const ids = await page.evaluate(() => {
+      let out;
+      NetMap.app.api.commit('rack+switch', (p) => {
+        const B = NetMap.builder, mid = p.maps[0].id;
+        const rack = B.addObjectPlaced(p, mid, { type: 'rack', name: 'SwRack' }, 4400, 40);
+        const sw = B.addObjectPlaced(p, mid, { type: 'switch', name: 'Sw16', portCount: 16, containerId: rack.id });
+        out = { rack: rack.id, sw: sw.id };
+      });
+      NetMap.app.api.goTo('object', out.sw, NetMap.app.S.p.maps[0].id);
+      return out;
+    });
+    const sel = (f, v) => page.selectOption('#detailsPane select[data-f="' + f + '"]', String(v));
+    const sw = () => page.evaluate((i) => { const o = NetMap.app.S.p.objects.find(x => x.id === i); const geo = NetMap.app.S.geo.portGeo; const pl = NetMap.app.S.p.placements.find(q => q.refId === i); return { o: JSON.parse(JSON.stringify(o)), x1: geo[o.ports[0].id].x, y1: geo[o.ports[0].id].y, x2: geo[o.ports[1].id].x, y2: geo[o.ports[1].id].y, w: pl.w, plx: pl.x }; }, ids.sw);
+    await sel('sectionSize', 8);
+    await sel('sectionRows', 2);
+    let s = await sw();
+    assert.strictEqual(s.o.sectionSize, 8); assert.strictEqual(s.o.sectionRows, 2);
+    assert.ok(s.x1 === s.x2 && s.y1 < s.y2, 'port 1 above port 2');
+    await page.fill('#detailsPane #upInput', '2');
+    await page.click('#detailsPane button[data-act="applyUplinks"]');
+    s = await sw();
+    assert.strictEqual(s.o.ports.filter(p => p.role === 'uplink').length, 2);
+    await page.check('#detailsPane input[data-f="fullWidth"]');
+    s = await sw();
+    const rackW = await page.evaluate((i) => NetMap.app.S.p.placements.find(q => q.refId === i).w, ids.rack);
+    assert.ok(s.o.fullWidth && s.w >= rackW - 20 - 1, 'stretched to the rack width: ' + s.w + ' vs ' + rackW);
+    const left = s.x1;
+    await sel('align', 'center'); const c = (await sw()).x1;
+    await sel('align', 'right'); const r = (await sw()).x1;
+    assert.ok(left < c && c < r, 'alignment moves the ports: ' + [left, c, r]);
+    await shot('switch-layout');
+    await page.check('#detailsPane input[data-f="portIsolation"]');
+    assert.strictEqual((await sw()).o.portIsolation, true);
+    assert.ok((await page.innerHTML('#vp')).indexOf('PORT ISOLATION') > 0);
+    for (let i = 0; i < 7; i++) await page.click('#btnUndo');
+  });
+
+
+  await step('device icons: create a PC via the toolbar, switch it to an access point, see the icon', async () => {
+    await page.click('#toolbar button[data-add="generic"]');
+    await page.selectOption('#dlg select[name="deviceKind"]', 'pc');
+    await page.click('#dlg button[data-btn="ok"]');
+    await page.waitForTimeout(100);
+    const name = await page.evaluate(() => NetMap.app.S.p.objects.filter(o => o.deviceKind === 'pc').pop().name);
+    assert.ok(/^PC \d+$/.test(name), name);
+    assert.ok((await page.locator('#vp [data-icon="pc"]').count()) >= 1, 'PC icon drawn');
+    await page.selectOption('#detailsPane select[data-f="deviceKind"]', 'ap');
+    await page.waitForTimeout(100);
+    assert.ok((await page.locator('#vp [data-icon="ap"]').count()) >= 1, 'AP icon after changing the type');
+    await shot('device-icons');
+    await page.click('#btnUndo'); await page.click('#btnUndo');
+  });
+
+  await step('wall socket rear: fixed link between a patch panel and a wall socket from the UI', async () => {
+    await page.evaluate(() => NetMap.app.api.commit('socket link', (p) => {
+      const B = NetMap.builder, mid = p.maps[0].id;
+      B.addObjectPlaced(p, mid, { type: 'patchpanel', name: 'PP-L', portCount: 8, straight: true }, 5200, 40);
+      B.addObjectPlaced(p, mid, { type: 'socket', name: 'WS-L', portCount: 2 }, 5200, 300);
+    }));
+    await page.click('#toolbar button[data-act="newLink"]');
+    const opts = await page.$$eval('#dlg select[name="a"] option', (os) => os.map(o => o.textContent));
+    assert.ok(opts.some(o => /WS-L \(wall socket\)/.test(o)), opts.join('|'));
+    await page.selectOption('#dlg select[name="a"]', { label: 'PP-L' });
+    await page.selectOption('#dlg select[name="b"]', { label: 'WS-L (wall socket)' });
+    await page.fill('#dlg input[name="n"]', '2');
+    await page.click('#dlg button[data-btn="ok"]');
+    await page.waitForTimeout(150);
+    const link = await page.evaluate(() => { const S = NetMap.app.S, l = S.p.fixedLinks[S.p.fixedLinks.length - 1], idx = NetMap.model.buildIndex(S.p); return { n: l.wires.length, b: idx.objects[l.bObjectId].name, side: idx.ports[l.wires[0].bPortId].side }; });
+    assert.deepStrictEqual(link, { n: 2, b: 'WS-L', side: 'rear' });
+    assert.ok(/fixed link/i.test(await page.innerText('#detailsPane')));
+    await page.click('#btnUndo'); await page.click('#btnUndo');
+  });
+
+
+  await step('W hotkey: one-shot wire from the selected port keeps the new cable selected; plain W toggles the repeating tool', async () => {
+    const ids = await page.evaluate(() => {
+      let out;
+      NetMap.app.api.commit('w test', (p) => {
+        const B = NetMap.builder, mid = p.maps[0].id;
+        const a = B.addObjectPlaced(p, mid, { type: 'switch', name: 'WA', portCount: 4 }, 6000, 40), b = B.addObjectPlaced(p, mid, { type: 'switch', name: 'WB', portCount: 4 }, 6000, 200);
+        out = { a1: a.ports[0].id, a2: a.ports[1].id, b1: b.ports[0].id, b2: b.ports[1].id, b3: b.ports[2].id };
+      });
+      NetMap.app.api.goTo('port', out.a1, NetMap.app.S.p.maps[0].id);
+      return out;
+    });
+    const port = (id) => page.locator('#vp rect[data-kind="port"][data-id="' + id + '"]');
+    const count = () => page.evaluate(() => NetMap.app.S.p.patchCables.length);
+    const c0 = await count();
+    await page.evaluate((id) => NetMap.app.api.select({ kind: 'port', id }), ids.a1);
+    await page.keyboard.press('w');
+    const t1 = await page.evaluate(() => NetMap.app.S.tool);
+    assert.ok(t1 && t1.type === 'patch' && t1.once && t1.pending, 'one-shot wire started from the selected port');
+    await port(ids.b1).click({ force: true });
+    await page.waitForTimeout(100);
+    assert.strictEqual(await count(), c0 + 1);
+    const after = await page.evaluate(() => ({ tool: NetMap.app.S.tool, sel: NetMap.app.S.sel }));
+    assert.strictEqual(after.tool, null, 'tool ended after the second port');
+    assert.strictEqual(after.sel.kind, 'cable', 'the new cable stays selected');
+    assert.ok(await page.locator('#detailsPane select[data-f="colorPreset"]').count() === 1, 'colour can be adjusted right away');
+    // plain W (nothing port-selected) = repeating tool, W again leaves it
+    await page.evaluate(() => NetMap.app.api.select(null));
+    await page.keyboard.press('w');
+    assert.ok(await page.evaluate(() => !!NetMap.app.S.tool && !NetMap.app.S.tool.once));
+    await port(ids.a2).click({ force: true }); await port(ids.b2).click({ force: true });
+    assert.ok(await page.evaluate(() => !!NetMap.app.S.tool), 'repeating tool stays active');
+    await page.keyboard.press('w');
+    assert.strictEqual(await page.evaluate(() => NetMap.app.S.tool), null);
+    // typing a w in a text field must not start the tool
+    await page.evaluate((id) => NetMap.app.api.select({ kind: 'object', id: NetMap.app.S.p.objects.find(o => o.name === 'WA').id }), ids.a1);
+    await page.fill('#detailsPane input[data-f="name"]', 'WAw');
+    assert.strictEqual(await page.evaluate(() => NetMap.app.S.tool), null);
+    // 'Patch cable from here' behaves like W
+    await page.evaluate((id) => NetMap.app.api.select({ kind: 'port', id }), ids.b3);
+    await page.click('#detailsPane button[data-act="startPatchFrom"]');
+    assert.ok(await page.evaluate(() => !!NetMap.app.S.tool && NetMap.app.S.tool.once));
+    await page.keyboard.press('Escape');
+    for (let i = 0; i < 4; i++) await page.click('#btnUndo');
+  });
+
+  await step('port label shows on hover; the face keeps the number', async () => {
+    const id = await page.evaluate(() => { const o = NetMap.app.S.p.objects.find(x => x.name === 'Switch A'); return o.ports.find(x => x.label === '12').id; });
+    await page.evaluate((i) => NetMap.app.api.select({ kind: 'port', id: i }), id);
+    await page.fill('#detailsPane input[data-f="pdesc"]', 'Uplink to core');
+    await page.keyboard.press('Tab');
+    const g = page.locator('#vp g[data-kind="port"][data-id="' + id + '"]');
+    assert.ok(/Uplink to core/.test(await g.locator('title').innerHTML()), 'tooltip has the label');
+    assert.strictEqual((await g.locator('text').textContent()).trim(), '12', 'face shows the number');
+    await page.click('#btnUndo');
+  });
+
+
+  await step('network colour: set on a router port, new cables default to it, manual colour still wins, recolour action', async () => {
+    const ids = await page.evaluate(() => {
+      let out;
+      NetMap.app.api.commit('net test', (p) => {
+        const B = NetMap.builder, mid = p.maps[0].id;
+        const r = B.addObjectPlaced(p, mid, { type: 'router', name: 'NetR', wanPorts: 1, lanPorts: 2 }, 7000, 40);
+        const s = B.addObjectPlaced(p, mid, { type: 'switch', name: 'NetS', portCount: 4 }, 7000, 240);
+        const d = B.addObjectPlaced(p, mid, { type: 'generic', name: 'NetPC', deviceKind: 'pc', portCount: 1 }, 7300, 240);
+        out = { l1: r.ports.find(x => x.label === 'L1').id, s1: s.ports[0].id, s2: s.ports[1].id, s3: s.ports[2].id, pc: d.ports[0].id };
+      });
+      NetMap.app.api.goTo('port', out.l1, NetMap.app.S.p.maps[0].id);
+      return out;
+    });
+    const color = (a) => page.evaluate((x) => { const p = NetMap.app.S.p, c = p.patchCables.find(k => k.aPortId === x.a || k.bPortId === x.a); return c && c.color; }, { a });
+    const port = (id) => page.locator('#vp rect[data-kind="port"][data-id="' + id + '"]');
+    await page.evaluate((id) => NetMap.app.api.select({ kind: 'port', id }), ids.l1);
+    await page.selectOption('#detailsPane select[data-f="netPreset"]', { label: 'red' });
+    assert.strictEqual(await page.evaluate((id) => NetMap.app.S.p.objects.flatMap(o => o.ports).find(x => x.id === id).networkColor, ids.l1), '#d62728');
+    assert.ok((await page.innerHTML('#vp')).indexOf('fill="#d62728" stroke="#333"') > 0, 'colour bar on the router port');
+    await page.click('#toolbar button[data-act="patchTool"]');
+    await page.selectOption('#toolbar select[data-f="toolPreset"]', 'auto');
+    assert.strictEqual(await page.$eval('#toolbar select[data-f="toolPreset"]', (s) => s.value), 'auto', 'tool can be set to Auto (network colour)');
+    await port(ids.l1).click({ force: true }); await port(ids.s1).click({ force: true });
+    assert.strictEqual(await color(ids.s1), '#d62728', 'router -> switch cable takes the network colour');
+    await port(ids.pc).click({ force: true }); await port(ids.s2).click({ force: true });
+    assert.strictEqual(await color(ids.pc), '#d62728', 'PC -> switch cable too: it extends from that network');
+    await page.selectOption('#toolbar select[data-f="toolPreset"]', { label: 'green' });
+    await port(ids.s3).click({ force: true });
+    const free = await page.evaluate(() => NetMap.app.S.p.objects.find(o => o.name === 'NetPC').ports[0].id);
+    assert.ok(free);
+    await page.keyboard.press('Escape');
+    // manual override on a cable
+    const cid = await page.evaluate((a) => NetMap.app.S.p.patchCables.find(k => k.aPortId === a || k.bPortId === a).id, ids.pc);
+    await page.evaluate((id) => NetMap.app.api.select({ kind: 'cable', id }), cid);
+    await page.selectOption('#detailsPane select[data-f="colorPreset"]', { label: 'yellow' });
+    assert.strictEqual(await color(ids.pc), '#f2c200');
+    // changing the network colour offers to match the existing downstream cables
+    await page.evaluate((id) => NetMap.app.api.select({ kind: 'port', id }), ids.l1);
+    await page.selectOption('#detailsPane select[data-f="netPreset"]', { label: 'orange' });
+    await page.waitForSelector('#dlg[open]');
+    assert.ok(/Match colours on downstream cables/.test(await page.innerText('#dlg')) && /different colour/.test(await page.innerText('#dlg')));
+    await page.click('#dlg button[data-btn="no"]');
+    assert.strictEqual(await color(ids.pc), '#f2c200', 'declined: cables unchanged');
+    await page.selectOption('#detailsPane select[data-f="netPreset"]', { label: 'red' });
+    await page.waitForSelector('#dlg[open]');
+    await page.click('#dlg button[data-btn="yes"]');
+    await page.waitForTimeout(100);
+    assert.strictEqual(await color(ids.pc), '#d62728', 'accepted: downstream cables match the network colour');
+    assert.strictEqual(await color(ids.s1), '#d62728');
+    // the explicit button works too
+    await page.evaluate((id) => NetMap.app.api.select({ kind: 'cable', id }), cid);
+    await page.selectOption('#detailsPane select[data-f="colorPreset"]', { label: 'yellow' });
+    await page.evaluate((id) => NetMap.app.api.select({ kind: 'port', id }), ids.l1);
+    await page.click('#detailsPane button[data-act="recolorNet"]');
+    await page.waitForSelector('#dlg[open]');
+    await page.click('#dlg button[data-btn="yes"]');
+    await page.waitForTimeout(100);
+    assert.strictEqual(await color(ids.pc), '#d62728', 'recoloured, including the manual one');
+    await shot('network-colour');
+    for (let i = 0; i < 12; i++) await page.click('#btnUndo');
+    await page.evaluate(() => { NetMap.app.S.tool = null; });
+  });
+
+
+  await step('IPv4 only: bad addresses are rejected in the form and in the properties', async () => {
+    await page.click('#toolbar button[data-add="router"]');
+    await page.fill('#dlg input[name="name"]', 'BadIpR');
+    await page.fill('#dlg input[name="ipAddress"]', '192.168.1.1/24');
+    await page.click('#dlg button[data-btn="ok"]');
+    assert.ok(await page.evaluate(() => document.getElementById('dlg').open), 'dialog stays open');
+    assert.ok(/IPv4/.test(await page.innerText('#dlg .form-err')));
+    await page.fill('#dlg input[name="ipAddress"]', '192.168.1.1');
+    await page.click('#dlg button[data-btn="ok"]');
+    await page.waitForTimeout(100);
+    assert.strictEqual(await page.evaluate(() => NetMap.app.S.p.objects.find(o => o.name === 'BadIpR').ipAddress), '192.168.1.1');
+    await page.fill('#detailsPane input[data-f="ipAddress"]', '10.0.0.1/8');
+    await page.keyboard.press('Tab');
+    await page.waitForTimeout(100);
+    assert.strictEqual(await page.evaluate(() => NetMap.app.S.p.objects.find(o => o.name === 'BadIpR').ipAddress), '192.168.1.1', 'unchanged');
+    assert.ok(/IPv4/.test(await page.innerText('#toast')));
+    assert.strictEqual(await page.inputValue('#detailsPane input[data-f="ipAddress"]'), '192.168.1.1', 'field restored');
+    await page.fill('#detailsPane input[data-f="ipAddress"]', '172.16.0.1');
+    await page.keyboard.press('Tab');
+    assert.strictEqual(await page.evaluate(() => NetMap.app.S.p.objects.find(o => o.name === 'BadIpR').ipAddress), '172.16.0.1');
+    await page.click('#btnUndo'); await page.click('#btnUndo');
+  });
+
+  await step('network warnings: joining different subnets asks first, then flags the routers', async () => {
+    const ids = await page.evaluate(() => {
+      let out;
+      NetMap.app.api.commit('subnets', (p) => {
+        const B = NetMap.builder, M = NetMap.model, mid = p.maps[0].id;
+        const r1 = B.addObjectPlaced(p, mid, { type: 'router', name: 'SubR1', wanPorts: 1, lanPorts: 2, ipAddress: '192.168.5.1' }, 8000, 40);
+        const r2 = B.addObjectPlaced(p, mid, { type: 'router', name: 'SubR2', wanPorts: 1, lanPorts: 2, ipAddress: '192.168.3.1' }, 8300, 40);
+        const s = B.addObjectPlaced(p, mid, { type: 'switch', name: 'SubS', portCount: 4 }, 8100, 260);
+        M.addPatchCable(p, { aPortId: r1.ports.find(x => x.label === 'L1').id, bPortId: s.ports[0].id });
+        out = { l2: r2.ports.find(x => x.label === 'L1').id, s2: s.ports[1].id, r2: r2.id };
+      });
+      NetMap.app.api.goTo('object', out.r2, NetMap.app.S.p.maps[0].id);
+      return out;
+    });
+    const port = (id) => page.locator('#vp rect[data-kind="port"][data-id="' + id + '"]');
+    const count = () => page.evaluate(() => NetMap.app.S.p.patchCables.length);
+    assert.ok(await page.isHidden('#btnAlerts'), 'no warning yet');
+    const c0 = await count();
+    await page.click('#toolbar button[data-act="patchTool"]');
+    await port(ids.l2).click({ force: true }); await port(ids.s2).click({ force: true });
+    await page.waitForSelector('#dlg[open]');
+    const txt = await page.innerText('#dlg');
+    assert.ok(/Network:/.test(txt) && /192\.168\.5\.0\/24/.test(txt) && /192\.168\.3\.0\/24/.test(txt) && /Do you want to continue/.test(txt), txt);
+    await page.click('#dlg button[data-btn="no"]');
+    assert.strictEqual(await count(), c0, 'declined');
+    await port(ids.l2).click({ force: true }); await port(ids.s2).click({ force: true });
+    await page.waitForSelector('#dlg[open]');
+    await page.click('#dlg button[data-btn="yes"]');
+    await page.waitForTimeout(150);
+    assert.strictEqual(await count(), c0 + 1);
+    await page.keyboard.press('Escape');
+    assert.ok(await page.isVisible('#btnAlerts') && /Network warnings \(1\)/.test(await page.innerText('#btnAlerts')));
+    assert.ok((await page.locator('#vp g[pointer-events="none"] circle[fill="#d32f2f"]').count()) >= 2, 'alert badges on both routers');
+    await shot('network-warning');
+    await page.click('#btnAlerts');
+    assert.ok(/Different subnets share one network segment/.test(await page.innerText('#issueList')));
+    // fixing the address clears it
+    await page.evaluate((id) => NetMap.app.api.select({ kind: 'object', id }), ids.r2);
+    await page.fill('#detailsPane input[data-f="ipAddress"]', '192.168.5.2');
+    await page.keyboard.press('Tab');
+    await page.waitForTimeout(100);
+    assert.ok(await page.isHidden('#btnAlerts'), 'same subnet, different address: fine');
+    for (let i = 0; i < 4; i++) await page.click('#btnUndo');
+    await page.evaluate(() => { NetMap.app.S.tool = null; });
+  });
+
+
+  await step('addresses for generic devices and managed switches from the UI', async () => {
+    await page.click('#toolbar button[data-add="generic"]');
+    await page.selectOption('#dlg select[name="deviceKind"]', 'pc');
+    await page.fill('#dlg input[name="portCount"]', '2');
+    await page.fill('#dlg input[name="ipAddress"]', '999.1.1.1');
+    await page.click('#dlg button[data-btn="ok"]');
+    assert.ok(/IPv4/.test(await page.innerText('#dlg .form-err')), 'bad address refused');
+    await page.fill('#dlg input[name="ipAddress"]', '');
+    await page.click('#dlg button[data-btn="ok"]');
+    await page.waitForTimeout(100);
+    const inputs = page.locator('#detailsPane input[data-f="pip"]');
+    assert.strictEqual(await inputs.count(), 2, 'one address field per port');
+    await inputs.nth(0).fill('192.168.3.240'); await page.keyboard.press('Tab');
+    await page.locator('#detailsPane input[data-f="pip"]').nth(1).fill('192.168.4.5'); await page.keyboard.press('Tab');
+    const ips = await page.evaluate(() => { const o = NetMap.app.S.p.objects.filter(x => x.deviceKind === 'pc').pop(); return o.ports.map(p => p.ip); });
+    assert.deepStrictEqual(ips, ['192.168.3.240', '192.168.4.5']);
+    assert.ok((await page.innerHTML('#vp')).indexOf('PC') > 0);
+    // managed switch
+    await page.evaluate((id) => NetMap.app.api.select({ kind: 'object', id }), await page.evaluate(() => NetMap.app.S.p.objects.find(o => o.name === 'Switch A').id));
+    assert.ok(/Management IP/.test(await page.innerText('#detailsPane')));
+    await page.fill('#detailsPane input[data-f="ipAddress"]', '192.168.1.2');
+    await page.keyboard.press('Tab');
+    assert.strictEqual(await page.evaluate(() => NetMap.app.S.p.objects.find(o => o.name === 'Switch A').ipAddress), '192.168.1.2');
+    assert.ok((await page.innerHTML('#vp')).indexOf('192.168.1.2') > 0, 'drawn in the switch header');
+    for (let i = 0; i < 5; i++) await page.click('#btnUndo');
+  });
+
+
+  await step('named port groups: Ctrl+select, G to name, edit ranges and colour, add from the form, link from a group', async () => {
+    const ids = await page.evaluate(() => {
+      let out;
+      NetMap.app.api.commit('pg test', (p) => {
+        const B = NetMap.builder, mid = p.maps[0].id;
+        const a = B.addObjectPlaced(p, mid, { type: 'patchpanel', name: 'PgA', portCount: 24, straight: true }, 9000, 40);
+        const b = B.addObjectPlaced(p, mid, { type: 'patchpanel', name: 'PgB', portCount: 24, straight: true }, 9000, 300);
+        out = { a: a.id, b: b.id };
+      });
+      NetMap.app.api.goTo('object', out.a, NetMap.app.S.p.maps[0].id);
+      return out;
+    });
+    const rear = (obj, n) => page.evaluate(([o, l]) => NetMap.app.S.p.objects.find(x => x.id === o).ports.find(q => q.side === 'rear' && q.label === l).id, [obj, String(n)]);
+    const port = async (obj, n) => page.locator('#vp rect[data-kind="port"][data-id="' + await rear(obj, n) + '"]');
+    await (await port(ids.a, 17)).click({ modifiers: ['Control'], force: true });
+    await (await port(ids.a, 20)).click({ modifiers: ['Control', 'Shift'], force: true });
+    assert.strictEqual(await page.evaluate(() => NetMap.app.S.pgroup.ids.length), 4);
+    await page.keyboard.press('g');
+    await page.waitForSelector('#dlg[open]');
+    await page.click('#dlg button[data-btn="ok"]');
+    assert.ok(/name/i.test(await page.innerText('#dlg .form-err')), 'a name is required');
+    await page.fill('#dlg input[name="name"]', 'to rack office');
+    await page.selectOption('#dlg select[name="color"]', { label: 'green' });
+    await page.click('#dlg button[data-btn="ok"]');
+    await page.waitForTimeout(100);
+    const g = await page.evaluate(() => { const o = NetMap.app.S.p.objects.find(x => x.name === 'PgA'); return o.portGroups[0]; });
+    assert.deepStrictEqual([g.name, g.color, g.portIds.length], ['to rack office', '#2ca02c', 4]);
+    assert.strictEqual(await page.evaluate(() => NetMap.app.S.sel.kind), 'pgroup');
+    assert.ok((await page.innerHTML('#vp')).indexOf('>to rack office</text>') > 0, 'name tag drawn');
+    await shot('port-group');
+    // edit the ports and name in the properties
+    await page.fill('#detailsPane input[data-f="pgPorts"]', '7-14');
+    await page.keyboard.press('Tab');
+    assert.strictEqual(await page.evaluate(() => NetMap.app.S.p.objects.find(x => x.name === 'PgA').portGroups[0].portIds.length), 8);
+    await page.fill('#detailsPane input[data-f="pgName"]', 'L1');
+    await page.keyboard.press('Tab');
+    await page.selectOption('#detailsPane select[data-f="pgPreset"]', { label: 'red' });
+    const g2 = await page.evaluate(() => NetMap.app.S.p.objects.find(x => x.name === 'PgA').portGroups[0]);
+    assert.deepStrictEqual([g2.name, g2.color], ['L1', '#d62728']);
+    // a second group from the object form
+    await page.evaluate((id) => NetMap.app.api.select({ kind: 'object', id }), ids.a);
+    await page.fill('#detailsPane #pgNewName', 'to rack office');
+    await page.fill('#detailsPane #pgNewPorts', '17-20');
+    await page.click('#detailsPane button[data-act="addPGroup"]');
+    await page.waitForTimeout(100);
+    assert.strictEqual(await page.evaluate(() => NetMap.app.S.p.objects.find(x => x.name === 'PgA').portGroups.length), 2);
+    // bad range is reported
+    await page.evaluate((id) => NetMap.app.api.select({ kind: 'object', id }), ids.a);
+    await page.fill('#detailsPane #pgNewName', 'bad'); await page.fill('#detailsPane #pgNewPorts', '99');
+    await page.click('#detailsPane button[data-act="addPGroup"]');
+    assert.ok(/No port/.test(await page.innerText('#toast')));
+    // fixed link from the group
+    const gid = await page.evaluate(() => NetMap.app.S.p.objects.find(x => x.name === 'PgA').portGroups.find(q => q.name === 'L1').id);
+    await page.evaluate((id) => NetMap.app.api.select({ kind: 'pgroup', id }), gid);
+    await page.click('#detailsPane button[data-act="linkFromGroup"]');
+    assert.strictEqual(await page.evaluate(() => NetMap.app.S.pgroup.ids.length), 8);
+    await (await port(ids.b, 1)).hover({ force: true });
+    await page.waitForTimeout(80);
+    await (await port(ids.b, 1)).click({ force: true });
+    await page.waitForTimeout(120);
+    assert.strictEqual(await page.evaluate(() => NetMap.app.S.p.fixedLinks[NetMap.app.S.p.fixedLinks.length - 1].wires.length), 8);
+    // delete the group again
+    await page.evaluate((id) => NetMap.app.api.select({ kind: 'pgroup', id }), gid);
+    await page.click('#detailsPane button[data-act="deletePGroup"]');
+    assert.ok(!(await page.evaluate((id) => !!NetMap.model.findPortGroup(NetMap.app.S.p, id), gid)));
+    for (let i = 0; i < 12; i++) await page.click('#btnUndo');
+  });
+
   await step('autosave survives a refresh', async () => {
     await page.click('#btnMode'); // back to view mode flushes the save
     const name = await page.evaluate(() => NetMap.app.S.p.name);
@@ -574,7 +937,7 @@ const ok = (m) => console.log('  ok   ' + m);
     const [dl] = await Promise.all([page.waitForEvent('download'), page.click('#dlg button[data-btn="json"]')]);
     const file = await dl.path();
     const text = fs.readFileSync(file, 'utf8');
-    assert.ok(text.indexOf('\r') < 0 && text.indexOf('"schemaVersion": 1') > 0);
+    assert.ok(text.indexOf('\r') < 0 && text.indexOf('"schemaVersion": 3') > 0);
     await page.evaluate(() => NetMap.app.api.loadProject(NetMap.model.createProject('blank')));
     await page.click('#btnFile'); await page.click('#dlg button[data-btn="import"]').catch(() => {});
     await page.keyboard.press('Escape');

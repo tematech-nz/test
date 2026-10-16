@@ -25,6 +25,35 @@ Try it: File -> Load demo project (two rooms, a fixed link between racks, a wall
 - **Safety nets for patch cables**: connecting two ports that are in different groups asks "Do you want to continue?"
   first (racks in the same group connect freely, and ports outside any group are never questioned). Hovering "Reconnect end A/B"
   circles the cable end that would move, and action buttons have tooltips explaining what they do.
+- **Wire hotkey (W)**: in edit mode `W` starts the patch cable tool. If a free port is selected (or you click "Patch cable from
+  here"), it draws one cable from that port and ends after the second click, leaving the new cable selected so you can set its
+  colour and type at once. With nothing selected `W` toggles the repeating tool (press `W` or `Esc` to stop).
+- **Port numbers and labels**: the face of a port shows its number; give a port a descriptive **label** (e.g. "Lobby camera")
+  in the properties and it appears on hover, in search results and in trace/cable descriptions without widening the port.
+- **Network colour**: give a router port a network colour (port properties). New patch cables that extend from it - through
+  switches, patch panels and fixed links, but not through other routers - default to that colour when the patch cable tool
+  is on "Auto (network colour)" (the default; pick a colour in the tool's list to override, and you can always change a single
+  cable by hand). The port shows a colour bar. When you set or change the colour the app offers to **match the colours of the
+  downstream cables that already exist**; "Recolour this network's cables" in the port properties does it on demand.
+- **IP addresses and network warnings**: IP fields accept plain IPv4 only (four numbers 0-255; a `/24` or IPv6 is refused with a
+  message). Routers have a LAN address (device IP, or per port) and optional per-port addresses. The app checks every layer-2
+  segment (devices joined through switches, patch panels, fixed links and cables) and raises a **Network warnings** alert (header
+  button, a red `!` on the routers, entries in the validation list) when: routers on one segment have **different subnets** (e.g.
+  192.168.5.1 next to 192.168.3.1), a router **LAN port has no address** while sharing a segment with a configured one, or the
+  **same address** is used twice. Several routers sharing a subnet with different addresses is fine; WAN ports without an address
+  (DHCP) and the Internet side are ignored. Connecting something that would create such a warning asks "Do you want to continue?".
+- **Addresses on any device**: generic devices (a one-port NVR, a PC with two NICs...) take an IP address too: a device address
+  for a single-port device, or one address per port (192.168.3.240 on port 1, 192.168.4.5 on port 2). A device never joins its
+  networks together - the Graph view treats it as an endpoint, so no path leads from one NIC's network to the other. **Managed
+  switches** have a **Management IP** (the web interface address) which belongs to the switch's own network segment, not to any
+  port. Devices and switch management addresses take part in the subnet checks (different subnet, duplicate address); devices
+  without an address (DHCP) are ignored. VLANs are not modelled, so a deliberate VLAN split on one switch will show as a warning.
+- **Named port groups**: give a set of ports a name and colour - e.g. rear 17-20 "to rack office" and 7-14 "L1" - and the
+  ports get a colour-coded band with the name tag on the map (also in exports). Create one by Ctrl+clicking the ports (Shift for a
+  range) and pressing `G`, or in the equipment's properties ("Port groups": a name, ports like `7-14, 17`, colour). Click a band to
+  edit its name, colour and ports, or use "Fixed link from this group..." to start a link from exactly those rear ports. A port
+  belongs to one group; groups work on any equipment with ports, are searchable, and the group name appears in the port tooltip
+  and in trace/cable descriptions.
 - **Cable colours**: pick white, grey, green, yellow, blue, orange, red or black from the list, or `Custom...` for an RGB
   picker. The patch cable tool has its own colour list for new cables. Cables are drawn with a thin dark outline so white and
   yellow stay visible.
@@ -32,8 +61,22 @@ Try it: File -> Load demo project (two rooms, a fixed link between racks, a wall
 - **Fixed links**: installed cabling between two patch panels with N numbered wires, each mapped rear port to rear port.
   Mapping is never assumed; "sequential" is an explicit choice. Endpoints and wires change only through
   "Edit installed wiring", which shows a review of every added, deleted or changed wire before applying (one undo step).
-- **Switch sections**: switches use plain rows by default; in edit mode (or when creating one) choose "N per section" in the
-  properties to get equal sections in one line like patch panels (e.g. 3 x 8 for 24 ports), or "None" to go back.
+- **Switch layout**: switches use plain rows by default. In the properties (or when creating one) choose ports per section
+  and the section shape - e.g. a 16-port switch as two 2 x 4 sections (ports numbered 1 above 2, or across then down) - plus
+  **uplink ports** (any number, shown in a purple block next to the sections: in line by default, left or right side) and
+  **align** left / center / right to match the real faceplate. "Full width" stretches equipment to the inner width of its rack
+  or group and keeps following the rack when you resize it. Switches can also have **port isolation**.
+- **Port isolation** (switches): access ports cannot talk to each other, only to uplink ports. The Graph view honours it:
+  devices on an isolated switch's access ports reach the uplink side but not each other directly. They can only meet by going
+  up an uplink and back down (e.g. through a router, shown as a longer path through the switch twice); if nothing upstream turns
+  the traffic around, they cannot reach each other at all. A U-turn on the same link is only allowed at a router.
+- **Device icons**: generic equipment has a "Device type" (PC / workstation, laptop, Wi-Fi access point, camera, printer, IP
+  phone, server, or other) that names it ("PC 1", "AP 1") and draws a small icon (original SVG artwork in `js/icons.js`,
+  works offline and in exports).
+- **Wall sockets** have a front jack and a rear termination per port, joined by an internal mapping (straight-through by
+  default, like a patch panel). The rear takes installed cabling: create a **fixed link between a patch panel and a wall
+  socket** (also via Ctrl+click port groups). A device plugged into the socket is traced through the outlet and the
+  panel to wherever the cabling leads; in the Graph view such an outlet is just part of the cable path.
 - **Routers** (`+ Router`): choose how many WAN and LAN ports (0-96 in total, changeable later) and an optional IP
   address; every port can have its own IP too. WAN and LAN ports sit in separate strips that fold with `^`.
   Routers cable like switches and are searchable by IP.
@@ -45,7 +88,7 @@ Try it: File -> Load demo project (two rooms, a fixed link between racks, a wall
   (what can be reached, via which cables, how many hops, what is unreachable). Pick a target device to list every
   route to it, shortest first, with redundant paths highlighted. Switches and routers pass traffic through; Internet,
   wall sockets and generic devices are endpoints unless you tick "Allow paths through Internet". Subnets
-  are shown on devices that have IPs with a prefix (e.g. 192.168.1.1/24). Click a device or link to jump to it on the map.
+  are shown on devices that have IP addresses (IP addresses are plain IPv4 such as 192.168.1.1 with no /prefix, and the subnet is assumed to be the /24 for now). Click a device or link to jump to it on the map.
   It is theoretical physical reachability: no routing, VLAN or firewall rules are modelled.
 - **Quick fixed link from ports** (edit mode, mouse): Ctrl+click free rear ports on one patch panel to group them
   (Shift+Ctrl+click extends a range). Move the pointer over another panel: the same number of rear ports, starting

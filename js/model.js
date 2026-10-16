@@ -3,7 +3,15 @@
   'use strict';
   var NM = g.NetMap = g.NetMap || {};
 
-  var SCHEMA_VERSION = 1;
+  var SCHEMA_VERSION = 3;
+  /* equipment that terminates installed (fixed) cabling on a rear side and presents front jacks */
+  var TERMINATIONS = { patchpanel: true, socket: true };
+  function isTermination(o) { return !!(o && TERMINATIONS[o.type]); }
+  /* generic equipment can be drawn with an icon */
+  var DEVICE_KINDS = [['other', 'Other', 'Device'], ['pc', 'PC / workstation', 'PC'], ['laptop', 'Laptop', 'Laptop'], ['ap', 'Wi-Fi access point', 'AP'],
+    ['camera', 'Camera', 'Camera'], ['printer', 'Printer', 'Printer'], ['phone', 'IP phone', 'IP phone'], ['server', 'Server', 'Server']];
+  function deviceKindInfo(k) { for (var i = 0; i < DEVICE_KINDS.length; i++) if (DEVICE_KINDS[i][0] === k) return DEVICE_KINDS[i]; return DEVICE_KINDS[0]; }
+  function typeLabel(o) { return o.type === 'generic' && o.deviceKind ? deviceKindInfo(o.deviceKind)[1] : TYPE_LABELS[o.type]; }
   var OBJECT_TYPES = ['rack', 'patchpanel', 'switch', 'router', 'internet', 'socket', 'generic'];
   var TYPE_LABELS = { rack: 'Rack', patchpanel: 'Patch panel', switch: 'Switch', router: 'Router', internet: 'Internet / ISP', socket: 'Wall socket', generic: 'Generic' };
   var CABLE_STATUS = ['planned', 'active', 'faulty', 'spare'];
@@ -93,7 +101,7 @@
     idx = idx || buildIndex(p);
     var pt = idx.ports[portId], o = idx.portObj[portId];
     if (!pt || !o) return '(missing port)';
-    return o.name + ' / ' + pt.label + (pt.side === 'rear' ? ' (rear)' : (o.type === 'patchpanel' ? ' (front)' : ''));
+    return o.name + ' / ' + pt.label + (pt.side === 'rear' ? ' (rear)' : (isTermination(o) ? ' (front)' : '')) + (pt.description ? ' - ' + pt.description : '') + (portGroupOf(o, portId) ? ' [' + portGroupOf(o, portId).name + ']' : '');
   }
   function wireName(link, wire) { return link.name + ' w' + wire.number; }
 
@@ -196,6 +204,84 @@
       containerId = par ? par.id : null;
     }
   }
+  /* ---------- named port groups: colour-coded sets of ports on one piece of equipment ("to rack office", "L1") ---------- */
+  function findPortGroup(p, groupId) {
+    for (var i = 0; i < p.objects.length; i++) {
+      var gs = p.objects[i].portGroups || [];
+      for (var j = 0; j < gs.length; j++) if (gs[j].id === groupId) return { obj: p.objects[i], group: gs[j] };
+    }
+    return null;
+  }
+  function prunePortGroups(o) {
+    if (!o.portGroups) return;
+    var ids = {};
+    o.ports.forEach(function (pt) { ids[pt.id] = true; });
+    o.portGroups.forEach(function (g) { g.portIds = g.portIds.filter(function (x) { return ids[x]; }); });
+    o.portGroups = o.portGroups.filter(function (g) { return g.portIds.length; });
+    if (!o.portGroups.length) delete o.portGroups;
+  }
+  /* "7-14, 17" -> port ids on `side` (any side when omitted) whose numeric label is in range or whose label matches */
+  function parsePortRange(o, text, side) {
+    var ports = o.ports.filter(function (pt) { return !side || pt.side === side; }), out = [], errors = [];
+    String(text || '').split(/[,;\s]+/).filter(Boolean).forEach(function (tok) {
+      var m = /^(\d+)-(\d+)$/.exec(tok), hit = [];
+      if (m) {
+        var a = Math.min(+m[1], +m[2]), b = Math.max(+m[1], +m[2]);
+        hit = ports.filter(function (pt) { return /^\d+$/.test(pt.label) && +pt.label >= a && +pt.label <= b; });
+      } else hit = ports.filter(function (pt) { return String(pt.label).toLowerCase() === tok.toLowerCase(); });
+      if (!hit.length) errors.push('No port "' + tok + '"' + (side ? ' on the ' + side + ' side' : ''));
+      hit.forEach(function (pt) { if (out.indexOf(pt.id) < 0) out.push(pt.id); });
+    });
+    var order = {}; o.ports.forEach(function (pt, i) { order[pt.id] = i; });
+    out.sort(function (x, y) { return order[x] - order[y]; });
+    return { ids: out, errors: errors };
+  }
+  /* spec: {name, color, portIds | (portsText + side)}; ports already in another group of the object move to this one */
+  function addPortGroup(p, objectId, spec) {
+    var o = buildIndex(p).objects[objectId];
+    if (!o) throw new Error('Object not found');
+    var ids = spec.portIds;
+    if (!ids) { var r = parsePortRange(o, spec.portsText, spec.side); if (r.errors.length) throw new Error(r.errors.join('; ')); ids = r.ids; }
+    var own = {}; o.ports.forEach(function (pt) { own[pt.id] = true; });
+    ids = ids.filter(function (x, i) { return own[x] && ids.indexOf(x) === i; });
+    if (!ids.length) throw new Error('Choose at least one port for the group');
+    var name = String(spec.name || '').trim();
+    if (!name) throw new Error('Give the group a name');
+    o.portGroups = o.portGroups || [];
+    o.portGroups.forEach(function (g) { g.portIds = g.portIds.filter(function (x) { return ids.indexOf(x) < 0; }); });
+    var grp = { id: uid('pgp'), name: name, color: spec.color || '#1f77b4', portIds: ids };
+    o.portGroups.push(grp);
+    prunePortGroups(o);
+    return grp;
+  }
+  function updatePortGroup(p, groupId, patch) {
+    var f = findPortGroup(p, groupId);
+    if (!f) throw new Error('Port group not found');
+    var g = f.group, o = f.obj;
+    if (patch.name !== undefined) { if (!String(patch.name).trim()) throw new Error('Give the group a name'); g.name = String(patch.name).trim(); }
+    if (patch.color !== undefined) g.color = patch.color;
+    if (patch.portsText !== undefined) {
+      var r = parsePortRange(o, patch.portsText, patch.side);
+      if (r.errors.length) throw new Error(r.errors.join('; '));
+      if (!r.ids.length) throw new Error('A group needs at least one port (delete it to remove it)');
+      o.portGroups.forEach(function (x) { if (x !== g) x.portIds = x.portIds.filter(function (i) { return r.ids.indexOf(i) < 0; }); });
+      g.portIds = r.ids;
+      prunePortGroups(o);
+    }
+    return g;
+  }
+  function deletePortGroup(p, groupId) {
+    var f = findPortGroup(p, groupId);
+    if (!f) return;
+    f.obj.portGroups = f.obj.portGroups.filter(function (g) { return g.id !== groupId; });
+    if (!f.obj.portGroups.length) delete f.obj.portGroups;
+  }
+  function portGroupOf(o, portId) {
+    var gs = o.portGroups || [];
+    for (var i = 0; i < gs.length; i++) if (gs[i].portIds.indexOf(portId) >= 0) return gs[i];
+    return null;
+  }
+
   function mapsFor(p, kind, id) {
     var idx = buildIndex(p), out = [];
     function add(ref) {
@@ -203,6 +289,7 @@
     }
     if (kind === 'map') return [id];
     if (kind === 'group' || kind === 'object') add(id);
+    else if (kind === 'pgroup') { var fg = findPortGroup(p, id); if (fg) add(fg.obj.id); }
     else if (kind === 'port') { var o = idx.portObj[id]; if (o) add(o.id); }
     else if (kind === 'cable') { var c = idx.cables[id]; if (c) [c.aPortId, c.bPortId].forEach(function (pid) { if (idx.portObj[pid]) add(idx.portObj[pid].id); }); }
     else if (kind === 'link') { var l = idx.links[id]; if (l) { add(l.aObjectId); add(l.bObjectId); } }
@@ -236,15 +323,79 @@
     var s = obj && obj.sectionSize;
     return s && n % s === 0 ? s : defaultSectionSize(n);
   }
+  /* switch ports that are not uplinks */
+  function accessPorts(o) { return o.ports.filter(function (x) { return x.role !== 'uplink'; }); }
   function setSectionSize(p, objectId, size) {
     var o = buildIndex(p).objects[objectId];
     if (!o || (o.type !== 'patchpanel' && o.type !== 'switch')) throw new Error('Sections apply to patch panels and switches');
-    var n = o.ports.filter(function (x) { return x.side === 'front'; }).length;
-    if (o.type === 'switch' && !size) { delete o.sectionSize; return; } // switches default to plain rows
+    var n = o.ports.filter(function (x) { return x.side === 'front' && x.role !== 'uplink'; }).length;
+    if (o.type === 'switch' && !size) { delete o.sectionSize; delete o.sectionRows; return; } // switches default to plain rows
     if (!(size >= 1) || size !== Math.floor(size) || n % size !== 0) {
       throw new Error('Sections must be equal: ' + n + ' ports cannot be split into sections of ' + size + ' (valid: ' + validSectionSizes(n).join(', ') + ')');
     }
     o.sectionSize = size;
+    if (o.sectionRows && size % o.sectionRows !== 0) delete o.sectionRows;
+  }
+
+  /* ---- switch layout and uplinks ---- */
+  function validSectionRows(size) {
+    var out = [];
+    for (var d = 1; d <= Math.min(size, 8); d++) if (size % d === 0) out.push(d);
+    return out;
+  }
+  function setUplinkPorts(p, objectId, n) {
+    var idx = buildIndex(p), o = idx.objects[objectId];
+    if (!o || o.type !== 'switch') throw new Error('Uplink ports apply to switches');
+    if (!(n >= 0 && n <= 16) || n !== Math.floor(n)) throw new Error('Uplink ports: 0-16');
+    var list = o.ports.filter(function (x) { return x.role === 'uplink'; });
+    if (n > list.length) {
+      for (var i = list.length + 1; i <= n; i++) o.ports.push({ id: uid('prt'), label: 'U' + i, side: 'front', role: 'uplink', portType: '', speed: '', media: '' });
+    } else if (n < list.length) {
+      var drop = list.slice(n);
+      drop.forEach(function (pt) { if (idx.portUse[pt.id]) throw new Error('Uplink ' + pt.label + ' is in use; disconnect it first'); });
+      o.ports = o.ports.filter(function (pt) { return drop.indexOf(pt) < 0; });
+      prunePortGroups(o);
+    }
+  }
+  /* patch: sectionRows, portOrder ('rows'|'columns'), align ('left'|'center'|'right'), uplinkSide ('left'|'right'), portIsolation */
+  function setSwitchLayout(p, objectId, patch) {
+    var o = buildIndex(p).objects[objectId];
+    if (!o || o.type !== 'switch') throw new Error('Not a switch');
+    if (patch.sectionRows !== undefined) {
+      var r = patch.sectionRows;
+      if (!o.sectionSize) throw new Error('Choose ports per section first');
+      if (!(r >= 1) || r !== Math.floor(r) || o.sectionSize % r !== 0) throw new Error('Rows must divide the section evenly (valid: ' + validSectionRows(o.sectionSize).join(', ') + ')');
+      if (r === 1) delete o.sectionRows; else o.sectionRows = r;
+    }
+    if (patch.portOrder !== undefined) {
+      if (patch.portOrder !== 'rows' && patch.portOrder !== 'columns') throw new Error('Port order is rows or columns');
+      o.portOrder = patch.portOrder;
+    }
+    if (patch.align !== undefined) {
+      if (['left', 'center', 'right'].indexOf(patch.align) < 0) throw new Error('Align is left, center or right');
+      if (patch.align === 'left') delete o.align; else o.align = patch.align;
+    }
+    if (patch.uplinkSide !== undefined) {
+      if (patch.uplinkSide !== 'left' && patch.uplinkSide !== 'right') throw new Error('Uplinks sit on the left or right');
+      if (patch.uplinkSide === 'right') delete o.uplinkSide; else o.uplinkSide = 'left';
+    }
+    if (patch.uplinkRows !== undefined) {
+      if (!(patch.uplinkRows >= 1 && patch.uplinkRows <= 8) || patch.uplinkRows !== Math.floor(patch.uplinkRows)) throw new Error('Uplink rows: 1-8');
+      if (patch.uplinkRows === 1) delete o.uplinkRows; else o.uplinkRows = patch.uplinkRows;
+    }
+    if (patch.portIsolation !== undefined) { if (patch.portIsolation) o.portIsolation = true; else delete o.portIsolation; }
+  }
+  /* equipment in a rack/group can be stretched to the container's full inner width */
+  function setDeviceKind(p, objectId, kind) {
+    var o = buildIndex(p).objects[objectId];
+    if (!o || o.type !== 'generic') throw new Error('Device icons apply to generic equipment');
+    if (deviceKindInfo(kind)[0] !== kind) throw new Error('Unknown device kind');
+    if (kind === 'other') delete o.deviceKind; else o.deviceKind = kind;
+  }
+  function setFullWidth(p, objectId, on) {
+    var o = buildIndex(p).objects[objectId];
+    if (!o || o.type === 'rack') throw new Error('Full width applies to equipment');
+    if (on) o.fullWidth = true; else delete o.fullWidth;
   }
 
   /* routers: WAN ports first, then LAN ports; each port has a role and an optional IP address */
@@ -256,7 +407,7 @@
   }
   function makePorts(type, count, labels) {
     var ports = [], i;
-    if (type === 'patchpanel') {
+    if (type === 'patchpanel' || type === 'socket') {
       for (i = 1; i <= count; i++) ports.push({ id: uid('prt'), label: String(i), side: 'front' });
       for (i = 1; i <= count; i++) ports.push({ id: uid('prt'), label: String(i), side: 'rear' });
     } else if (type === 'rack') {
@@ -283,21 +434,33 @@
     }
     if (n < 0 || n > 96 || n !== Math.floor(n)) throw new Error('Port count must be 0-96');
     var same = p.objects.filter(function (x) { return x.type === o.type; }).length;
-    var defName = o.type === 'internet' ? (same ? 'INTERNET ' + (same + 1) : 'INTERNET') : TYPE_LABELS[o.type] + ' ' + (same + 1);
+    var kind = o.type === 'generic' && o.deviceKind && deviceKindInfo(o.deviceKind)[0] === o.deviceKind && o.deviceKind !== 'other' ? o.deviceKind : null;
+    if (o.type === 'generic') same = p.objects.filter(function (x) { return x.type === 'generic' && (x.deviceKind || null) === kind; }).length;
+    var defName = o.type === 'internet' ? (same ? 'INTERNET ' + (same + 1) : 'INTERNET') : (kind ? deviceKindInfo(kind)[2] : TYPE_LABELS[o.type]) + ' ' + (same + 1);
     var obj = {
       id: uid('obj'), type: o.type, name: o.name || defName,
       location: o.location || '', description: o.description || '',
       containerId: o.containerId || null, ports: o.type === 'router' ? routerPorts(wan, lan) : makePorts(o.type, n)
     };
-    if (o.type === 'router' || o.type === 'internet') obj.ipAddress = o.ipAddress || '';
+    if (o.type === 'router' || o.type === 'internet' || (hasDeviceIp(o) && o.ipAddress)) {
+      if (!isValidIp(o.ipAddress)) throw new Error(IP_ERROR);
+      obj.ipAddress = String(o.ipAddress || '').trim();
+    }
+    if (kind) obj.deviceKind = kind;
     if (o.type === 'rack') obj.rackHeight = o.rackHeight || 42;
     p.objects.push(obj);
+    if (o.type === 'switch') {
+      if (o.uplinkPorts) setUplinkPorts(p, obj.id, o.uplinkPorts);
+      if (o.portIsolation) obj.portIsolation = true;
+    }
     if ((o.type === 'patchpanel' || o.type === 'switch') && o.sectionSize) {
       var sz = o.sectionSize;
       if (!(sz >= 1) || sz !== Math.floor(sz) || n % sz !== 0) { p.objects.pop(); throw new Error('Sections must be equal: ' + n + ' ports cannot be split into sections of ' + sz + ' (valid: ' + validSectionSizes(n).join(', ') + ')'); }
       obj.sectionSize = sz;
+      if (o.sectionRows > 1) { try { setSwitchLayout(p, obj.id, { sectionRows: o.sectionRows }); } catch (e) { p.objects.pop(); throw e; } }
     }
-    if (o.type === 'patchpanel' && o.straight) autoMapPanel(p, obj.id);
+    var straight = o.straight === undefined ? o.type === 'socket' : o.straight; // wall sockets are straight-through unless told otherwise
+    if (isTermination(obj) && straight) autoMapPanel(p, obj.id);
     return obj;
   }
 
@@ -317,9 +480,9 @@
     if (o.type === 'rack') throw new Error('Racks have no ports');
     if (o.type === 'router') throw new Error('Use setRouterPorts for routers');
     if (n < 0 || n > 96 || n !== Math.floor(n)) throw new Error('Port count must be 0-96');
-    function used(pt) { return idx.portUse[pt.id] || idx.mapByPort[pt.id]; }
+    function used(pt) { return idx.portUse[pt.id]; }
     function adjust(side) {
-      var list = o.ports.filter(function (pt) { return pt.side === side; });
+      var list = o.ports.filter(function (pt) { return pt.side === side && pt.role !== 'uplink'; });
       if (n > list.length) {
         for (var i = list.length + 1; i <= n; i++) {
           var pt = { id: uid('prt'), label: String(i), side: side };
@@ -329,17 +492,20 @@
       } else if (n < list.length) {
         var drop = list.slice(n);
         drop.forEach(function (pt) { if (used(pt)) throw new Error('Port ' + pt.label + ' is in use; disconnect it first'); });
+        var gone = {}; drop.forEach(function (pt) { gone[pt.id] = true; });
+        p.internalMappings = p.internalMappings.filter(function (m) { return !gone[m.aPortId] && !gone[m.bPortId]; });
         o.ports = o.ports.filter(function (pt) { return drop.indexOf(pt) < 0; });
       }
     }
-    if (o.type === 'patchpanel') {
+    if (isTermination(o)) {
       adjust('front'); adjust('rear');
       if (o.sectionSize && n % o.sectionSize !== 0) delete o.sectionSize;
     } else {
       adjust('front');
-      if (o.sectionSize && n % o.sectionSize !== 0) delete o.sectionSize;
+      if (o.sectionSize && n % o.sectionSize !== 0) { delete o.sectionSize; delete o.sectionRows; }
     }
-    o.ports.sort(function (a, b) { return (a.side === b.side ? 0 : (a.side === 'front' ? -1 : 1)); });
+    prunePortGroups(o);
+    o.ports.sort(function (a, b) { return (a.side === b.side ? (a.role === 'uplink' ? 1 : 0) - (b.role === 'uplink' ? 1 : 0) : (a.side === 'front' ? -1 : 1)); });
   }
 
   /* routers: set WAN and LAN counts independently; ports in use cannot be removed */
@@ -358,6 +524,7 @@
       }
     }
     adjust('wan', wan, 'W'); adjust('lan', lan, 'L');
+    prunePortGroups(o);
     o.ports.sort(function (a, b) { return (a.role === b.role ? 0 : (a.role === 'wan' ? -1 : 1)); });
   }
 
@@ -405,7 +572,7 @@
   /* ---------- internal mappings ---------- */
   function addInternalMapping(p, objectId, aPortId, bPortId) {
     var idx = buildIndex(p), o = idx.objects[objectId];
-    if (!o || o.type !== 'patchpanel') throw new Error('Internal mappings belong to patch panels');
+    if (!isTermination(o)) throw new Error('Internal mappings belong to patch panels and wall sockets');
     var a = idx.ports[aPortId], b = idx.ports[bPortId];
     if (!a || !b || idx.portObj[aPortId] !== o || idx.portObj[bPortId] !== o) throw new Error('Ports must belong to the panel');
     if (a.side === b.side) throw new Error('A mapping joins a front port to a rear port');
@@ -420,7 +587,7 @@
   /* explicit straight-through action: front N <-> rear N for unmapped pairs */
   function autoMapPanel(p, objectId) {
     var o = p.objects.filter(function (x) { return x.id === objectId; })[0];
-    if (!o || o.type !== 'patchpanel') throw new Error('Not a patch panel');
+    if (!isTermination(o)) throw new Error('Not a patch panel or wall socket');
     var idx = buildIndex(p), n = 0;
     var front = o.ports.filter(function (x) { return x.side === 'front'; });
     var rear = o.ports.filter(function (x) { return x.side === 'rear'; });
@@ -453,7 +620,7 @@
 
   function addFixedLink(p, o) {
     var idx = buildIndex(p), a = idx.objects[o.aObjectId], b = idx.objects[o.bObjectId];
-    if (!a || !b || a.type !== 'patchpanel' || b.type !== 'patchpanel') throw new Error('Fixed links join two patch panels');
+    if (!isTermination(a) || !isTermination(b)) throw new Error('Fixed links join patch panels and wall sockets');
     if (a === b) throw new Error('A fixed link needs two different panels');
     var pairs = null, n;
     if (o.pairs) {
@@ -499,7 +666,7 @@
   function validateLinkDraft(p, linkId, draft) {
     var idx = buildIndex(p), errs = [];
     var a = idx.objects[draft.aObjectId], b = idx.objects[draft.bObjectId];
-    if (!a || !b || a.type !== 'patchpanel' || b.type !== 'patchpanel') errs.push('Both endpoints must be patch panels');
+    if (!isTermination(a) || !isTermination(b)) errs.push('Both endpoints must be patch panels or wall sockets');
     if (a && b && a === b) errs.push('Endpoints must be different panels');
     if (!draft.wires.length) errs.push('A link needs at least one wire');
     var nums = {}, used = {};
@@ -602,13 +769,28 @@
     if (kind === 'group') removeGroupCore(p, id); else removeObjectCore(p, id);
   }
 
-  /* accepts IPv4 (optionally /prefix), or anything with ':' that looks like IPv6; empty is fine */
+  /* plain IPv4 only: four numbers 0-255 (no /prefix, no IPv6 for now); empty is fine */
+  /* device-level address: routers (LAN), switches (management / web interface), generic devices, Internet; per-port addresses: routers, generic devices, Internet */
+  function hasDeviceIp(o) { return !!o && (o.type === 'router' || o.type === 'internet' || o.type === 'switch' || o.type === 'generic'); }
+  function hasPortIp(o) { return !!o && (o.type === 'router' || o.type === 'internet' || o.type === 'generic'); }
+  var IP_ERROR = 'Not a valid IPv4 address: use four numbers 0-255 such as 192.168.1.1 (no /prefix)';
   function isValidIp(s) {
-    s = String(s || '').trim();
+    s = String(s == null ? '' : s).trim();
     if (!s) return true;
-    var m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})(?:\/(\d{1,2}))?$/.exec(s);
-    if (m) return [m[1], m[2], m[3], m[4]].every(function (x) { return +x <= 255; }) && (m[5] === undefined || +m[5] <= 32);
-    return /^[0-9a-fA-F:.]+(?:\/\d{1,3})?$/.test(s) && s.indexOf(':') >= 0;
+    var m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(s);
+    return !!m && [m[1], m[2], m[3], m[4]].every(function (x) { return +x <= 255 && String(+x) === x.replace(/^0+(?=\d)/, ''); });
+  }
+  function setDeviceIp(p, objectId, ip) {
+    var o = buildIndex(p).objects[objectId];
+    if (!o || !hasDeviceIp(o)) throw new Error('This equipment has no IP address (routers, switches, generic devices and the Internet object do)');
+    if (!isValidIp(ip)) throw new Error(IP_ERROR);
+    o.ipAddress = String(ip || '').trim();
+  }
+  function setPortIp(p, portId, ip) {
+    var idx = buildIndex(p), o = idx.portObj[portId];
+    if (!o || !hasPortIp(o)) throw new Error('Ports of this equipment have no IP address (routers, generic devices and the Internet object do)');
+    if (!isValidIp(ip)) throw new Error(IP_ERROR);
+    idx.ports[portId].ip = String(ip || '').trim();
   }
 
   /* ---------- search ---------- */
@@ -624,11 +806,12 @@
     p.maps.forEach(function (m) { if (has(m.name, m.location, m.id)) out.push({ kind: 'map', id: m.id, title: m.name, sub: 'Map' + (m.location ? ' - ' + m.location : '') }); });
     p.groups.forEach(function (x) { if (has(x.name, x.location, x.description, x.id)) out.push({ kind: 'group', id: x.id, title: x.name, sub: 'Group' + (x.location ? ' - ' + x.location : '') }); });
     p.objects.forEach(function (o) {
-      if (has(o.name, o.location, o.description, o.id, TYPE_LABELS[o.type], o.ipAddress)) out.push({ kind: 'object', id: o.id, title: o.name, sub: TYPE_LABELS[o.type] + (o.location ? ' - ' + o.location : '') });
+      if (has(o.name, o.location, o.description, o.id, typeLabel(o), o.ipAddress)) out.push({ kind: 'object', id: o.id, title: o.name, sub: typeLabel(o) + (o.location ? ' - ' + o.location : '') });
     });
     p.objects.forEach(function (o) {
+      (o.portGroups || []).forEach(function (g) { if (has(g.name, g.id)) out.push({ kind: 'pgroup', id: g.id, title: g.name, sub: 'Port group on ' + o.name + ' (' + g.portIds.length + ' ports)' }); });
       o.ports.forEach(function (pt) {
-        if (has(pt.label, pt.id, pt.ip, pt.role)) out.push({ kind: 'port', id: pt.id, title: o.name + ' / ' + pt.label + (pt.side === 'rear' ? ' (rear)' : ''), sub: 'Port' + (pt.ip ? ' - ' + pt.ip : '') });
+        if (has(pt.label, pt.id, pt.ip, pt.role, pt.description)) out.push({ kind: 'port', id: pt.id, title: o.name + ' / ' + pt.label + (pt.side === 'rear' ? ' (rear)' : ''), sub: 'Port' + (pt.description ? ' - ' + pt.description : '') + (pt.ip ? ' - ' + pt.ip : '') });
       });
     });
     p.patchCables.forEach(function (c) { if (has(c.name, c.id)) out.push({ kind: 'cable', id: c.id, title: c.name, sub: 'Patch cable: ' + portName(p, c.aPortId, idx) + ' <-> ' + portName(p, c.bPortId, idx) }); });
@@ -670,6 +853,11 @@
       }
       if (!isValidIp(o.ipAddress)) add('warning', 'BAD_IP', '"' + o.name + '" has an invalid IP address: ' + o.ipAddress, 'object', o.id);
       o.ports.forEach(function (pt) { if (!isValidIp(pt.ip)) add('warning', 'BAD_IP', o.name + ' / ' + pt.label + ' has an invalid IP address: ' + pt.ip, 'port', pt.id); });
+      if (o.portIsolation && !o.ports.some(function (pt) { return pt.role === 'uplink'; })) add('warning', 'ISOLATION_NO_UPLINK', 'Switch "' + o.name + '" has port isolation on but no uplink ports, so its devices can talk to nothing through it', 'object', o.id);
+      (o.portGroups || []).forEach(function (g) {
+        var own = {}; o.ports.forEach(function (pt) { own[pt.id] = true; });
+        if (g.portIds.some(function (x) { return !own[x]; })) add('warning', 'BAD_PORT_GROUP', 'Port group "' + g.name + '" on "' + o.name + '" refers to a missing port', 'object', o.id);
+      });
       var unused = o.ports.filter(function (pt) { return !idx.portUse[pt.id] && !idx.mapByPort[pt.id]; }).length;
       if (o.ports.length && unused) add('info', 'UNUSED_PORTS', unused + ' of ' + o.ports.length + ' terminations on "' + o.name + '" are unused', 'object', o.id);
     });
@@ -691,7 +879,7 @@
     p.fixedLinks.forEach(function (l) {
       var a = idx.objects[l.aObjectId], b = idx.objects[l.bObjectId];
       if (!a || !b) { add('error', 'MISSING_ENDPOINT', 'Fixed link ' + l.name + ' has a missing endpoint', 'link', l.id); return; }
-      if (a.type !== 'patchpanel' || b.type !== 'patchpanel') add('error', 'INCOMPATIBLE', 'Fixed link ' + l.name + ' must join patch panels', 'link', l.id);
+      if (!isTermination(a) || !isTermination(b)) add('error', 'INCOMPATIBLE', 'Fixed link ' + l.name + ' must join patch panels or wall sockets', 'link', l.id);
       var nums = {};
       l.wires.forEach(function (w) {
         if (nums[w.number]) add('error', 'DUP_WIRE', l.name + ': duplicate wire number ' + w.number, 'wire', w.id);
@@ -737,6 +925,32 @@
       return d;
     }
   };
+  /* v2: wall sockets get rear terminations (for installed cabling) with straight-through internal mappings */
+  MIGRATIONS[1] = function (d) {
+    d.objects.forEach(function (o) {
+      if (o.type !== 'socket') return;
+      o.ports = o.ports || [];
+      var front = o.ports.filter(function (x) { return x.side !== 'rear'; });
+      if (o.ports.some(function (x) { return x.side === 'rear'; })) return;
+      front.forEach(function (f) {
+        var r = { id: uid('prt'), label: f.label, side: 'rear' };
+        o.ports.push(r);
+        d.internalMappings.push({ id: uid('map_i'), objectId: o.id, aPortId: f.id, bPortId: r.id });
+      });
+    });
+    d.schemaVersion = 2;
+    return d;
+  };
+  /* v3: IP addresses are plain IPv4 now; drop any /prefix that earlier versions allowed */
+  MIGRATIONS[2] = function (d) {
+    function strip(ip) { return /^\d{1,3}(\.\d{1,3}){3}\/\d{1,2}$/.test(String(ip || '')) ? String(ip).split('/')[0] : ip; }
+    d.objects.forEach(function (o) {
+      if (o.ipAddress) o.ipAddress = strip(o.ipAddress);
+      (o.ports || []).forEach(function (pt) { if (pt.ip) pt.ip = strip(pt.ip); });
+    });
+    d.schemaVersion = 3;
+    return d;
+  };
   function migrate(data) {
     if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('Not a NetMap project file');
     var d = clone(data), v = d.schemaVersion || 0, from = v;
@@ -767,7 +981,7 @@
     findContainer: findContainer, groupOf: groupOf, parentOf: parentOf, containerChildren: containerChildren, descendants: descendants,
     addPlacement: addPlacement, placementOf: placementOf, placementGroup: placementGroup, movePlacement: movePlacement,
     growToFit: growToFit, mapsFor: mapsFor, addGroup: addGroup, addObject: addObject, setContainer: setContainer,
-    setPortCount: setPortCount, setSectionSize: setSectionSize, validSectionSizes: validSectionSizes, defaultSectionSize: defaultSectionSize, effectiveSectionSize: effectiveSectionSize, setRouterPorts: setRouterPorts, isValidIp: isValidIp, canConnectPatch: canConnectPatch, addPatchCable: addPatchCable,
+    setPortCount: setPortCount, findPortGroup: findPortGroup, parsePortRange: parsePortRange, addPortGroup: addPortGroup, updatePortGroup: updatePortGroup, deletePortGroup: deletePortGroup, portGroupOf: portGroupOf, prunePortGroups: prunePortGroups, hasDeviceIp: hasDeviceIp, hasPortIp: hasPortIp, setDeviceIp: setDeviceIp, setPortIp: setPortIp, IP_ERROR: IP_ERROR, setDeviceKind: setDeviceKind, isTermination: isTermination, DEVICE_KINDS: DEVICE_KINDS, deviceKindInfo: deviceKindInfo, typeLabel: typeLabel, accessPorts: accessPorts, validSectionRows: validSectionRows, setUplinkPorts: setUplinkPorts, setSwitchLayout: setSwitchLayout, setFullWidth: setFullWidth, setSectionSize: setSectionSize, validSectionSizes: validSectionSizes, defaultSectionSize: defaultSectionSize, effectiveSectionSize: effectiveSectionSize, setRouterPorts: setRouterPorts, isValidIp: isValidIp, canConnectPatch: canConnectPatch, addPatchCable: addPatchCable,
     updatePatchCable: updatePatchCable, deletePatchCable: deletePatchCable, addInternalMapping: addInternalMapping,
     removeInternalMapping: removeInternalMapping, autoMapPanel: autoMapPanel, rearPorts: rearPorts,
     sequentialPorts: sequentialPorts, addFixedLink: addFixedLink, updateLinkMeta: updateLinkMeta,

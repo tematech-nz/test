@@ -10,8 +10,8 @@
     p: null, mapId: null, mode: 'view', sel: null, trace: null, tool: null,
     undo: [], redo: [], unsaved: false, saveErr: null, savedAt: null, lastExport: null,
     drag: null, geo: null, query: '', showIssues: false, issues: [],
-    collapsed: {}, pgroup: null, hoverPort: null, preview: null, drop: null, cableColor: '#1f77b4', customColorFor: null, ring: null,
-    view: 'map', graph: { from: '', to: '', via: false }
+    collapsed: {}, pgroup: null, hoverPort: null, preview: null, drop: null, cableColor: 'auto', customColorFor: null, ring: null,
+    rev: 0, netRev: -1, netCache: [], view: 'map', graph: { from: '', to: '', via: false }
   };
   NM.app = { S: S, M: M }; // exposed for tests
 
@@ -73,6 +73,7 @@
     catch (e) { S.p = JSON.parse(snap); toast(e.message, true); renderAll(); return false; }
     S.undo.push({ label: label, snap: snap }); if (S.undo.length > 100) S.undo.shift();
     S.redo = [];
+    S.rev++;
     scheduleSave(); afterChange();
     return r === undefined ? true : r;
   }
@@ -80,7 +81,7 @@
     const e = from.pop();
     if (!e) return;
     to.push({ label: e.label, snap: JSON.stringify(S.p) });
-    S.p = JSON.parse(e.snap);
+    S.p = JSON.parse(e.snap); S.rev++;
     toast((from === S.undo ? 'Undid: ' : 'Redid: ') + e.label);
     scheduleSave(); afterChange();
   }
@@ -90,6 +91,7 @@
   function selExists() {
     if (!S.sel) return true;
     const idx = M.buildIndex(S.p), k = S.sel.kind, id = S.sel.id;
+    if (k === 'pgroup') return !!M.findPortGroup(S.p, id);
     const t = { group: idx.groups, object: idx.objects, port: idx.ports, cable: idx.cables, link: idx.links, wire: idx.wires }[k];
     return !!(t && t[id]);
   }
@@ -103,7 +105,7 @@
       const ok = { port: idx.ports, cable: idx.cables, link: idx.links, wire: idx.wires }[t.kind];
       S.trace = ok && ok[t.id] ? T.traceTarget(S.p, t) : null;
     }
-    S.issues = S.showIssues ? M.validateProject(S.p) : S.issues;
+    S.issues = S.showIssues ? allIssues() : S.issues;
     renderAll();
   }
 
@@ -142,6 +144,7 @@
     const add = (r) => { if (r) rects.push(r); };
     if (kind === 'group' || kind === 'object') add(pls(id));
     else if (kind === 'port') add(S.geo && S.geo.portGeo[id]);
+    else if (kind === 'pgroup') { const f = M.findPortGroup(S.p, id); if (f) f.group.portIds.forEach((pid) => add(S.geo && S.geo.portGeo[pid])); }
     else if (kind === 'cable') { const c = idx.cables[id]; if (c) [c.aPortId, c.bPortId].forEach((pid) => add(S.geo && S.geo.portGeo[pid])); }
     else if (kind === 'link') { const l = idx.links[id]; if (l) { add(pls(l.aObjectId)); add(pls(l.bObjectId)); } }
     else if (kind === 'wire') { const l = idx.wireLink[id]; if (l) { add(pls(l.aObjectId)); add(pls(l.bObjectId)); } }
@@ -183,6 +186,11 @@
   function cancelTool() { if (S.tool) { S.tool = null; renderAll(); } }
 
   /* ports of the cable end being reconnected are circled (hover over "Reconnect end A/B" or while the tool is active) */
+  function netAlertMap() {
+    const m = {};
+    netIssues().forEach((i) => (i.objectIds || []).forEach((id) => { m[id] = (m[id] ? m[id] + '\n' : '') + i.message; }));
+    return m;
+  }
   function ringPorts() {
     if (S.tool && S.tool.type === 'reconnect') { const c = S.p.patchCables.find((x) => x.id === S.tool.cableId); return c ? [S.tool.end === 'a' ? c.aPortId : c.bPortId] : []; }
     return S.ring ? [S.ring] : [];
@@ -193,14 +201,72 @@
     if (!oa || !ob) return null;
     const ga = M.groupOf(S.p, oa.id), gb = M.groupOf(S.p, ob.id);
     if (!ga || !gb || ga.id === gb.id) return null;
-    return '<p><b>' + esc(oa.name) + '</b> is in group <b>' + esc(ga.name) + '</b> and <b>' + esc(ob.name) + '</b> is in group <b>' + esc(gb.name) + '</b>.</p><p>A patch cable normally stays inside one group. Do you want to continue?</p>';
+    return '<p><b>' + esc(oa.name) + '</b> is in group <b>' + esc(ga.name) + '</b> and <b>' + esc(ob.name) + '</b> is in group <b>' + esc(gb.name) + '</b>. A patch cable normally stays inside one group.</p>';
+  }
+  /* network problems (see topology.networkIssues) memoised per project revision */
+  function netIssues() {
+    if (S.netRev !== S.rev) { S.netCache = NM.topology.networkIssues(S.p); S.netRev = S.rev; }
+    return S.netCache;
+  }
+  const allIssues = () => M.validateProject(S.p).concat(netIssues());
+  /* issues a prospective change would introduce (computed on a copy of the project) */
+  function newNetworkIssues(mutate) {
+    const trial = M.clone(S.p);
+    try { mutate(trial); } catch (e) { return []; }
+    const before = netIssues().map((i) => i.message);
+    return NM.topology.networkIssues(trial).filter((i) => before.indexOf(i.message) < 0);
+  }
+  /* html describing everything worth a second look before connecting aPortId to bPortId (cableId: the cable being reconnected) */
+  function connectionWarnings(aPortId, bPortId, cableId) {
+    const parts = [];
+    const cg = crossGroupWarning(aPortId, bPortId);
+    if (cg) parts.push(cg);
+    const ni = newNetworkIssues((trial) => {
+      if (cableId) M.updatePatchCable(trial, cableId, { aPortId: aPortId, bPortId: bPortId });
+      else M.addPatchCable(trial, { aPortId: aPortId, bPortId: bPortId });
+    });
+    ni.forEach((i) => parts.push('<p class="err-text"><b>Network:</b> ' + esc(i.message) + '</p>'));
+    return parts.length ? parts.join('') + '<p>Do you want to continue?</p>' : null;
+  }
+  /*
+   * 'W' / "Patch cable from here": with a free port selected, start a one-shot wire from it (the tool ends after the
+   * second click and the new cable stays selected so colour etc. can be adjusted); otherwise toggle the repeating tool.
+   */
+  function startWire(fromPortId) {
+    if (!isEdit()) { toast('Switch to edit mode to draw patch cables', true); return; }
+    const pid = fromPortId || (S.sel && S.sel.kind === 'port' ? S.sel.id : null);
+    if (!fromPortId && S.tool && S.tool.type === 'patch') { cancelTool(); return; }
+    if (pid) {
+      const idx = M.buildIndex(S.p), pt = idx.ports[pid];
+      if (!pt) return;
+      if (pt.side === 'rear') { toast('Rear terminations take fixed links, not patch cables', true); return; }
+      if (idx.portUse[pid]) { toast('That port is already occupied', true); return; }
+      S.tool = { type: 'patch', pending: pid, cableType: 'Cat6', once: true };
+      renderAll(); return;
+    }
+    setTool({ type: 'patch', pending: null, cableType: 'Cat6' });
+  }
+  /* 'G' after Ctrl+selecting ports: name and colour them as a port group */
+  async function nameSelectedPorts() {
+    const g = S.pgroup;
+    if (!g || !g.ids.length) return;
+    const o = M.buildIndex(S.p).objects[g.objId];
+    const v = await formDlg('Name port group', [
+      { k: 'name', label: 'Name', v: '', hint: g.ids.length + ' port(s) on ' + o.name + '. Examples: "to rack office", "L1".' },
+      { k: 'color', label: 'Colour', type: 'select', opts: M.CABLE_COLORS.filter((c) => c[0] !== 'white').map((c) => [c[1], c[0]]), v: '#1f77b4' }
+    ], 'Create group', '', (vals) => (vals.name.trim() ? null : 'Give the group a name'));
+    if (!v) return;
+    const created = commit('Add port group', (p) => M.addPortGroup(p, g.objId, { name: v.name, color: v.color, portIds: g.ids }));
+    clearPgroup();
+    if (created && created !== true) { S.sel = { kind: 'pgroup', id: created.id }; showTab('details'); openRight(); }
+    renderAll();
   }
   function clearPgroup() { S.pgroup = null; S.hoverPort = null; S.preview = null; }
 
   /* Ctrl+click builds a group of free rear ports on one patch panel (Shift extends a range) */
   function pickGroupPort(id, shift) {
     const idx = M.buildIndex(S.p), pt = idx.ports[id], o = idx.portObj[id];
-    if (!o || o.type !== 'patchpanel' || pt.side !== 'rear') { toast('Ctrl+click rear ports of a patch panel to group them for a fixed link', true); return; }
+    if (!M.isTermination(o) || pt.side !== 'rear') { toast('Ctrl+click rear ports of a patch panel or wall socket to group them for a fixed link', true); return; }
     if (idx.portUse[id]) { toast('That port already has a fixed wire', true); return; }
     if (!S.pgroup || S.pgroup.objId !== o.id) S.pgroup = { objId: o.id, ids: [], last: null };
     const rear = M.rearPorts(o), g = S.pgroup;
@@ -221,7 +287,7 @@
   /* the same number of rear ports on another panel, starting at the hovered port */
   function previewFor(hoverId) {
     const g = S.pgroup, idx = M.buildIndex(S.p), o = idx.portObj[hoverId], pt = idx.ports[hoverId];
-    if (!g || !o || o.type !== 'patchpanel' || pt.side !== 'rear' || o.id === g.objId) return null;
+    if (!g || !o || !M.isTermination(o) || pt.side !== 'rear' || o.id === g.objId) return null;
     const rear = M.rearPorts(o), start = rear.findIndex((x) => x.id === hoverId), n = g.ids.length;
     const ids = rear.slice(start, start + n).map((x) => x.id);
     let ok = true, text = idx.objects[g.objId].name + ' -> ' + o.name + ': ' + n + ' wire(s), rear ' + rear[start].label + (n > 1 ? '..' + rear[Math.min(start + n, rear.length) - 1].label : '');
@@ -262,22 +328,25 @@
       }
       const a = S.tool.pending;
       if (a === id) { S.tool.pending = null; renderAll(); return; }
-      const tool = S.tool, warn = crossGroupWarning(a, id);
+      const tool = S.tool, warn = connectionWarnings(a, id);
       const make = () => {
-        const cable = commit('Add patch cable', (p) => M.addPatchCable(p, { aPortId: a, bPortId: id, color: S.cableColor, cableType: tool.cableType }));
+        // 'auto': the colour of the network the cable extends from (router port network colour), else the default blue
+        const color = S.cableColor === 'auto' ? (NM.topology.networkColorFor(S.p, [a, id]) || '#1f77b4') : S.cableColor;
+        const cable = commit('Add patch cable', (p) => M.addPatchCable(p, { aPortId: a, bPortId: id, color: color, cableType: tool.cableType }));
         tool.pending = null;
-        if (cable) { toast('Added ' + cable.name); S.sel = { kind: 'cable', id: cable.id }; renderAll(); } else renderAll();
+        if (tool.once) S.tool = null; // one-shot wire: leave the tool, the new cable stays selected for colour/type edits
+        if (cable) { toast('Added ' + cable.name + (tool.once ? ' - adjust colour and type in the panel' : '')); S.sel = { kind: 'cable', id: cable.id }; showTab('details'); openRight(); renderAll(); } else renderAll();
       };
-      if (warn) confirmDlg('Connect across groups?', warn, 'Connect anyway').then((ok) => { if (ok) make(); else { tool.pending = null; renderAll(); } });
+      if (warn) confirmDlg('Check this connection', warn, 'Connect anyway').then((ok) => { if (ok) make(); else { tool.pending = null; renderAll(); } });
       else make();
       return;
     }
     if (S.tool && S.tool.type === 'reconnect') {
       if (kind !== 'port') { toast('Tap a port to reconnect to, or press Esc', true); return; }
       const t = S.tool, cab = S.p.patchCables.find((c) => c.id === t.cableId);
-      const other = cab && (t.end === 'a' ? cab.bPortId : cab.aPortId), warn = other && crossGroupWarning(id, other);
+      const other = cab && (t.end === 'a' ? cab.bPortId : cab.aPortId), warn = other && connectionWarnings(t.end === 'a' ? id : other, t.end === 'a' ? other : id, t.cableId);
       const go = () => { S.tool = null; commit('Reconnect patch cable', (p) => M.updatePatchCable(p, t.cableId, t.end === 'a' ? { aPortId: id } : { bPortId: id })); };
-      if (warn) confirmDlg('Connect across groups?', warn, 'Reconnect anyway').then((ok) => { if (ok) go(); });
+      if (warn) confirmDlg('Check this connection', warn, 'Reconnect anyway').then((ok) => { if (ok) go(); });
       else go();
       return;
     }
@@ -420,6 +489,8 @@
     $('projTitle').textContent = S.p.name;
     $('mapSelect').innerHTML = opts(S.p.maps.map((m) => [m.id, m.name]), S.mapId);
     $('btnMode').textContent = isEdit() ? 'Done editing' : 'Edit';
+    const na = netIssues(), ab = $('btnAlerts');
+    ab.hidden = !na.length; ab.textContent = 'Network warnings (' + na.length + ')'; ab.title = na.slice(0, 5).map((i) => i.message).join('\n');
     $('btnUndo').disabled = !S.undo.length; $('btnRedo').disabled = !S.redo.length;
     $('btnUndo').title = S.undo.length ? 'Undo: ' + S.undo[S.undo.length - 1].label : 'Nothing to undo';
     setStatus();
@@ -428,7 +499,7 @@
     const map = curMap();
     const r = R.renderMap(S.p, map.id, {
       mode: S.mode, selection: S.sel, highlight: S.trace && S.trace.highlight,
-      pendingPortId: S.tool && S.tool.pending, collapsed: S.collapsed, drop: S.drop, ringPorts: ringPorts(),
+      pendingPortId: S.tool && S.tool.pending, collapsed: S.collapsed, drop: S.drop, alerts: netAlertMap(), ringPorts: ringPorts(),
       groupPorts: S.pgroup ? S.pgroup.ids : null, preview: S.preview
     });
     S.geo = r;
@@ -442,11 +513,11 @@
         (S.p.objects.length ? '' : '<button data-act="demo">Load demo project</button>');
     }
     const th = $('toolHint');
-    if (S.tool && S.tool.type === 'patch') { th.hidden = false; th.textContent = S.tool.pending ? 'Tap the destination port (Esc to cancel)' : 'Patch cable: tap the first port (Esc to stop)'; }
+    if (S.tool && S.tool.type === 'patch') { th.hidden = false; th.textContent = S.tool.pending ? 'Tap the destination port (Esc to cancel)' : 'Patch cable: tap the first port (W or Esc to stop)'; }
     else if (S.pgroup) {
       th.hidden = false;
       const pv = S.preview;
-      th.textContent = pv ? (pv.ok ? 'Click to create a fixed link: ' + pv.text : pv.text) : S.pgroup.ids.length + ' rear port(s) selected - hover another patch panel and click to link (Ctrl+click adds, Esc cancels)';
+      th.textContent = pv ? (pv.ok ? 'Click to create a fixed link: ' + pv.text : pv.text) : S.pgroup.ids.length + ' rear port(s) selected - hover another panel and click to link, G names them as a group (Ctrl+click adds, Esc cancels)';
     }
     else if (S.tool && S.tool.type === 'reconnect') { th.hidden = false; th.textContent = 'Tap the new port for end ' + S.tool.end.toUpperCase() + ' (Esc to cancel)'; }
     else th.hidden = true;
@@ -459,8 +530,8 @@
       ['group:Group', 'rack:Rack', 'patchpanel:Patch panel', 'switch:Switch', 'router:Router', 'internet:Internet / ISP', 'socket:Wall socket', 'generic:Generic'].map((s) => {
         const a = s.split(':'); return '<button data-add="' + a[0] + '" title="Create a new ' + a[1].toLowerCase() + ' on this map">+ ' + a[1] + '</button>';
       }).join('') + '<span class="sep"></span>' +
-      '<button data-act="patchTool" title="' + esc(TIPS.patchTool) + '" class="' + (pc ? 'active' : '') + '">Patch cable tool</button>' +
-      (pc ? ' <span class="cable-colour">' + colorPicker('toolPreset', 'toolColor', S.cableColor, '__tool') + '</span>' : '') +
+      '<button data-act="patchTool" title="' + esc(TIPS.patchTool) + '" class="' + (pc ? 'active' : '') + '">Patch cable tool (W)</button>' +
+      (pc ? ' <span class="cable-colour">' + colorPicker('toolPreset', 'toolColor', S.cableColor, '__tool', { value: 'auto', label: 'Auto (network colour)', swatch: '#1f77b4' }) + '</span>' : '') +
       '<button data-act="newLink" title="' + esc(TIPS.newLink) + '">+ Fixed link</button>' +
       '<button data-act="addMapItems" title="' + esc(TIPS.addMapItems) + '">Add existing here...</button>';
   }
@@ -485,7 +556,7 @@
     function node(kind, item, depth) {
       const isG = kind === 'group';
       let h = '<div class="list-item ' + (S.sel && S.sel.id === item.id ? 'active' : '') + '" style="margin-left:' + depth * 14 + 'px" data-act="goto" data-kind="' + kind + '" data-id="' + esc(item.id) + '">' +
-        '<div class="grow">' + esc(item.name) + '</div><span class="tag">' + (isG ? 'group' : M.TYPE_LABELS[item.type]) + '</span>' +
+        '<div class="grow">' + esc(item.name) + '</div><span class="tag">' + (isG ? 'group' : M.typeLabel(item)) + '</span>' +
         (onMap(item.id) ? '' : '<span class="tag" title="Not drawn on the current map">other map</span>') + '</div>';
       M.containerChildren(S.p, item.id).forEach((k) => {
         h += node(k.kind, k.kind === 'group' ? idx.groups[k.id] : idx.objects[k.id], depth + 1);
@@ -519,12 +590,17 @@
   const closeLeft = () => $('left').classList.remove('open');
 
   /* preset cable colours plus "Custom..." which reveals the RGB picker */
-  function colorPicker(presetField, colorField, value, ownerId) {
+  /* special: optional first choice {value, label, swatch[, dt]} for "no colour" / "auto"; dt = data-t of the port being edited */
+  function colorPicker(presetField, colorField, value, ownerId, special) {
+    const isSpecial = !!special && !special.noOption && value === special.value;
     const preset = M.CABLE_COLORS.find((c) => c[1].toLowerCase() === String(value).toLowerCase());
-    const custom = !preset || S.customColorFor === ownerId;
-    const o = M.CABLE_COLORS.map((c) => [c[1], c[0]]).concat([['custom', 'Custom...']]);
-    return '<span class="swatch" role="button" data-act="customColor" data-owner="' + esc(ownerId) + '" title="Click to choose any colour" style="background:' + esc(value) + '"></span> <select data-f="' + presetField + '">' + opts(o, custom ? 'custom' : preset[1]) + '</select>' +
-      (custom ? ' <input type="color" data-f="' + colorField + '" value="' + esc(value) + '" title="Custom colour">' : '');
+    const custom = S.customColorFor === ownerId || (!isSpecial && !preset);
+    const o = (special && !special.noOption ? [[special.value, special.label]] : []).concat(M.CABLE_COLORS.map((c) => [c[1], c[0]]), [['custom', 'Custom...']]);
+    const dt = special && special.dt ? ' data-t="' + esc(special.dt) + '"' : '';
+    const hex = /^#[0-9a-f]{6}$/i.test(value) ? value : '#1f77b4';
+    return '<span class="swatch" role="button" data-act="customColor" data-owner="' + esc(ownerId) + '" title="Click to choose any colour" style="background:' + esc(isSpecial ? (special.swatch || 'transparent') : value) + '"></span> <select data-f="' + presetField + '"' + dt + '>' +
+      opts(o, custom ? 'custom' : (isSpecial ? special.value : preset[1])) + '</select>' +
+      (custom ? ' <input type="color" data-f="' + colorField + '"' + dt + ' value="' + esc(hex) + '" title="Custom colour">' : '');
   }
   function fld(label, html) { return '<div class="field"><label>' + label + '</label><div>' + html + '</div></div>'; }
   function inp(label, f, val, t, extra) {
@@ -548,10 +624,10 @@
     applyRouterPorts: 'Set the number of WAN and LAN ports (ports in use cannot be removed)',
     addToMap: 'Show this item on the current map (the same record, not a copy)',
     removeFromMap: 'Hide this item from the current map only; the equipment and its connections stay in the project',
-    startPatchFrom: 'Start a patch cable at this port: then click the other port on the map',
+    startPatchFrom: 'Start one patch cable at this port (hotkey W): click the other port on the map; the new cable then stays selected so you can set its colour',
     clearTrace: 'Remove the trace highlight and return to the normal map',
     fitTrace: 'Zoom the map to the parts of the trace that are on this map',
-    patchTool: 'Draw patch cables: click one port, then another. Esc stops.',
+    patchTool: 'Draw patch cables: click one port, then another (hotkey W). Select a port first and press W to draw a single cable from it. Esc stops.',
     newLink: 'Create a fixed link between two patch panels',
     addMapItems: 'Show equipment that exists in the project but is not drawn on this map',
     help: 'How NetMap works'
@@ -565,14 +641,14 @@
       pane.innerHTML = '<h3>Nothing selected</h3><div class="sub">Tap an object, port, cable or fixed link on the map to see details. Use the search box to find a port, cable or wire by label or ID.</div>' +
         '<div class="btn-row">' + btn('help', 'Help') + '</div>';
     } else {
-      const d = { group: detGroup, object: detObject, port: detPort, cable: detCable, link: detLink, wire: detWire }[S.sel.kind];
+      const d = { group: detGroup, object: detObject, port: detPort, cable: detCable, link: detLink, wire: detWire, pgroup: detPGroup }[S.sel.kind];
       pane.innerHTML = d(S.sel.id);
     }
     renderTracePane();
     $('tabTrace').textContent = S.trace ? 'Trace *' : 'Trace';
   }
 
-  const hasIp = (o) => o.type === 'router' || o.type === 'internet';
+  const hasIp = (o) => M.hasPortIp(o); // per-port addresses (router, generic device, Internet); switches have one management address
   function containerOptions(forKind, forType, selfId) {
     const out = [['', '(none - standalone)']];
     S.p.groups.forEach((g) => {
@@ -616,11 +692,37 @@
     return parts.length ? parts.join('<br>') : '<span class="sub">free</span>';
   }
 
+  /* switch port layout, uplinks and isolation */
+  function switchBlock(o) {
+    const per = M.accessPorts(o).length, up = o.ports.length - per;
+    const cur = o.sectionSize > 0 && per % o.sectionSize === 0 ? o.sectionSize : 0;
+    const rows = cur && o.sectionRows > 0 && cur % o.sectionRows === 0 ? o.sectionRows : 1;
+    const order = o.portOrder === 'rows' ? 'rows' : 'columns', align = o.align || 'left', side = o.uplinkSide === 'left' ? 'left' : 'right';
+    const sel = (f, list, v) => '<select data-f="' + f + '">' + opts(list, v) + '</select>';
+    if (!isEdit()) {
+      return fld('Sections', cur ? per / cur + ' x (' + rows + ' x ' + cur / rows + ')' : 'none') + (up ? fld('Uplink ports', up) : '') + (o.portIsolation ? fld('Port isolation', 'on: access ports only reach uplinks') : '');
+    }
+    let h = fld('Sections', sel('sectionSize', [[0, 'None (plain rows)']].concat(M.validSectionSizes(per).map((d) => [d, d + ' per section (' + per / d + ' x ' + d + ')'])), cur) + '<div class="sub">Equal sections only.</div>');
+    if (cur) h += fld('Section shape', sel('sectionRows', M.validSectionRows(cur).map((d) => [d, d + (d === 1 ? ' row' : ' rows') + ' x ' + cur / d + ' columns']), rows));
+    if (cur && rows > 1) h += fld('Port order', sel('portOrder', [['columns', 'down, then across (1 above 2)'], ['rows', 'across, then down']], order));
+    h += fld('Align', sel('align', [['left', 'left'], ['center', 'center'], ['right', 'right']], align) + '<div class="sub">Where the ports sit when the switch is wider than its ports (e.g. full width).</div>');
+    h += fld('Uplink ports', '<input type="number" id="upInput" min="0" max="16" value="' + up + '" style="width:60px"> ' + btn('applyUplinks', 'Apply') + '<div class="sub">Extra ports next to the sections (SFP, trunk...).</div>');
+    if (up) h += fld('Uplinks on', sel('uplinkSide', [['right', 'right'], ['left', 'left']], side));
+    if (up > 1) h += fld('Uplink rows', sel('uplinkRows', [1, 2, 3, 4].filter((d) => d <= up).map((d) => [d, d === 1 ? '1 (in line)' : d + ' rows']), o.uplinkRows || 1));
+    h += fld('Port isolation', '<label><input type="checkbox" data-f="portIsolation"' + (o.portIsolation ? ' checked' : '') + '> access ports cannot reach each other, only uplinks</label>');
+    return h;
+  }
+
   function detObject(id) {
     const idx = M.buildIndex(S.p), o = idx.objects[id];
-    let h = '<h3>' + esc(M.TYPE_LABELS[o.type]) + '</h3>' + inp('Name', 'name', o.name) + inp('Location', 'location', o.location) + inp('Description', 'description', o.description);
+    let h = '<h3>' + esc(M.typeLabel(o)) + '</h3>' + inp('Name', 'name', o.name) + inp('Location', 'location', o.location) + inp('Description', 'description', o.description);
+    if (o.type === 'generic') h += isEdit() ? fld('Device type', '<select data-f="deviceKind">' + opts(M.DEVICE_KINDS.map((k) => [k[0], k[1]]), o.deviceKind || 'other') + '</select>') : fld('Device type', esc(M.typeLabel(o)));
     if (o.type === 'rack') h += inp('Height (U)', 'rackHeight', o.rackHeight || '');
-    if (hasIp(o)) h += inp(o.type === 'internet' ? 'Public IP' : 'IP address', 'ipAddress', o.ipAddress || '');
+    if (M.hasDeviceIp(o)) {
+      h += inp(o.type === 'internet' ? 'Public IP' : (o.type === 'switch' ? 'Management IP' : 'IP address'), 'ipAddress', o.ipAddress || '');
+      if (isEdit() && o.type === 'switch') h += '<div class="sub">Address of the switch\'s web interface (managed switch). It joins the network of the switch, not its ports.</div>';
+      if (isEdit() && o.type === 'generic') h += '<div class="sub">Used for its port when it has just one; with several ports (e.g. a PC with two NICs) give each port its own IP below - a device never joins its networks together.</div>';
+    }
     const par = o.containerId ? M.findContainer(S.p, o.containerId) : null;
     h += isEdit() ? fld('Inside', '<select data-f="container">' + opts(containerOptions('object', o.type, id), o.containerId || '') + '</select>') : fld('Inside', par ? lnk(par.kind, par.id, par.item.name) : '-');
     h += fld('On maps', mapsLine('object', id)) + fld('ID', '<span class="sub">' + esc(o.id) + '</span>');
@@ -628,14 +730,13 @@
       const kids = M.containerChildren(S.p, id);
       h += '<h3>Contents (' + kids.length + ')</h3>' + (kids.map((k) => '<div class="list-item" data-act="goto" data-kind="object" data-id="' + esc(k.id) + '">' + esc(idx.objects[k.id].name) + '</div>').join('') || '<div class="sub">Empty rack.</div>');
     } else if (o.type !== 'generic' || o.ports.length) {
-      const per = o.type === 'patchpanel' ? o.ports.length / 2 : o.ports.length;
+      const per = M.isTermination(o) ? o.ports.length / 2 : (o.type === 'switch' ? M.accessPorts(o).length : o.ports.length);
       const used = o.ports.filter((p) => idx.portUse[p.id]).length;
-      h += '<h3>Ports (' + per + (o.type === 'patchpanel' ? ' front + ' + per + ' rear' : '') + ', ' + used + ' cabled)</h3>';
+      h += '<h3>Ports (' + per + (M.isTermination(o) ? ' front + ' + per + ' rear' : '') + (o.type === 'switch' && o.ports.length > per ? ' + ' + (o.ports.length - per) + ' uplink' : '') + ', ' + used + ' cabled)</h3>';
     }
-    if (o.type === 'switch' && o.ports.length) {
-      const per = o.ports.length, cur = o.sectionSize > 0 && per % o.sectionSize === 0 ? o.sectionSize : 0;
-      h += isEdit() ? fld('Sections', '<select data-f="sectionSize">' + opts([[0, 'None (plain rows)']].concat(M.validSectionSizes(per).map((d) => [d, d + ' per section (' + per / d + ' x ' + d + ')'])), cur) + '</select><div class="sub">Equal sections only.</div>') :
-        fld('Sections', cur ? per / cur + ' x ' + cur : 'none');
+    if (o.type === 'switch') h += switchBlock(o);
+    if (o.type !== 'rack' && o.type !== 'internet' && o.containerId) {
+      h += isEdit() ? fld('Full width', '<label><input type="checkbox" data-f="fullWidth"' + (o.fullWidth ? ' checked' : '') + '> stretch to the width of its ' + (M.findContainer(S.p, o.containerId).kind === 'group' ? 'group' : 'rack') + '</label>') : (o.fullWidth ? fld('Full width', 'yes') : '');
     }
     if (o.type === 'patchpanel') {
       const per = o.ports.length / 2, cur = M.effectiveSectionSize(o, per);
@@ -646,41 +747,87 @@
       const nw = o.ports.filter((x) => x.role === 'wan').length, nl = o.ports.length - nw;
       h += fld('Ports', 'WAN <input type="number" id="wanInput" min="0" max="96" value="' + nw + '" style="width:60px"> LAN <input type="number" id="lanInput" min="0" max="96" value="' + nl + '" style="width:60px"> ' + btn('applyRouterPorts', 'Apply'));
     } else if (isEdit() && o.type !== 'rack') {
-      h += fld('Port count', '<input type="number" id="pcInput" min="0" max="96" value="' + (o.type === 'patchpanel' ? o.ports.length / 2 : o.ports.length) + '" style="width:70px"> ' + btn('applyPortCount', 'Apply') +
+      h += fld('Port count', '<input type="number" id="pcInput" min="0" max="96" value="' + (M.isTermination(o) ? o.ports.length / 2 : (o.type === 'switch' ? M.accessPorts(o).length : o.ports.length)) + '" style="width:70px"> ' + btn('applyPortCount', 'Apply') +
         (o.type === 'switch' ? '<div class="sub">Presets: ' + [8, 16, 24, 48].map((n) => '<a class="lnk" data-act="presetPorts" data-n="' + n + '">' + n + '</a>').join(' ') + '</div>' : ''));
     }
     if (o.ports.length) {
       h += '<table class="t"><tr><th>Port</th><th>Connection</th><th></th></tr>' + o.ports.map((pt) =>
         '<tr><td>' + (isEdit() ? '<input type="text" data-f="plabel" data-t="' + esc(pt.id) + '" value="' + esc(pt.label) + '" style="width:5em">' : '<a class="lnk" data-act="select" data-kind="port" data-id="' + esc(pt.id) + '">' + esc(pt.label) + '</a>') +
-        (o.type === 'patchpanel' ? ' <span class="tag">' + pt.side + '</span>' : '') + (o.type === 'router' ? ' <span class="tag">' + esc(pt.role) + '</span>' : '') + '</td><td>' +
+        (M.isTermination(o) ? ' <span class="tag">' + pt.side + '</span>' : '') + ((o.type === 'router' || pt.role === 'uplink') ? ' <span class="tag">' + esc(pt.role) + '</span>' : '') + '</td><td>' +
+        (isEdit() ? '<input type="text" data-f="pdesc" data-t="' + esc(pt.id) + '" value="' + esc(pt.description || '') + '" placeholder="Label (shown on hover)" style="width:100%;margin-bottom:2px">' : (pt.description ? '<div><b>' + esc(pt.description) + '</b></div>' : '')) +
         (hasIp(o) ? (isEdit() ? '<input type="text" data-f="pip" data-t="' + esc(pt.id) + '" value="' + esc(pt.ip || '') + '" placeholder="IP" style="width:100%;margin-bottom:2px">' : (pt.ip ? '<div>' + esc(pt.ip) + '</div>' : '')) : '') +
         portState(o, pt, idx) + '</td><td>' +
         '<button data-act="trace" data-kind="port" data-id="' + esc(pt.id) + '" title="Trace connection">Trace</button></td></tr>').join('') + '</table>';
     }
+    h += pgroupSection(o);
     if (isEdit()) {
-      h += '<div class="btn-row">' + placeButtons(id, 'object') + (o.type === 'patchpanel' ? btn('automap', 'Map front N <-> rear N') + btn('newLinkFrom', 'Fixed link from here...') : '') +
+      h += '<div class="btn-row">' + placeButtons(id, 'object') + (M.isTermination(o) ? btn('automap', 'Map front N <-> rear N') + btn('newLinkFrom', 'Fixed link from here...') : '') +
         btn('deleteSel', 'Delete...', '', 'danger') + '</div>';
-      if (o.type === 'patchpanel') h += '<div class="sub">Internal mappings: ' + S.p.internalMappings.filter((m) => m.objectId === id).length + ' documented. Tracing only follows documented mappings.</div>';
+      if (M.isTermination(o)) h += '<div class="sub">Internal mappings: ' + S.p.internalMappings.filter((m) => m.objectId === id).length + ' documented. Tracing only follows documented mappings.</div>';
     }
     return h;
   }
 
+  /* "7-14, 17" style text for a group's ports (numeric labels in runs) */
+  function portsText(o, g, side) {
+    const list = o.ports.filter((pt) => g.portIds.indexOf(pt.id) >= 0 && (!side || pt.side === side)), out = [];
+    let i = 0;
+    while (i < list.length) {
+      const a = list[i]; let j = i;
+      while (/^\d+$/.test(list[j].label) && j + 1 < list.length && /^\d+$/.test(list[j + 1].label) && +list[j + 1].label === +list[j].label + 1) j++;
+      out.push(j > i ? a.label + '-' + list[j].label : a.label); i = j + 1;
+    }
+    return out.join(', ');
+  }
+  const groupSide = (o, g) => { const sides = Array.from(new Set(o.ports.filter((pt) => g.portIds.indexOf(pt.id) >= 0).map((pt) => pt.side))); return M.isTermination(o) && sides.length === 1 ? sides[0] : null; };
+  function pgroupRows(o) {
+    return (o.portGroups || []).map((g) => '<div class="list-item" data-act="select" data-kind="pgroup" data-id="' + esc(g.id) + '"><span class="swatch" style="background:' + esc(g.color) + '"></span><div class="grow"><b>' + esc(g.name) + '</b> <span class="sub">' +
+      (groupSide(o, g) ? groupSide(o, g) + ' ' : '') + esc(portsText(o, g, groupSide(o, g))) + '</span></div></div>').join('');
+  }
+  function detPGroup(id) {
+    const f = M.findPortGroup(S.p, id), o = f.obj, g = f.group, side = groupSide(o, g);
+    let h = '<h3>Port group</h3>' + fld('On', lnk('object', o.id, o.name)) + inp('Name', 'pgName', g.name, g.id);
+    h += isEdit() ? fld('Colour', colorPicker('pgPreset', 'pgColor', g.color, 'pg:' + g.id, { noOption: true, dt: g.id })) : fld('Colour', '<span class="swatch" style="background:' + esc(g.color) + '"></span>');
+    h += inp('Ports', 'pgPorts', portsText(o, g, side), g.id, 'placeholder="7-14, 17"') + fld('Count', g.portIds.length + (side ? ' (' + side + ')' : ''));
+    if (isEdit()) h += '<div class="sub">Ports as numbers and ranges, e.g. 7-14, 17. A port belongs to one group.</div>';
+    h += '<div class="btn-row">';
+    if (isEdit()) {
+      const rear = o.ports.filter((pt) => g.portIds.indexOf(pt.id) >= 0 && pt.side === 'rear');
+      if (M.isTermination(o) && rear.length) h += btn('linkFromGroup', 'Fixed link from this group...', 'data-id="' + esc(g.id) + '"');
+      h += btn('deletePGroup', 'Delete group', 'data-id="' + esc(g.id) + '"', 'danger');
+    }
+    return h + '</div>';
+  }
+  function pgroupSection(o) {
+    let h = '';
+    if (!o.ports.length) return h;
+    h += '<h3>Port groups (' + (o.portGroups || []).length + ')</h3>' + (pgroupRows(o) || '<div class="sub">None. Name and colour a set of ports, e.g. "to rack office".</div>');
+    if (isEdit()) {
+      h += '<div class="sub" style="margin-top:6px">New group: <input type="text" id="pgNewName" placeholder="name" style="width:9em"> ports <input type="text" id="pgNewPorts" placeholder="7-14, 17" style="width:7em">' +
+        (M.isTermination(o) ? ' <select id="pgNewSide"><option value="rear">rear</option><option value="front">front</option></select>' : '') +
+        ' <select id="pgNewColor">' + opts(M.CABLE_COLORS.filter((c) => c[0] !== 'white').map((c) => [c[1], c[0]]), '#1f77b4') + '</select> ' + btn('addPGroup', 'Add') + '</div>';
+      h += '<div class="sub">Tip: Ctrl+click ports, then press G to name them as a group.</div>';
+    }
+    return h;
+  }
   function detPort(id) {
     const idx = M.buildIndex(S.p), pt = idx.ports[id], o = idx.portObj[id];
-    let h = '<h3>Port</h3>' + fld('Equipment', lnk('object', o.id, o.name)) + inp('Label', 'plabel', pt.label, pt.id);
-    if (o.type === 'patchpanel') h += fld('Side', pt.side);
+    let h = '<h3>Port</h3>' + fld('Equipment', lnk('object', o.id, o.name)) + inp('Number', 'plabel', pt.label, pt.id) + inp('Label', 'pdesc', pt.description || '', pt.id, 'placeholder="shown on hover"');
+    if (M.isTermination(o)) h += fld('Side', pt.side);
     if (o.type === 'router') h += fld('Role', esc((pt.role || '').toUpperCase()));
     if (hasIp(o)) h += inp('IP address', 'pip', pt.ip || '', pt.id);
+    if (o.type === 'router') h += isEdit() ? fld('Network colour', colorPicker('netPreset', 'pnet', pt.networkColor || '', 'net:' + pt.id, { value: '', label: 'none', swatch: 'transparent', dt: pt.id }) + '<div class="sub">New patch cables extending from this port default to this colour.</div>') : (pt.networkColor ? fld('Network colour', '<span class="swatch" style="background:' + esc(pt.networkColor) + '"></span>') : '');
     if (o.type === 'switch') h += inp('Type', 'ptype', pt.portType || '', pt.id) + inp('Speed', 'pspeed', pt.speed || '', pt.id) + inp('Media', 'pmedia', pt.media || '', pt.id);
     h += fld('Connection', portState(o, pt, idx));
     h += '<div class="btn-row">' + btn('trace', 'Trace connection', 'data-kind="port" data-id="' + esc(id) + '"', 'primary');
     if (isEdit()) {
       const u = idx.portUse[id];
       if (pt.side !== 'rear' && !u) h += btn('startPatchFrom', 'Patch cable from here', 'data-id="' + esc(id) + '"');
+      if (o.type === 'router' && pt.networkColor) h += btn('recolorNet', 'Recolour this network\'s cables', 'data-id="' + esc(id) + '"');
       if (u && u.kind === 'patch') h += btn('deleteCable', 'Remove cable ' + idx.cables[u.id].name, 'data-id="' + esc(u.id) + '"', 'danger');
       const mp = S.p.internalMappings.find((m) => m.aPortId === id || m.bPortId === id);
-      if (o.type === 'patchpanel' && mp) h += btn('unmap', 'Remove internal mapping', 'data-id="' + esc(mp.id) + '"');
-      else if (o.type === 'patchpanel') h += btn('mapPort', 'Map to ' + (pt.side === 'front' ? 'rear' : 'front') + ' port...', 'data-id="' + esc(id) + '"');
+      if (M.isTermination(o) && mp) h += btn('unmap', 'Remove internal mapping', 'data-id="' + esc(mp.id) + '"');
+      else if (M.isTermination(o)) h += btn('mapPort', 'Map to ' + (pt.side === 'front' ? 'rear' : 'front') + ' port...', 'data-id="' + esc(id) + '"');
     }
     return h + '</div>';
   }
@@ -797,7 +944,7 @@
       onButton: (k, c) => c.close(k === 'yes')
     }).then((v) => !!v);
   }
-  function formDlg(title, fields, okLabel, intro) {
+  function formDlg(title, fields, okLabel, intro, validate) {
     function body() {
       return (intro || '') + fields.map((f) => {
         let c;
@@ -817,6 +964,12 @@
           const el = c.root.querySelector('[name="' + f.k + '"]');
           out[f.k] = f.type === 'check' ? el.checked : f.type === 'number' ? parseInt(el.value, 10) : el.value;
         });
+        const err = validate && validate(out);
+        if (err) {
+          let box = c.root.querySelector('.form-err');
+          if (!box) { box = document.createElement('div'); box.className = 'msg-box err-text form-err'; c.root.querySelector('.db').prepend(box); }
+          box.textContent = err; return;
+        }
         c.close(out);
       }
     });
@@ -844,27 +997,35 @@
     if (type === 'router') {
       fields.push({ k: 'wanPorts', label: 'WAN ports', type: 'number', v: 1, min: 0, max: 96 });
       fields.push({ k: 'lanPorts', label: 'LAN ports', type: 'number', v: 4, min: 0, max: 96 });
-      fields.push({ k: 'ipAddress', label: 'IP address', v: '', hint: 'Optional, e.g. 192.168.1.1 or 192.168.1.1/24. Each port can also have its own IP later.' });
+      fields.push({ k: 'ipAddress', label: 'IP address', v: '', hint: 'Optional IPv4 address, e.g. 192.168.1.1 (no /prefix; the subnet is assumed to be the /24). Each port can also have its own IP later.' });
     }
     if (type === 'internet') {
       fields[0].v = 'INTERNET'; fields[0].hint = 'The ISP / upstream network. Cable its ports to your router WAN ports.';
       fields.push({ k: 'portCount', label: 'ISP ports', type: 'number', v: 1, min: 1, max: 12 });
       fields.push({ k: 'ipAddress', label: 'Public IP / circuit', v: '' });
     }
+    if (type === 'switch') fields.push({ k: 'ipAddress', label: 'Management IP', v: '', hint: 'Optional: the web interface address of a managed switch (IPv4, e.g. 192.168.1.2).' });
+    if (type === 'generic') fields.push({ k: 'ipAddress', label: 'IP address', v: '', hint: 'Optional IPv4 address for a single-port device; give multi-port devices per-port addresses afterwards.' });
     if (type === 'socket') fields.push({ k: 'portCount', label: 'Ports', type: 'number', v: 2, min: 1, max: 12 });
-    if (type === 'generic') fields.push({ k: 'portCount', label: 'Ports', type: 'number', v: 0, min: 0, max: 96 });
+    if (type === 'generic') {
+      fields.unshift({ k: 'deviceKind', label: 'Device type', type: 'select', opts: M.DEVICE_KINDS.map((k) => [k[0], k[1]]), v: 'other' });
+      fields.push({ k: 'portCount', label: 'Ports', type: 'number', v: 1, min: 0, max: 96, hint: 'Network ports of this device (0 for none).' });
+    }
     if (type === 'rack') fields.push({ k: 'rackHeight', label: 'Height (U)', type: 'number', v: 42, min: 1, max: 60 });
     if (type === 'patchpanel') fields.push({ k: 'sectionSize', label: 'Ports per section', type: 'number', v: '', min: 1, max: 96, hint: 'Leave empty for automatic (24 -> 3 x 8, 12 -> 2 x 6, 16 -> 2 x 8). Must divide the port count evenly.' });
+    if (type === 'switch') fields.push({ k: 'uplinkPorts', label: 'Uplink ports', type: 'number', v: 0, min: 0, max: 16, hint: 'Extra ports next to the main ports (1, 2, 4...).' });
     if (type === 'switch') fields.push({ k: 'sectionSize', label: 'Ports per section', type: 'number', v: '', min: 1, max: 96, hint: 'Optional, e.g. 8 for 3 x 8 on a 24-port switch. Leave empty for plain rows. Must divide the port count evenly.' });
-    if (type === 'patchpanel') fields.push({ k: 'straight', label: 'Front N <-> rear N', type: 'check', v: true, hint: 'Documents a straight-through internal mapping. Untick if this panel is not wired that way.' });
+    if (type === 'switch') fields.push({ k: 'sectionRows', label: 'Rows per section', type: 'number', v: '', min: 1, max: 8, hint: 'Optional: 2 makes 8-port sections 2 x 4. Needs ports per section.' });
+    if (type === 'switch') fields.push({ k: 'portIsolation', label: 'Port isolation', type: 'check', v: false, hint: 'Access ports can only talk to uplinks, not to each other.' });
+    if (type === 'patchpanel' || type === 'socket') fields.push({ k: 'straight', label: 'Front N <-> rear N', type: 'check', v: true, hint: 'Documents a straight-through internal mapping. Untick if this panel is not wired that way.' });
     fields.push({ k: 'container', label: 'Inside', type: 'select', opts: containerOptions(isGroup ? 'group' : 'object', type, null), v: defaultContainer(type) });
-    const v = await formDlg('New ' + (isGroup ? 'group' : M.TYPE_LABELS[type]), fields, 'Create');
+    const v = await formDlg('New ' + (isGroup ? 'group' : M.TYPE_LABELS[type]), fields, 'Create', '', (vals) => (vals.ipAddress && !M.isValidIp(vals.ipAddress) ? M.IP_ERROR : null));
     if (!v) return;
     const pos = viewCentre(), mid = curMap().id;
     const r = commit('Create ' + type, (p) => {
       if (isGroup) return B.addGroupPlaced(p, mid, { name: v.name || undefined, parentGroupId: v.container || null }, pos.x, pos.y).id;
       const portCount = v.portCount != null ? parseInt(v.portCount, 10) : undefined;
-      return B.addObjectPlaced(p, mid, { type: type, name: v.name || undefined, portCount: portCount, rackHeight: v.rackHeight, straight: v.straight, wanPorts: v.wanPorts, lanPorts: v.lanPorts, sectionSize: (type === 'patchpanel' || type === 'switch') && v.sectionSize > 0 ? v.sectionSize : undefined, ipAddress: v.ipAddress, containerId: v.container || null }, pos.x, pos.y).id;
+      return B.addObjectPlaced(p, mid, { type: type, name: v.name || undefined, portCount: portCount, rackHeight: v.rackHeight, straight: v.straight, wanPorts: v.wanPorts, lanPorts: v.lanPorts, deviceKind: v.deviceKind, sectionSize: (type === 'patchpanel' || type === 'switch') && v.sectionSize > 0 ? v.sectionSize : undefined, uplinkPorts: v.uplinkPorts > 0 ? v.uplinkPorts : undefined, sectionRows: v.sectionRows > 1 ? v.sectionRows : undefined, portIsolation: !!v.portIsolation, ipAddress: v.ipAddress, containerId: v.container || null }, pos.x, pos.y).id;
     });
     if (r && r !== true) { S.sel = { kind: isGroup ? 'group' : 'object', id: r }; renderAll(); openRight(); }
   }
@@ -903,9 +1064,9 @@
   }
 
   async function newLink(prefA) {
-    const panels = S.p.objects.filter((o) => o.type === 'patchpanel');
-    if (panels.length < 2) { toast('Create at least two patch panels first', true); return; }
-    const po = panels.map((o) => [o.id, o.name]);
+    const panels = S.p.objects.filter((o) => M.isTermination(o));
+    if (panels.length < 2) { toast('Create at least two patch panels (or a panel and a wall socket) first', true); return; }
+    const po = panels.map((o) => [o.id, o.name + (o.type === 'socket' ? ' (wall socket)' : '')]);
     const a = prefA || (S.sel && S.sel.kind === 'object' && panels.some((x) => x.id === S.sel.id) ? S.sel.id : panels[0].id);
     const v = await formDlg('New fixed link', [
       { k: 'a', label: 'Panel A', type: 'select', opts: po, v: a },
@@ -924,7 +1085,7 @@
     const link = S.p.fixedLinks.find((l) => l.id === linkId);
     const draft = { aObjectId: link.aObjectId, bObjectId: link.bObjectId, wires: M.clone(link.wires) };
     let step = 1;
-    const panels = S.p.objects.filter((o) => o.type === 'patchpanel').map((o) => [o.id, o.name]);
+    const panels = S.p.objects.filter((o) => M.isTermination(o)).map((o) => [o.id, o.name + (o.type === 'socket' ? ' (wall socket)' : '')]);
     const portOptions = (objId, sel) => {
       const idx = M.buildIndex(S.p), o = idx.objects[objId];
       const own = {}; link.wires.forEach((w) => { own[w.id] = 1; });
@@ -1025,7 +1186,7 @@
     const mid = curMap().id;
     const items = [];
     S.p.groups.forEach((g) => { if (!M.placementOf(S.p, mid, g.id)) items.push(['group:' + g.id, 'Group: ' + g.name]); });
-    S.p.objects.forEach((o) => { if (!M.placementOf(S.p, mid, o.id)) items.push(['object:' + o.id, M.TYPE_LABELS[o.type] + ': ' + o.name]); });
+    S.p.objects.forEach((o) => { if (!M.placementOf(S.p, mid, o.id)) items.push(['object:' + o.id, M.typeLabel(o) + ': ' + o.name]); });
     if (!items.length) { toast('Everything is already on this map'); return; }
     const v = await formDlg('Add existing item to this map', [{ k: 'it', label: 'Item', type: 'select', opts: items, v: items[0][0] }, { k: 'contents', label: 'With contents', type: 'check', v: true, hint: 'The same equipment record is shown again - no duplicate is created.' }], 'Add');
     if (!v) return;
@@ -1036,34 +1197,70 @@
   /* ---------------------------------------------------------------- field editing */
   function onFieldChange(el) {
     let f = el.dataset.f;
-    const t = el.dataset.t, val = el.value;
+    const t = el.dataset.t, val = el.type === 'checkbox' ? el.checked : el.value;
+    if (f === 'pgPreset') {
+      if (val === 'custom') { S.customColorFor = 'pg:' + t; renderRight(); return; }
+      S.customColorFor = null; f = 'pgColor';
+    } else if (f === 'pgColor') S.customColorFor = null;
+    if (f === 'netPreset') {
+      if (val === 'custom') { S.customColorFor = 'net:' + t; renderRight(); return; }
+      S.customColorFor = null; f = 'pnet';
+    } else if (f === 'pnet') S.customColorFor = null;
     if (f === 'colorPreset') {
       if (val === 'custom') { S.customColorFor = S.sel && S.sel.id; renderRight(); return; }
       S.customColorFor = null; f = 'color';
     } else if (f === 'color') S.customColorFor = null;
     const sel = S.sel; if (!sel && !t) return;
-    commit('Edit ' + f, (p) => {
+    const netPort = f === 'pnet' && val ? (t || (sel && sel.id)) : null;
+    const beforeNet = netIssues().map((i) => i.message);
+    const ok = commit('Edit ' + f, (p) => {
       const idx = M.buildIndex(p);
+      if (f === 'pnet') { const pt = idx.ports[t || sel.id]; if (pt) { if (val) pt.networkColor = val; else delete pt.networkColor; } return; }
+      if (f === 'pdesc') { const pt = idx.ports[t || sel.id]; if (pt) { if (val.trim()) pt.description = val.trim(); else delete pt.description; } return; }
       if (f === 'plabel' || f === 'ptype' || f === 'pspeed' || f === 'pmedia' || f === 'pip') {
         const pt = idx.ports[t || sel.id]; if (!pt) return;
-        if (f === 'pip' && !M.isValidIp(val)) toast('That does not look like a valid IP address (kept as typed)', true);
+        if (f === 'pip') { M.setPortIp(p, pt.id, val); return; }
         if (f === 'plabel') { pt.label = val; B.fitMinimum(p, idx.portObj[pt.id].id); } else pt[{ ptype: 'portType', pspeed: 'speed', pmedia: 'media', pip: 'ip' }[f]] = val.trim();
         return;
       }
       if (f === 'wstatus') { M.updateWireStatus(p, t, val); return; }
       if (sel.kind === 'group' || sel.kind === 'object') {
         const c = M.findContainer(p, sel.id);
-        if (f === 'sectionSize') { M.setSectionSize(p, sel.id, parseInt(val, 10)); B.refitObject(p, sel.id); }
+        if (f === 'deviceKind') { M.setDeviceKind(p, sel.id, val); B.refitObject(p, sel.id); }
+        else if (f === 'sectionSize') { M.setSectionSize(p, sel.id, parseInt(val, 10)); B.refitObject(p, sel.id); }
+        else if (f === 'sectionRows') { M.setSwitchLayout(p, sel.id, { sectionRows: parseInt(val, 10) }); B.refitObject(p, sel.id); }
+        else if (f === 'portOrder' || f === 'align' || f === 'uplinkSide') M.setSwitchLayout(p, sel.id, { [f]: val });
+        else if (f === 'uplinkRows') { M.setSwitchLayout(p, sel.id, { uplinkRows: parseInt(val, 10) }); B.refitObject(p, sel.id); }
+        else if (f === 'portIsolation') M.setSwitchLayout(p, sel.id, { portIsolation: !!val });
+        else if (f === 'fullWidth') { M.setFullWidth(p, sel.id, !!val); B.applyFullWidthFor(p, sel.id); }
         else if (f === 'container') {
           M.setContainer(p, sel.kind, sel.id, val || null);
           M.mapsFor(p, sel.kind, sel.id).forEach((m) => { if (val) M.growToFit(p, m, val); });
         } else if (f === 'rackHeight') c.item.rackHeight = parseInt(val, 10) || null;
         else {
-          if (f === 'ipAddress' && !M.isValidIp(val)) toast('That does not look like a valid IP address (kept as typed)', true);
-          c.item[f] = f === 'ipAddress' ? val.trim() : val;
+          if (f === 'ipAddress') M.setDeviceIp(p, sel.id, val); else c.item[f] = val;
         }
       } else if (sel.kind === 'cable') M.updatePatchCable(p, sel.id, { [f]: val });
-      else if (sel.kind === 'link') M.updateLinkMeta(p, sel.id, { [f]: val });
+      else if (sel.kind === 'pgroup') {
+        const fg = M.findPortGroup(p, sel.id), side = fg && groupSide(fg.obj, fg.group);
+        if (f === 'pgName') M.updatePortGroup(p, sel.id, { name: val });
+        else if (f === 'pgColor') M.updatePortGroup(p, sel.id, { color: val });
+        else if (f === 'pgPorts') M.updatePortGroup(p, sel.id, { portsText: val, side: side || undefined });
+      } else if (sel.kind === 'link') M.updateLinkMeta(p, sel.id, { [f]: val });
+    });
+    if (ok && netPort) offerMatchNetworkColor(netPort);
+    if (ok && (f === 'pip' || f === 'ipAddress')) { const fresh = netIssues().filter((i) => beforeNet.indexOf(i.message) < 0); if (fresh.length) toast('Network warning: ' + fresh[0].message, true); }
+  }
+
+  /* after a router port gets a network colour: offer to recolour the cables that already extend from it */
+  function offerMatchNetworkColor(portId) {
+    const pt = S.p.objects.flatMap((o) => o.ports).find((x) => x.id === portId);
+    if (!pt || !pt.networkColor) return;
+    const col = pt.networkColor, ids = NM.topology.networkCables(S.p, portId);
+    const cables = S.p.patchCables.filter((c) => ids.indexOf(c.id) >= 0), diff = cables.filter((c) => c.color.toLowerCase() !== col.toLowerCase());
+    if (!diff.length) return;
+    confirmDlg('Match colours on downstream cables?', '<p><b>' + diff.length + '</b> of the <b>' + cables.length + '</b> patch cable(s) extending from this router port have a different colour.</p><p>Change them to <span class="swatch" style="background:' + esc(col) + '"></span> to match the network colour? (Cables you draw from now on use it automatically.)</p>', 'Match colours').then((yes) => {
+      if (yes) commit('Match network cable colours', (p) => { p.patchCables.forEach((c) => { if (diff.some((d) => d.id === c.id)) c.color = col; }); });
     });
   }
 
@@ -1119,7 +1316,7 @@
   function loadProject(p) {
     const fixed = B.normalizeSizes(p);
     if (fixed) setTimeout(() => toast('Enlarged ' + fixed + ' item(s) that were too small to read', false), 100);
-    S.p = p; S.mapId = p.maps[0].id; S.sel = null; S.trace = null; S.tool = null; S.undo = []; S.redo = []; S.issues = []; S.showIssues = false;
+    S.rev++; S.p = p; S.mapId = p.maps[0].id; S.sel = null; S.trace = null; S.tool = null; S.undo = []; S.redo = []; S.issues = []; S.showIssues = false;
     saveNow(); renderAll();
     if (p.placements.some((q) => q.mapId === S.mapId)) fitMap();
   }
@@ -1144,7 +1341,7 @@
     else if (choice === 'help') showHelp();
   }
   function runValidate() {
-    S.issues = M.validateProject(S.p); S.showIssues = true; renderLeft(); openLeft();
+    S.issues = allIssues(); S.showIssues = true; renderLeft(); openLeft();
     const n = S.issues.filter((i) => i.severity !== 'info').length;
     toast(n ? n + ' problem(s) found' : 'No errors or warnings');
   }
@@ -1153,7 +1350,7 @@
       title: 'How NetMap works', render: () => ({
         body: '<p><b>View mode</b> is read-only: browse, search, inspect ports and trace connections. <b>Edit</b> unlocks editing; moving anything never changes cabling.</p>' +
           '<p><b>Fixed links</b> are installed cable runs between patch panels. Each has numbered wires with explicit mappings; change them only with "Edit installed wiring".</p>' +
-          '<p><b>Patch cables</b> are removable leads between two ports. Use the "Patch cable tool" and tap two ports.</p>' +
+          '<p><b>Patch cables</b> are removable leads between two ports. Press <b>W</b> (or use the "Patch cable tool") and click two ports; with a port selected, W draws a single cable from it and leaves the new cable selected so you can set its colour.</p>' +
           '<p><b>Trace</b> follows only documented connections: patch cables, fixed wires and internal panel mappings. Proximity, groups and shared switches imply nothing.</p>' +
           '<p>Autosave goes to this browser only. Use File -> Export JSON for real backups.</p>',
         buttons: [{ key: 'x', label: 'Close', cls: 'primary' }]
@@ -1174,6 +1371,7 @@
     $('btnMode').onclick = () => setMode(isEdit() ? 'view' : 'edit');
     $('btnUndo').onclick = undo; $('btnRedo').onclick = redo;
     $('btnFile').onclick = fileMenu;
+    $('btnAlerts').onclick = runValidate;
     $('btnGraph').onclick = () => setView(S.view === 'graph' ? 'map' : 'graph');
     $('graphView').addEventListener('change', (e) => {
       const k = e.target.dataset.g; if (!k) return;
@@ -1228,13 +1426,36 @@
           if (pick) { try { pick.showPicker(); } catch (_) { pick.click(); } }
           break;
         }
+        case 'recolorNet': {
+          const pid = d.id, ids = NM.topology.networkCables(S.p, pid), col = S.p.objects.flatMap((o) => o.ports).find((x) => x.id === pid).networkColor;
+          confirmDlg('Recolour network cables', '<p>Set <span class="swatch" style="background:' + esc(col) + '"></span> on <b>' + ids.length + '</b> patch cable(s) extending from this router port (through switches and panels, not through other routers)? Cables with a manually chosen colour are included.</p>', 'Recolour').then((ok) => {
+            if (ok) commit('Recolour network cables', (p) => { p.patchCables.forEach((c) => { if (ids.indexOf(c.id) >= 0) c.color = col; }); });
+          });
+          break;
+        }
+        case 'addPGroup': {
+          const id = S.sel.id, side = $('pgNewSide') ? $('pgNewSide').value : undefined;
+          const spec = { name: $('pgNewName').value, portsText: $('pgNewPorts').value, side: side, color: $('pgNewColor').value };
+          const g = commit('Add port group', (p) => M.addPortGroup(p, id, spec));
+          if (g && g !== true) { S.sel = { kind: 'pgroup', id: g.id }; renderAll(); }
+          break;
+        }
+        case 'deletePGroup': { const f = M.findPortGroup(S.p, d.id), oid = f && f.obj.id; commit('Delete port group', (p) => M.deletePortGroup(p, d.id)); if (oid) { S.sel = { kind: 'object', id: oid }; renderAll(); } break; }
+        case 'linkFromGroup': {
+          const f = M.findPortGroup(S.p, d.id), idx = M.buildIndex(S.p);
+          const ids = f.group.portIds.filter((pid) => idx.ports[pid].side === 'rear' && !idx.portUse[pid]);
+          if (!ids.length) { toast('No free rear ports in this group', true); break; }
+          S.pgroup = { objId: f.obj.id, ids: ids, last: ids[ids.length - 1] }; S.hoverPort = null; S.preview = null;
+          renderAll(); toast(ids.length + ' port(s) ready: hover another panel or socket and click to link'); break;
+        }
+        case 'applyUplinks': { const n = parseInt($('upInput').value, 10), id = S.sel.id; commit('Set uplink ports', (p) => { M.setUplinkPorts(p, id, n); B.refitObject(p, id); }); break; }
         case 'applyPortCount': { const n = parseInt($('pcInput').value, 10), id = S.sel.id; commit('Set port count', (p) => { M.setPortCount(p, id, n); B.refitObject(p, id); }); break; }
         case 'applyRouterPorts': { const id = S.sel.id, w = parseInt($('wanInput').value, 10), l = parseInt($('lanInput').value, 10); commit('Set router ports', (p) => M.setRouterPorts(p, id, w, l)); break; }
         case 'presetPorts': { const id = S.sel.id, n = parseInt(d.n, 10); commit('Set port count', (p) => { M.setPortCount(p, id, n); B.refitObject(p, id); }); break; }
         case 'automap': { const id = S.sel.id; commit('Map front to rear', (p) => { const n = M.autoMapPanel(p, id); toast(n + ' mapping(s) added'); }); break; }
         case 'mapPort': mapPort(d.id); break;
         case 'unmap': commit('Remove internal mapping', (p) => M.removeInternalMapping(p, d.id)); break;
-        case 'startPatchFrom': S.tool = { type: 'patch', pending: d.id, cableType: 'Cat6' }; renderAll(); break;
+        case 'startPatchFrom': startWire(d.id); break;
         case 'patchTool': break;
         case 'reconnect': S.tool = { type: 'reconnect', cableId: S.sel.id, end: d.end }; renderAll(); break;
         case 'editWiring': editWiring(S.sel.id); break;
@@ -1267,6 +1488,8 @@
       else if (isEdit() && !typing && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); }
       else if (isEdit() && !typing && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') { e.preventDefault(); redo(); }
       else if (isEdit() && !typing && (e.key === 'Delete')) deleteSelection();
+      else if (isEdit() && !typing && !e.ctrlKey && !e.metaKey && !e.altKey && S.pgroup && (e.key === 'g' || e.key === 'G')) { e.preventDefault(); nameSelectedPorts(); }
+      else if (!typing && !e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'w' || e.key === 'W')) { e.preventDefault(); startWire(); }
     });
     window.addEventListener('pagehide', () => { if (S.unsaved) saveNow(); });
     window.addEventListener('beforeunload', () => { if (S.unsaved) saveNow(); });
