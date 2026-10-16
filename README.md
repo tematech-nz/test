@@ -122,6 +122,9 @@ Try it: File -> Load demo project (two rooms, a fixed link between racks, a wall
 - **Folded sections and stacking**: the layout uses an item's drawn height, so you can drop an item right under one whose Front/Rear
   section is folded. In edit mode, items stacked directly under an item (touching it, or one grid step away) follow it down or up
   when it is unfolded or folded, together with what is stacked under them in turn (one undo step).
+- **Route optimisation** (File > Find shorter routes...): lists physical routes that detour through panels (for example panel 1 > panel 3 > panel 2) although
+  a fixed link with spare or unused wires already joins two of their panels directly (panel 1 - panel 2). Each entry shows the current
+  route, the shortcut link, the panels it would skip and its free wires, with a button to jump to the link. Faulty and decommissioned links are not suggested.
 - **Pseudo-devices** (e.g. 16 cameras without 16 entries): make a port group (Ctrl+click ports, G, or "New group" in the equipment panel) and
   pick a **Plugged-in device** type, or set it later in the group's panel. The ports count as occupied (no patch cables), the map tag reads
   `Cameras x16`, and the Graph view shows one dashed endpoint "Cameras x16" connected to the switch. Clear the type to make the ports ordinary again.

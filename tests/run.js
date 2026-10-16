@@ -1296,6 +1296,27 @@ console.log('Placing new items');
 test('nextName counts up: trailing numbers keep their width, plain names get a 2', () => {
   assert.deepStrictEqual(['PC 1', 'AP-07', 'Switch', 'Rack 9', 'x99'].map(B.nextName), ['PC 2', 'AP-08', 'Switch 2', 'Rack 10', 'x100']);
 });
+test('route optimisation: a route 1 > 3 > 2 is flagged when a fixed link 1-2 has free wires', () => {
+  const p = M.createProject('ro');
+  const sw = M.addObject(p, { type: 'switch', name: 'SW', portCount: 8 }), pc = M.addObject(p, { type: 'generic', name: 'PC', portCount: 1 });
+  const mk = (n) => M.addObject(p, { type: 'patchpanel', name: n, portCount: 8, straight: true });
+  const P1 = mk('P1'), P2 = mk('P2'), P3 = mk('P3');
+  const rear = (o, n) => o.ports.find(x => x.side === 'rear' && x.label === String(n)).id, front = (o, n) => o.ports.find(x => x.side === 'front' && x.label === String(n)).id;
+  M.addFixedLink(p, { aObjectId: P1.id, bObjectId: P3.id, wireCount: 1, pairs: [[rear(P1, 1), rear(P3, 1)]] });
+  M.addFixedLink(p, { aObjectId: P3.id, bObjectId: P2.id, wireCount: 1, pairs: [[rear(P3, 2), rear(P2, 1)]] });
+  M.addPatchCable(p, { aPortId: front(P3, 1), bPortId: front(P3, 2) });
+  M.addPatchCable(p, { aPortId: sw.ports[0].id, bPortId: front(P1, 1) });
+  M.addPatchCable(p, { aPortId: pc.ports[0].id, bPortId: front(P2, 1) });
+  assert.deepStrictEqual(NM.topology.routeShortcuts(p), [], 'no direct link yet');
+  const direct = M.addFixedLink(p, { aObjectId: P1.id, bObjectId: P2.id, wireCount: 3, pairs: [[rear(P1, 2), rear(P2, 2)], [rear(P1, 3), rear(P2, 3)], [rear(P1, 4), rear(P2, 4)]] });
+  assert.deepStrictEqual(NM.topology.routeShortcuts(p), [], 'direct link exists but all wires are connected');
+  direct.wires[0].status = 'spare'; direct.wires[1].status = 'unused';
+  const s = NM.topology.routeShortcuts(p);
+  assert.strictEqual(s.length, 1);
+  assert.deepStrictEqual([s[0].fromName, s[0].toName, s[0].skipped, s[0].freeWires, s[0].saved, s[0].linkName], ['P1', 'P2', ['P3'], [1, 2], 1, direct.name]);
+  direct.status = 'faulty';
+  assert.deepStrictEqual(NM.topology.routeShortcuts(p), [], 'a faulty link is not suggested');
+});
 test('pseudo-devices: ports marked as occupied by cameras show up in the graph without 16 real devices', () => {
   const p = M.createProject('ps'), mid = p.maps[0].id;
   const sw = M.addObject(p, { type: 'switch', name: 'POE', portCount: 24 });

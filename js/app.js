@@ -1470,11 +1470,24 @@
     saveNow(); renderAll();
     if (p.placements.some((q) => q.mapId === S.mapId)) fitMap();
   }
+  /* route optimisation: routes that detour through panels although a fixed link with free wires joins two of their panels directly */
+  async function showRoutes() {
+    const list = NM.topology.routeShortcuts(S.p);
+    const body = list.length
+      ? '<div class="sub">These routes pass through more panels than needed: a fixed link with spare or unused wires already joins two of their panels directly. Re-patching onto it would shorten the route.</div>' +
+        list.map((r) => '<div class="msg-box" style="margin:8px 0"><b>' + esc(r.aName) + ' &harr; ' + esc(r.bName) + '</b>' +
+          '<div class="sub">Now: ' + esc(r.via || 'direct') + '</div>' +
+          '<div>Shortcut: <b>' + esc(r.linkName) + '</b> joins <b>' + esc(r.fromName) + '</b> and <b>' + esc(r.toName) + '</b> directly, skipping ' + esc(r.skipped.join(', ')) + ' (' + r.saved + ' fewer panel' + (r.saved === 1 ? '' : 's') + '). Free wire' + (r.freeWires.length === 1 ? '' : 's') + ': ' + r.freeWires.map((n) => 'w' + n).join(', ') + '.</div>' +
+          '<div class="btn-row" style="margin-top:6px"><button data-btn="link:' + esc(r.linkId) + '">Show ' + esc(r.linkName) + '</button></div></div>').join('')
+      : '<p>No shorter routes found: no route skips panels that a fixed link with free wires could join directly.</p>';
+    const k = await openDialog({ title: 'Shorter routes (' + list.length + ')', render: () => ({ body: body, buttons: [{ key: 'x', label: 'Close' }] }), onButton: (key, c) => c.close(key) });
+    if (k && k.indexOf('link:') === 0) goTo('link', k.slice(5));
+  }
   async function fileMenu() {
     const choice = await openDialog({
       title: 'Project: ' + S.p.name, render: () => ({
         body: '<div class="btn-row" style="flex-direction:column;align-items:stretch">' +
-          [['rename', 'Rename project'], ['json', 'Export project as JSON (backup)'], ['import', 'Import JSON...'], ['svg', 'Export map as SVG'], ['png', 'Export map as PNG'], ['pdf', 'Export PDF (maps + connection table)'], ['table', 'Connection table...'], ['grid', 'Align everything to the grid'], ['validate', 'Validate project'], ['demo', 'Load demo project...'], ['new', 'New empty project...'], ['help', 'Help']]
+          [['rename', 'Rename project'], ['json', 'Export project as JSON (backup)'], ['import', 'Import JSON...'], ['svg', 'Export map as SVG'], ['png', 'Export map as PNG'], ['pdf', 'Export PDF (maps + connection table)'], ['table', 'Connection table...'], ['routes', 'Find shorter routes...'], ['grid', 'Align everything to the grid'], ['validate', 'Validate project'], ['demo', 'Load demo project...'], ['new', 'New empty project...'], ['help', 'Help']]
             .map((b) => '<button data-btn="' + b[0] + '">' + b[1] + '</button>').join('') + '</div><p class="sub">Browser autosave is a convenience only. Export a JSON file to back up your work.</p>',
         buttons: [{ key: 'x', label: 'Close' }]
       }), onButton: (k, c) => c.close(k)
@@ -1482,6 +1495,7 @@
     if (!choice || choice === 'x') return;
     if (choice === 'rename') { const v = await formDlg('Rename project', [{ k: 'n', label: 'Name', v: S.p.name }], 'Save'); if (v && v.n) commit('Rename project', (p) => { p.name = v.n; }); }
     else if (choice === 'grid') { const n = commit('Align to grid', (p) => B.alignToGrid(p, true)); toast(typeof n === 'number' && n ? 'Aligned ' + n + ' item(s) to the grid' : 'Everything is already on the grid'); }
+    else if (choice === 'routes') showRoutes();
     else if (choice === 'json') exportJson();
     else if (choice === 'import') $('fileInput').click();
     else if (choice === 'svg' || choice === 'png' || choice === 'pdf') exportImages(choice);

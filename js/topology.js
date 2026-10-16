@@ -158,6 +158,52 @@
   }
 
   /*
+   * Route optimisation: a physical route between two devices passes through panels and sockets (device > panel > panel > panel >
+   * device). When two non-adjacent ones on that route are also joined directly by a fixed link that still has free wires
+   * (spare or unused), the route could skip the panels in between. Returns one suggestion per route, biggest saving first.
+   */
+  function routeShortcuts(p, graph) {
+    graph = graph || buildGraph(p);
+    var idx = M.buildIndex(p), out = [];
+    function freeWires(l) { return l.wires.filter(function (w) { return w.status === 'spare' || w.status === 'unused'; }); }
+    function between(a, b) {
+      return p.fixedLinks.filter(function (l) {
+        return ((l.aObjectId === a && l.bObjectId === b) || (l.aObjectId === b && l.bObjectId === a)) && l.status !== 'decommissioned' && l.status !== 'faulty';
+      });
+    }
+    graph.links.forEach(function (gl) {
+      gl.paths.forEach(function (e) {
+        var seq = [];
+        e.trace.path.forEach(function (s) {
+          if (s.type !== 'port') return;
+          var o = idx.portObj[s.id];
+          if (o && seq[seq.length - 1] !== o.id) seq.push(o.id);
+        });
+        var mid = seq.slice(1, -1), best = null;
+        for (var i = 0; i < mid.length; i++) {
+          for (var j = mid.length - 1; j >= i + 2; j--) {
+            between(mid[i], mid[j]).forEach(function (l) {
+              var free = freeWires(l);
+              if (!free.length) return;
+              var saved = j - i - 1;
+              if (!best || saved > best.saved) best = { i: i, j: j, link: l, free: free, saved: saved };
+            });
+          }
+        }
+        if (!best) return;
+        out.push({
+          aId: e.a, bId: e.b, aName: graph.nodes[e.a].name, bName: graph.nodes[e.b].name, via: e.via.join(' > '),
+          fromId: mid[best.i], toId: mid[best.j], fromName: idx.objects[mid[best.i]].name, toName: idx.objects[mid[best.j]].name,
+          skipped: mid.slice(best.i + 1, best.j).map(function (id) { return idx.objects[id].name; }),
+          linkId: best.link.id, linkName: best.link.name, freeWires: best.free.map(function (w) { return w.number; }), saved: best.saved
+        });
+      });
+    });
+    out.sort(function (x, y) { return y.saved - x.saved; });
+    return out;
+  }
+
+  /*
    * Network colour: a router port may carry a networkColor. Patch cables extending from it - through switches and panels,
    * not through other routers - default to that colour. ends are the port(s) a new cable would join.
    */
@@ -326,6 +372,6 @@
     return out;
   }
 
-  NM.topology = { segments: segments, networkIssues: networkIssues, effectiveIp: effectiveIp, networkColorFor: networkColorFor, networkCables: networkCables, canPass: canPass, buildGraph: buildGraph, reachTree: reachTree, allPaths: allPaths, subnetOf: subnetOf, PASSIVE: PASSIVE, TERMINAL: TERMINAL };
+  NM.topology = { segments: segments, networkIssues: networkIssues, effectiveIp: effectiveIp, networkColorFor: networkColorFor, routeShortcuts: routeShortcuts, networkCables: networkCables, canPass: canPass, buildGraph: buildGraph, reachTree: reachTree, allPaths: allPaths, subnetOf: subnetOf, PASSIVE: PASSIVE, TERMINAL: TERMINAL };
   if (typeof module !== 'undefined' && module.exports) module.exports = NM.topology;
 })(typeof window !== 'undefined' ? window : globalThis);

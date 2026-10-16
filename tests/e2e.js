@@ -160,6 +160,15 @@ const ok = (m) => console.log('  ok   ' + m);
     await page.click('#btnUndo');
   });
 
+  await step('File > Find shorter routes opens a report', async () => {
+    await page.click('#btnFile');
+    await page.click('#dlg button[data-btn="routes"]');
+    await page.waitForSelector('#dlg .dh');
+    const txt = await page.innerText('#dlg');
+    assert.ok(/Shorter routes \(\d+\)/.test(txt), txt.slice(0, 120));
+    await page.click('#dlg button[data-btn="x"]');
+  });
+
   await step('hidden navigation stays hidden when clicking the map or changing mode', async () => {
     await page.click('#btnMenu');
     assert.ok(!(await page.isVisible('#left')));
