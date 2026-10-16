@@ -70,7 +70,8 @@ Try it: File -> Load demo project (two rooms, a fixed link between racks, a wall
   and the section shape - e.g. a 16-port switch as two 2 x 4 sections (ports numbered 1 above 2, or across then down) - plus
   **uplink ports** (any number, shown in a purple block next to the sections: in line by default, left or right side) and
   **align** left / center / right to match the real faceplate. "Full width" stretches equipment to the inner width of its rack
-  or group and keeps following the rack when you resize it. Switches can also have **port isolation**.
+  or group and keeps following the rack when you resize it; in a narrow rack its sections wrap onto extra lines (taller), so the rack can
+  shrink down to one section wide. Switches can also have **port isolation**.
 - **Port isolation** (switches): access ports cannot talk to each other, only to uplink ports. The Graph view honours it:
   devices on an isolated switch's access ports reach the uplink side but not each other directly. They can only meet by going
   up an uplink and back down (e.g. through a router, shown as a longer path through the switch twice); if nothing upstream turns

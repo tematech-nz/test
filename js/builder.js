@@ -74,8 +74,8 @@
       if (!o.fullWidth || o.type === 'rack') return;
       var q = M.placementOf(p, mapId, k.id);
       if (!q) return;
-      var w = Math.max(L.minSize(o).w, cp.w - 2 * M.PAD), x = cp.x + M.PAD;
-      if (q.w !== w || q.x !== x) { q.w = w; q.x = x; changed = true; }
+      var w = Math.max(L.minWidth(o), cp.w - 2 * M.PAD), x = cp.x + M.PAD, h = Math.max(q.h, L.minSizeAt(o, w).h);
+      if (q.w !== w || q.x !== x || q.h !== h) { q.w = w; q.x = x; q.h = h; changed = true; }
     });
     return changed;
   }
@@ -323,11 +323,11 @@
   function minPlacementSize(p, pl) {
     var c = M.findContainer(p, pl.refId);
     if (!c) return { w: 40, h: 30 };
-    var base = c.kind === 'object' ? L.minSize(c.item) : { w: 100, h: 60 };
+    var base = c.kind === 'object' ? { w: L.minWidth(c.item), h: L.minSizeAt(c.item, pl.w).h } : { w: 100, h: 60 };
     M.containerChildren(p, pl.refId).forEach(function (k) {
       var q = M.placementOf(p, pl.mapId, k.id);
       var kc = M.findContainer(p, k.id);
-      if (q) { base.w = Math.max(base.w, (kc && kc.item.fullWidth ? L.minSize(kc.item).w + 2 * M.PAD : q.x + q.w + M.PAD - pl.x)); base.h = Math.max(base.h, q.y + q.h + M.PAD - pl.y); }
+      if (q) { base.w = Math.max(base.w, (kc && kc.item.fullWidth ? L.minWidth(kc.item) + 2 * M.PAD : q.x + q.w + M.PAD - pl.x)); base.h = Math.max(base.h, q.y + q.h + M.PAD - pl.y); }
     });
     return base;
   }
@@ -340,7 +340,7 @@
     p.placements.forEach(function (pl) {
       var c = M.findContainer(p, pl.refId);
       if (!c || c.kind !== 'object') return;
-      var mn = L.minSize(c.item);
+      var mn = L.minSizeAt(c.item, pl.w);
       if (pl.w < mn.w || pl.h < mn.h) { pl.w = Math.max(pl.w, mn.w); pl.h = Math.max(pl.h, mn.h); changed++; touched.push(pl); }
     });
     touched.forEach(function (pl) { settle(p, pl); });
@@ -350,8 +350,8 @@
   function fitMinimum(p, objectId) {
     var o = M.buildIndex(p).objects[objectId];
     if (!o) return;
-    var mn = L.minSize(o);
     p.placements.forEach(function (pl) {
+      var mn = L.minSizeAt(o, pl.w);
       if (pl.refId !== objectId || (pl.w >= mn.w && pl.h >= mn.h)) return;
       pl.w = Math.max(pl.w, mn.w); pl.h = Math.max(pl.h, mn.h);
       settle(p, pl);

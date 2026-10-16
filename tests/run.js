@@ -792,6 +792,23 @@ test('fullWidth equipment fills its rack, follows rack resizes and never shrinks
   M.setFullWidth(p, sw.id, false); assert.strictEqual(sw.fullWidth, undefined);
   assert.deepStrictEqual(overlapPairs(p), []);
 });
+test('rack with a fullWidth switch can be made much narrower: sections wrap onto more lines', () => {
+  const p = M.createProject('s'), mid = p.maps[0].id, L = NM.layout;
+  const rack = B.addObjectPlaced(p, mid, { type: 'rack', name: 'R' }, 0, 0);
+  const sw = B.addObjectPlaced(p, mid, { type: 'switch', name: 'S', portCount: 24, containerId: rack.id });
+  M.setSectionSize(p, sw.id, 8);
+  const rp = M.placementOf(p, mid, rack.id), sp = M.placementOf(p, mid, sw.id), natW = L.minSize(sw).w, natH = L.minSize(sw).h;
+  M.setFullWidth(p, sw.id, true); B.applyFullWidthFor(p, sw.id);
+  const minW = B.minPlacementSize(p, rp).w;
+  assert.ok(minW < natW + 2 * M.PAD, 'rack minimum is below the one-line width of the switch: ' + minW + ' vs ' + natW);
+  rp.w = minW; B.settle(p, rp);
+  assert.strictEqual(sp.w, rp.w - 2 * M.PAD);
+  assert.ok(sp.h > natH, 'switch grew taller to wrap its sections');
+  assert.ok(rp.w >= sp.w + 2 * M.PAD && rp.h >= sp.y + sp.h - rp.y);
+  const lay = L.computeLayout(sw, sp.w, sp.h);
+  Object.keys(lay.ports).forEach((id) => { const r = lay.ports[id]; assert.ok(r.x >= 0 && r.x + r.w <= sp.w + 0.5, 'port inside switch width'); });
+  assert.deepStrictEqual(overlapPairs(p), []);
+});
 function isoNet(isolated, upstream) {
   const p = M.createProject('iso');
   const up = upstream === 'router' ? M.addObject(p, { type: 'router', name: 'R', wanPorts: 1, lanPorts: 2 }) : M.addObject(p, { type: 'switch', name: 'T', portCount: 4 });
