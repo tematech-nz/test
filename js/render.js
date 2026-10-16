@@ -64,6 +64,8 @@
       else if (sel.kind === 'wire' && idx.wires[sel.id]) { var sw0 = idx.wires[sel.id]; if (sw0.aPortId) selPorts[sw0.aPortId] = true; if (sw0.bPortId) selPorts[sw0.bPortId] = true; }
       else if (sel.kind === 'cable' && idx.cables[sel.id]) { selPorts[idx.cables[sel.id].aPortId] = true; selPorts[idx.cables[sel.id].bPortId] = true; }
     }
+    var ringSet = {};
+    (opts.ringPorts || []).forEach(function (id) { ringSet[id] = true; });
     var prev = opts.preview || null;
     if (prev) prev.ids.forEach(function (id) { prevSet[id] = true; });
     items.forEach(function (it) {
@@ -246,6 +248,13 @@
       cableParts.push(o);
     });
 
+    Object.keys(ringSet).forEach(function (pid) {
+      var gp = portGeo[pid];
+      if (!gp) return;
+      var cx = gp.x + gp.w / 2, cy = gp.y + gp.h / 2, rr = Math.max(gp.w, gp.h) / 2 + 6;
+      cableParts.push('<g data-ring="' + esc(pid) + '" pointer-events="none"><circle cx="' + num(cx) + '" cy="' + num(cy) + '" r="' + num(rr) + '" fill="none" stroke="#d500f9" stroke-width="3"/>' +
+        '<circle cx="' + num(cx) + '" cy="' + num(cy) + '" r="' + num(rr + 4) + '" fill="none" stroke="#d500f9" stroke-width="1.5" stroke-dasharray="3 3"/></g>');
+    });
     if (opts.drop && opts.drop.line) {
       var ln = opts.drop.line;
       cableParts.push('<g data-drop="line" pointer-events="none"><path d="M' + num(ln.x) + ' ' + num(ln.y) + 'h' + num(ln.w) + '" stroke="#00c853" stroke-width="4" stroke-linecap="round"/>' +

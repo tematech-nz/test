@@ -10,7 +10,7 @@
     p: null, mapId: null, mode: 'view', sel: null, trace: null, tool: null,
     undo: [], redo: [], unsaved: false, saveErr: null, savedAt: null, lastExport: null,
     drag: null, geo: null, query: '', showIssues: false, issues: [],
-    collapsed: {}, pgroup: null, hoverPort: null, preview: null, drop: null, cableColor: '#1f77b4', customColorFor: null,
+    collapsed: {}, pgroup: null, hoverPort: null, preview: null, drop: null, cableColor: '#1f77b4', customColorFor: null, ring: null,
     view: 'map', graph: { from: '', to: '', via: false }
   };
   NM.app = { S: S, M: M }; // exposed for tests
@@ -182,6 +182,19 @@
   function setTool(t) { S.tool = t; renderAll(); }
   function cancelTool() { if (S.tool) { S.tool = null; renderAll(); } }
 
+  /* ports of the cable end being reconnected are circled (hover over "Reconnect end A/B" or while the tool is active) */
+  function ringPorts() {
+    if (S.tool && S.tool.type === 'reconnect') { const c = S.p.patchCables.find((x) => x.id === S.tool.cableId); return c ? [S.tool.end === 'a' ? c.aPortId : c.bPortId] : []; }
+    return S.ring ? [S.ring] : [];
+  }
+  /* returns a confirmation text when the two ports are in different groups (both must be in a group) */
+  function crossGroupWarning(aPortId, bPortId) {
+    const idx = M.buildIndex(S.p), oa = idx.portObj[aPortId], ob = idx.portObj[bPortId];
+    if (!oa || !ob) return null;
+    const ga = M.groupOf(S.p, oa.id), gb = M.groupOf(S.p, ob.id);
+    if (!ga || !gb || ga.id === gb.id) return null;
+    return '<p><b>' + esc(oa.name) + '</b> is in group <b>' + esc(ga.name) + '</b> and <b>' + esc(ob.name) + '</b> is in group <b>' + esc(gb.name) + '</b>.</p><p>A patch cable normally stays inside one group. Do you want to continue?</p>';
+  }
   function clearPgroup() { S.pgroup = null; S.hoverPort = null; S.preview = null; }
 
   /* Ctrl+click builds a group of free rear ports on one patch panel (Shift extends a range) */
@@ -249,15 +262,23 @@
       }
       const a = S.tool.pending;
       if (a === id) { S.tool.pending = null; renderAll(); return; }
-      const cable = commit('Add patch cable', (p) => M.addPatchCable(p, { aPortId: a, bPortId: id, color: S.cableColor, cableType: S.tool.cableType }));
-      S.tool.pending = null;
-      if (cable) { toast('Added ' + cable.name); S.sel = { kind: 'cable', id: cable.id }; renderAll(); }
+      const tool = S.tool, warn = crossGroupWarning(a, id);
+      const make = () => {
+        const cable = commit('Add patch cable', (p) => M.addPatchCable(p, { aPortId: a, bPortId: id, color: S.cableColor, cableType: tool.cableType }));
+        tool.pending = null;
+        if (cable) { toast('Added ' + cable.name); S.sel = { kind: 'cable', id: cable.id }; renderAll(); } else renderAll();
+      };
+      if (warn) confirmDlg('Connect across groups?', warn, 'Connect anyway').then((ok) => { if (ok) make(); else { tool.pending = null; renderAll(); } });
+      else make();
       return;
     }
     if (S.tool && S.tool.type === 'reconnect') {
       if (kind !== 'port') { toast('Tap a port to reconnect to, or press Esc', true); return; }
-      const t = S.tool; S.tool = null;
-      commit('Reconnect patch cable', (p) => M.updatePatchCable(p, t.cableId, t.end === 'a' ? { aPortId: id } : { bPortId: id }));
+      const t = S.tool, cab = S.p.patchCables.find((c) => c.id === t.cableId);
+      const other = cab && (t.end === 'a' ? cab.bPortId : cab.aPortId), warn = other && crossGroupWarning(id, other);
+      const go = () => { S.tool = null; commit('Reconnect patch cable', (p) => M.updatePatchCable(p, t.cableId, t.end === 'a' ? { aPortId: id } : { bPortId: id })); };
+      if (warn) confirmDlg('Connect across groups?', warn, 'Reconnect anyway').then((ok) => { if (ok) go(); });
+      else go();
       return;
     }
     if (!el) { S.sel = null; closeRight(); renderAll(); return; }
@@ -406,7 +427,7 @@
     const map = curMap();
     const r = R.renderMap(S.p, map.id, {
       mode: S.mode, selection: S.sel, highlight: S.trace && S.trace.highlight,
-      pendingPortId: S.tool && S.tool.pending, collapsed: S.collapsed, drop: S.drop,
+      pendingPortId: S.tool && S.tool.pending, collapsed: S.collapsed, drop: S.drop, ringPorts: ringPorts(),
       groupPorts: S.pgroup ? S.pgroup.ids : null, preview: S.preview
     });
     S.geo = r;
@@ -435,12 +456,12 @@
     const pc = S.tool && S.tool.type === 'patch';
     tb.innerHTML =
       ['group:Group', 'rack:Rack', 'patchpanel:Patch panel', 'switch:Switch', 'router:Router', 'internet:Internet / ISP', 'socket:Wall socket', 'generic:Generic'].map((s) => {
-        const a = s.split(':'); return '<button data-add="' + a[0] + '">+ ' + a[1] + '</button>';
+        const a = s.split(':'); return '<button data-add="' + a[0] + '" title="Create a new ' + a[1].toLowerCase() + ' on this map">+ ' + a[1] + '</button>';
       }).join('') + '<span class="sep"></span>' +
-      '<button data-act="patchTool" class="' + (pc ? 'active' : '') + '">Patch cable tool</button>' +
+      '<button data-act="patchTool" title="' + esc(TIPS.patchTool) + '" class="' + (pc ? 'active' : '') + '">Patch cable tool</button>' +
       (pc ? ' <span class="cable-colour">' + colorPicker('toolPreset', 'toolColor', S.cableColor, '__tool') + '</span>' : '') +
-      '<button data-act="newLink">+ Fixed link</button>' +
-      '<button data-act="addMapItems">Add existing here...</button>';
+      '<button data-act="newLink" title="' + esc(TIPS.newLink) + '">+ Fixed link</button>' +
+      '<button data-act="addMapItems" title="' + esc(TIPS.addMapItems) + '">Add existing here...</button>';
   }
 
   /* ---- left drawer ---- */
@@ -510,7 +531,32 @@
     return fld(label, '<input type="text" data-f="' + f + '"' + (t ? ' data-t="' + esc(t) + '"' : '') + ' value="' + esc(val) + '" ' + (extra || '') + '>');
   }
   const lnk = (kind, id, text) => '<a class="lnk" data-act="select" data-kind="' + kind + '" data-id="' + esc(id) + '">' + esc(text) + '</a>';
-  const btn = (act, label, extra, cls) => '<button data-act="' + act + '" ' + (extra || '') + ' class="' + (cls || '') + '">' + esc(label) + '</button>';
+  /* tooltips for action buttons, keyed by data-act (reconnect also by end) */
+  const TIPS = {
+    trace: 'Highlight the complete physical path through this item, across patch panels, fixed links and maps',
+    'reconnect:a': 'Move end A of this patch cable to a different port: click this, then click the new port on the map. The circled port is the end that moves.',
+    'reconnect:b': 'Move end B of this patch cable to a different port: click this, then click the new port on the map. The circled port is the end that moves.',
+    deleteSel: 'Delete the selected item (you will be asked to confirm and shown what else is removed)',
+    deleteCable: 'Remove this patch cable; both ports become free',
+    editWiring: 'Change installed wiring: endpoints, wire mappings, add or delete wires. Changes are reviewed before they are applied.',
+    automap: 'Document a straight-through panel: map every unmapped front port N to rear port N',
+    newLinkFrom: 'Create a fixed link (installed multi-wire cable) from this patch panel to another one',
+    mapPort: 'Document which port on the other side of the panel this one is physically wired to',
+    unmap: 'Remove the documented front-to-rear mapping of this port',
+    applyPortCount: 'Set the number of ports (ports in use cannot be removed)',
+    applyRouterPorts: 'Set the number of WAN and LAN ports (ports in use cannot be removed)',
+    addToMap: 'Show this item on the current map (the same record, not a copy)',
+    removeFromMap: 'Hide this item from the current map only; the equipment and its connections stay in the project',
+    startPatchFrom: 'Start a patch cable at this port: then click the other port on the map',
+    clearTrace: 'Remove the trace highlight and return to the normal map',
+    fitTrace: 'Zoom the map to the parts of the trace that are on this map',
+    patchTool: 'Draw patch cables: click one port, then another. Esc stops.',
+    newLink: 'Create a fixed link between two patch panels',
+    addMapItems: 'Show equipment that exists in the project but is not drawn on this map',
+    help: 'How NetMap works'
+  };
+  const tipFor = (act, extra) => { const m = /data-end="(\w)"/.exec(extra || ''); return (m && TIPS[act + ':' + m[1]]) || TIPS[act] || ''; };
+  const btn = (act, label, extra, cls) => '<button data-act="' + act + '" ' + (extra || '') + ' class="' + (cls || '') + '"' + (tipFor(act, extra) ? ' title="' + esc(tipFor(act, extra)) + '"' : '') + '>' + esc(label) + '</button>';
 
   function renderRight() {
     const pane = $('detailsPane');
@@ -1180,6 +1226,18 @@
         case 'help': showHelp(); break;
         default: break;
       }
+    });
+    // hovering "Reconnect end A/B" circles the port that would move
+    document.addEventListener('mouseover', (e) => {
+      const b = e.target.closest && e.target.closest('button[data-act="reconnect"]');
+      if (!b || S.sel?.kind !== 'cable') return;
+      const c = S.p.patchCables.find((x) => x.id === S.sel.id);
+      const pid = c && (b.dataset.end === 'a' ? c.aPortId : c.bPortId);
+      if (pid && S.ring !== pid) { S.ring = pid; renderCanvas(); }
+    });
+    document.addEventListener('mouseout', (e) => {
+      const b = e.target.closest && e.target.closest('button[data-act="reconnect"]');
+      if (b && S.ring) { S.ring = null; renderCanvas(); }
     });
     document.addEventListener('keydown', (e) => {
       if ($('dlg').open) return;

@@ -22,6 +22,9 @@ Try it: File -> Load demo project (two rooms, a fixed link between racks, a wall
   Objects move only by their dark drag handle (top-left); selecting never moves anything.
 - **Groups** organise equipment and can nest. Moving a group moves its contents visually; deleting one asks whether
   to keep or delete the contents. Groups never imply connectivity.
+- **Safety nets for patch cables**: connecting two ports that are in different groups asks "Do you want to continue?"
+  first (racks in the same group connect freely, and ports outside any group are never questioned). Hovering "Reconnect end A/B"
+  circles the cable end that would move, and action buttons have tooltips explaining what they do.
 - **Cable colours**: pick white, grey, green, yellow, blue, orange, red or black from the list, or `Custom...` for an RGB
   picker. The patch cable tool has its own colour list for new cables. Cables are drawn with a thin dark outline so white and
   yellow stay visible.

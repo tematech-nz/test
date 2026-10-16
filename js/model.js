@@ -104,6 +104,17 @@
     for (var j = 0; j < p.objects.length; j++) if (p.objects[j].id === id) return { kind: 'object', id: id, item: p.objects[j] };
     return null;
   }
+  /* nearest group an object sits in (directly or through a rack); null when it is not in any group */
+  function groupOf(p, objectId) {
+    var c = findContainer(p, objectId), guard = 0;
+    while (c && guard++ < 20) {
+      var par = findContainer(p, c.kind === 'group' ? c.item.parentGroupId : c.item.containerId);
+      if (!par) return null;
+      if (par.kind === 'group') return par.item;
+      c = par;
+    }
+    return null;
+  }
   function parentOf(p, kind, id) {
     var c = findContainer(p, id);
     if (!c) return null;
@@ -749,7 +760,7 @@
     SCHEMA_VERSION: SCHEMA_VERSION, CABLE_COLORS: CABLE_COLORS, OBJECT_TYPES: OBJECT_TYPES, TYPE_LABELS: TYPE_LABELS,
     CABLE_STATUS: CABLE_STATUS, WIRE_STATUS: WIRE_STATUS, LINK_STATUS: LINK_STATUS, PAD: PAD, HEADER: HEADER,
     uid: uid, clone: clone, createProject: createProject, buildIndex: buildIndex, portName: portName, wireName: wireName,
-    findContainer: findContainer, parentOf: parentOf, containerChildren: containerChildren, descendants: descendants,
+    findContainer: findContainer, groupOf: groupOf, parentOf: parentOf, containerChildren: containerChildren, descendants: descendants,
     addPlacement: addPlacement, placementOf: placementOf, placementGroup: placementGroup, movePlacement: movePlacement,
     growToFit: growToFit, mapsFor: mapsFor, addGroup: addGroup, addObject: addObject, setContainer: setContainer,
     setPortCount: setPortCount, setSectionSize: setSectionSize, validSectionSizes: validSectionSizes, defaultSectionSize: defaultSectionSize, effectiveSectionSize: effectiveSectionSize, setRouterPorts: setRouterPorts, isValidIp: isValidIp, canConnectPatch: canConnectPatch, addPatchCable: addPatchCable,

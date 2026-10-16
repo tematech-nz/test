@@ -397,6 +397,58 @@ const ok = (m) => console.log('  ok   ' + m);
     assert.notStrictEqual(await color(), '#123456');
   });
 
+
+  await step('patch cable across groups asks for confirmation; across racks in one group does not; hover circles the end', async () => {
+    const ids = await page.evaluate(() => {
+      let out;
+      NetMap.app.api.commit('groups', (p) => {
+        const B = NetMap.builder, mid = p.maps[0].id;
+        const gA = B.addGroupPlaced(p, mid, { name: 'GA' }, 2000, 40), gB = B.addGroupPlaced(p, mid, { name: 'GB' }, 2000, 600);
+        const sA = B.addObjectPlaced(p, mid, { type: 'switch', name: 'sA', portCount: 4, containerId: gA.id });
+        const sB = B.addObjectPlaced(p, mid, { type: 'switch', name: 'sB', portCount: 4, containerId: gB.id });
+        const r1 = B.addObjectPlaced(p, mid, { type: 'rack', name: 'rk1', containerId: gA.id }), r2 = B.addObjectPlaced(p, mid, { type: 'rack', name: 'rk2', containerId: gA.id });
+        const t1 = B.addObjectPlaced(p, mid, { type: 'switch', name: 't1', portCount: 4, containerId: r1.id }), t2 = B.addObjectPlaced(p, mid, { type: 'switch', name: 't2', portCount: 4, containerId: r2.id });
+        const f = (o) => o.ports[0].id;
+        out = { sA: f(sA), sB: f(sB), t1: f(t1), t2: f(t2) };
+      });
+      NetMap.app.api.fitMap();
+      return out;
+    });
+    const port = (id) => page.locator('#vp rect[data-kind="port"][data-id="' + id + '"]');
+    const count = () => page.evaluate(() => NetMap.app.S.p.patchCables.length);
+    const c0 = await count();
+    await page.click('#toolbar button[data-act="patchTool"]');
+    await port(ids.sA).click({ force: true }); await port(ids.sB).click({ force: true });
+    await page.waitForSelector('#dlg[open]');
+    assert.ok(/Do you want to continue/.test(await page.innerText('#dlg')) && /GA/.test(await page.innerText('#dlg')) && /GB/.test(await page.innerText('#dlg')));
+    await page.click('#dlg button[data-btn="no"]');
+    assert.strictEqual(await count(), c0, 'cancelled: nothing created');
+    await port(ids.sA).click({ force: true }); await port(ids.sB).click({ force: true });
+    await page.waitForSelector('#dlg[open]');
+    await page.click('#dlg button[data-btn="yes"]');
+    await page.waitForTimeout(100);
+    assert.strictEqual(await count(), c0 + 1, 'confirmed: cable created');
+    await page.click('#toolbar button[data-act="patchTool"]'); // tool may have stopped; make sure it is on
+    if (!(await page.evaluate(() => !!NetMap.app.S.tool))) await page.click('#toolbar button[data-act="patchTool"]');
+    await port(ids.t1).click({ force: true }); await port(ids.t2).click({ force: true });
+    await page.waitForTimeout(150);
+    assert.ok(!(await page.evaluate(() => document.getElementById('dlg').open)), 'two racks in one group: no warning');
+    assert.strictEqual(await count(), c0 + 2);
+    await page.keyboard.press('Escape');
+    // hover circles the port of the end that would move, and the buttons explain themselves
+    const cid = await page.evaluate(() => NetMap.app.S.p.patchCables[NetMap.app.S.p.patchCables.length - 1].id);
+    await page.evaluate((id) => NetMap.app.api.select({ kind: 'cable', id }), cid);
+    const rb = page.locator('#detailsPane button[data-act="reconnect"][data-end="a"]');
+    assert.ok(/Move end A/.test(await rb.getAttribute('title')));
+    await rb.hover();
+    assert.strictEqual(await page.locator('#vp [data-ring]').count(), 1, 'ring around end A');
+    await shot('reconnect-ring');
+    await page.mouse.move(5, 300);
+    assert.strictEqual(await page.locator('#vp [data-ring]').count(), 0, 'ring gone');
+    assert.ok((await page.locator('#toolbar button[data-act="patchTool"]').getAttribute('title')).length > 10);
+    await page.click('#btnUndo'); await page.click('#btnUndo'); await page.click('#btnUndo');
+  });
+
   await step('autosave survives a refresh', async () => {
     await page.click('#btnMode'); // back to view mode flushes the save
     const name = await page.evaluate(() => NetMap.app.S.p.name);

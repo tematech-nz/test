@@ -616,5 +616,18 @@ test('predefined cable colours and outline keep every colour visible', () => {
   assert.ok(svg.indexOf('stroke="#ffffff" stroke-width="2.4"') > 0 && svg.indexOf('stroke="#37474f" stroke-width="4"') > 0);
 });
 
+test('groupOf: nearest group through racks; null outside groups', () => {
+  const p = B.buildDemoProject();
+  assert.strictEqual(M.groupOf(p, byName(p, 'Switch A').id).name, 'Server room');
+  assert.strictEqual(M.groupOf(p, byName(p, 'PP-B').id).name, 'Office');
+  assert.strictEqual(M.groupOf(p, byName(p, 'PP-Standalone').id), null);
+  assert.strictEqual(M.groupOf(p, byName(p, 'Rack A').id).name, 'Server room');
+});
+test('port ring is drawn for hovered cable ends', () => {
+  const p = B.buildDemoProject(), c = p.patchCables[0];
+  const svg = R.renderMap(p, p.maps[0].id, { ringPorts: [c.aPortId] }).content;
+  assert.ok(svg.indexOf('data-ring="' + c.aPortId + '"') > 0 && svg.indexOf('#d500f9') > 0);
+});
+
 console.log('\n' + passed + ' passed, ' + failed + ' failed');
 process.exit(failed ? 1 : 0);
