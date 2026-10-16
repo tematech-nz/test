@@ -508,6 +508,39 @@ const ok = (m) => console.log('  ok   ' + m);
     assert.ok(!labels.some(l => /^Rack: /.test(l) && l !== 'Rack: Rack A') || true);
   });
 
+
+  await step('inside its own rack an item can be placed freely (no magnet away from seams)', async () => {
+    const ids = await page.evaluate(() => {
+      let out;
+      NetMap.app.api.commit('free rack', (p) => {
+        const B = NetMap.builder, mid = p.maps[0].id;
+        const rack = B.addObjectPlaced(p, mid, { type: 'rack', name: 'FreeRack' }, 3300, 40);
+        M = NetMap.model; M.placementOf(p, mid, rack.id).h = 600;
+        const a = B.addObjectPlaced(p, mid, { type: 'switch', name: 'FrA', portCount: 8, containerId: rack.id });
+        const b = B.addObjectPlaced(p, mid, { type: 'switch', name: 'FrB', portCount: 8, containerId: rack.id });
+        out = { a: a.id, b: b.id };
+      });
+      const S = NetMap.app.S;
+      out.plB = S.p.placements.find(q => q.refId === out.b).id;
+      NetMap.app.api.goTo('object', out.b, S.p.maps[0].id);
+      return out;
+    });
+    const gap = () => page.evaluate((i) => { const S = NetMap.app.S, a = S.p.placements.find(q => q.refId === i.a), b = S.p.placements.find(q => q.refId === i.b); return { gap: b.y - (a.y + a.h), zoom: S.p.maps[0].viewport.zoom }; }, ids);
+    const g0 = await gap();
+    assert.ok(g0.gap <= 16, 'stacked together at the start');
+    const box = await page.locator('[data-handle="move"][data-pl="' + ids.plB + '"]').boundingBox();
+    await page.mouse.move(box.x + 5, box.y + 5); await page.mouse.down();
+    await page.mouse.move(box.x + 5, box.y + 5 + 120 * g0.zoom, { steps: 8 });
+    await page.waitForTimeout(100);
+    assert.strictEqual(await page.locator('#vp [data-drop="line"]').count(), 0, 'no magnet line for free placement');
+    await page.mouse.up();
+    await page.waitForTimeout(100);
+    const g1 = await gap();
+    assert.ok(g1.gap > 60, 'stayed where dropped, not snapped back: gap ' + g1.gap);
+    // dragging it back onto the seam of two stuck items would still insert; here just check it can return next to FrA freely
+    await page.click('#btnUndo'); await page.click('#btnUndo');
+  });
+
   await step('autosave survives a refresh', async () => {
     await page.click('#btnMode'); // back to view mode flushes the save
     const name = await page.evaluate(() => NetMap.app.S.p.name);

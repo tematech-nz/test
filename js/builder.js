@@ -238,7 +238,13 @@
       .map(function (c) { return M.placementOf(p, mapId, c.id); }).filter(Boolean)
       .sort(function (a, b) { return a.y - b.y; });
   }
-  function dropSlot(p, dragPl) {
+  /*
+   * fromContainerId: the container the item was dragged out of. Coming from elsewhere, the rack magnet applies anywhere
+   * (including both ends). Moving inside its own rack, the magnet only applies at a seam between two items that are
+   * stuck together (gap <= SEAM_STUCK), so everything else can be placed freely.
+   */
+  var SEAM_STUCK = 16, SEAM_BAND = 14;
+  function dropSlot(p, dragPl, fromContainerId) {
     var c0 = M.findContainer(p, dragPl.refId);
     if (!c0 || c0.kind !== 'object' || c0.item.type === 'rack') return null;
     var rackPl = findDropContainer(p, dragPl);
@@ -246,6 +252,17 @@
     var rc = M.findContainer(p, rackPl.refId);
     if (!rc || rc.kind !== 'object' || rc.item.type !== 'rack') return null;
     var sibs = stackSiblings(p, dragPl.mapId, rackPl.refId, dragPl.refId), cy = dragPl.y + dragPl.h / 2, index = 0;
+    if (fromContainerId === rackPl.refId) {
+      var best = null;
+      for (var i = 1; i < sibs.length; i++) {
+        var bottom = sibs[i - 1].y + sibs[i - 1].h, gap = sibs[i].y - bottom;
+        if (gap > SEAM_STUCK) continue;
+        var mid = (bottom + sibs[i].y) / 2, dist = Math.abs(cy - mid);
+        if (dist <= SEAM_BAND + Math.max(0, gap) / 2 && (!best || dist < best.dist)) best = { i: i, dist: dist, y: mid };
+      }
+      if (!best) return null;
+      return { containerId: rackPl.refId, index: best.i, line: { x: rackPl.x + M.PAD / 2, y: best.y, w: rackPl.w - M.PAD } };
+    }
     sibs.forEach(function (s) { if (s.y + s.h / 2 < cy) index++; });
     var top = rackPl.y + M.HEADER, prevBottom = index ? sibs[index - 1].y + sibs[index - 1].h : top;
     var y = index < sibs.length ? (prevBottom + sibs[index].y) / 2 : prevBottom + 4;

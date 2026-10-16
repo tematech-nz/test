@@ -502,7 +502,7 @@ test('dropSlot finds the insertion line between rack neighbours; restack attache
   // drag Extra up so its centre sits between PP-A and Switch A
   const drag = pl(extra);
   drag.y = (pl(pp).y + pl(pp).h + pl(sw).y) / 2 - drag.h / 2;
-  const slot = B.dropSlot(p, drag);
+  const slot = B.dropSlot(p, drag, rack.id);
   assert.strictEqual(slot.containerId, rack.id);
   assert.strictEqual(slot.index, 1);
   const gapMid = (pl(pp).y + pl(pp).h + pl(sw).y) / 2;
@@ -513,8 +513,13 @@ test('dropSlot finds the insertion line between rack neighbours; restack attache
   assert.ok([pp, extra, sw].every(o => pl(o).x === pl(rack).x + M.PAD), 'aligned in the rack');
   assert.ok(pl(rack).y + pl(rack).h >= pl(sw).y + pl(sw).h, 'rack still contains everything');
   // dragged above everything -> index 0; far below the last item inside the rack -> last
+  // dragged from elsewhere: the magnet works at the ends too; inside its own rack only seams between stuck items magnetise
   drag.y = pl(rack).y;
-  assert.strictEqual(B.dropSlot(p, drag).index, 0);
+  assert.strictEqual(B.dropSlot(p, drag, null).index, 0);
+  assert.strictEqual(B.dropSlot(p, drag, rack.id), null, 'free placement in its own rack away from a seam');
+  drag.y = pl(rack).y + pl(rack).h - drag.h;
+  assert.strictEqual(B.dropSlot(p, drag, null).index, 2, 'from outside: after the last item');
+  assert.strictEqual(B.dropSlot(p, drag, rack.id), null);
   assert.strictEqual(M.findContainer(p, extra.id).item.containerId, rack.id);
 });
 test('no snapping for groups or when dragging a rack', () => {
@@ -525,7 +530,7 @@ test('no snapping for groups or when dragging a rack', () => {
   assert.strictEqual(B.dropSlot(p, standalone), null, 'outside every rack');
   const g = M.placementOf(p, mid, p.groups[0].id);
   standalone.x = g.x + g.w - standalone.w - 2; standalone.y = g.y + g.h - standalone.h - 2;
-  assert.ok(!B.dropSlot(p, standalone) || M.findContainer(p, B.dropSlot(p, standalone).containerId).item.type === 'rack');
+  assert.ok(!B.dropSlot(p, standalone, null) || M.findContainer(p, B.dropSlot(p, standalone).containerId).item.type === 'rack');
   const svg = R.renderMap(p, mid, { drop: { containerId: byName(p, 'Rack A').id, line: { x: 0, y: 0, w: 50 } } }).content;
   assert.ok(svg.indexOf('data-drop="line"') > 0 && svg.indexOf('#00c853') > 0);
 });

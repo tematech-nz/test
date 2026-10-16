@@ -308,7 +308,7 @@
         if (!q) return;
         const kind = h.dataset.handle, start = toMap(e.clientX, e.clientY);
         const items = kind === 'move' ? M.placementGroup(S.p, q.id).map((x) => ({ q: x, ox: x.x, oy: x.y })) : [{ q: q, ow: q.w, oh: q.h }];
-        S.drag = { kind: kind, plId: q.id, start: start, snap: JSON.stringify(S.p), items: items, moved: false, chain: kind === 'move' ? B.captureChain(S.p, q.mapId, q.refId) : [] };
+        S.drag = { kind: kind, plId: q.id, start: start, snap: JSON.stringify(S.p), items: items, moved: false, chain: kind === 'move' ? B.captureChain(S.p, q.mapId, q.refId) : [], from: (() => { const c = M.findContainer(S.p, q.refId); return c ? (c.kind === 'group' ? c.item.parentGroupId : c.item.containerId) : null; })() };
         return;
       }
       gesture = { x: e.clientX, y: e.clientY, vx: vpState().x, vy: vpState().y, target: e.target, moved: false };
@@ -337,7 +337,7 @@
           dx = snap(p0.ox + dx) - p0.ox; dy = snap(p0.oy + dy) - p0.oy;
           d.items.forEach((it) => { it.q.x = it.ox + dx; it.q.y = it.oy + dy; });
           B.applyExtension(S.p, d.items[0].q.mapId, d.chain, d.items[0].q, EXTEND_ZONE);
-          S.drop = B.dropSlot(S.p, d.items[0].q);
+          S.drop = B.dropSlot(S.p, d.items[0].q, d.from);
         } else {
           const it = d.items[0];
           const mn = B.minPlacementSize(S.p, it.q);
