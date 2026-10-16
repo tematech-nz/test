@@ -185,3 +185,11 @@ body.view-graph #canvas, body.view-graph #toolbar, body.view-graph #zoomctl, bod
 .pk.busy, .pk:disabled { background: #e3e3e3; color: #999; border-color: #bbb; cursor: not-allowed; text-decoration: line-through; }
 .pk i { position: absolute; top: -7px; right: -5px; background: #e65100; color: #fff; font-size: 9px; font-style: normal; border-radius: 8px; min-width: 14px; line-height: 14px; text-align: center; }
 .pk-sum { margin: 8px 0; padding: 6px 8px; background: #eef6ff; border-radius: 6px; font-weight: 600; }
+
+.pk.cand { background: #e8f5e9; border-color: #43a047; }
+.pk.win-ok { background: #66bb6a; color: #fff; border: 2px solid #1b5e20; }
+.pk.win-bad { background: #ffcdd2; border: 2px solid #c62828; }
+.pk-group.on { box-shadow: 0 0 0 2px #e65100; font-weight: 700; }
+.pk-group:disabled { opacity: .45; cursor: not-allowed; text-decoration: line-through; }
+.pk-place.on { background: #2e7d32; color: #fff; border-color: #1b5e20; }
+.pk-banner { margin: 6px 0; padding: 6px 8px; background: #e8f5e9; border: 1px solid #43a047; border-radius: 6px; font-size: 12px; }

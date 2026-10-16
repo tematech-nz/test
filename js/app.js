@@ -1014,6 +1014,8 @@
         else if (spec.onClick) spec.onClick(e, ctx);
       };
       dlg.onchange = (e) => { if (spec.onChange) spec.onChange(e, ctx); };
+      dlg.onmouseover = (e) => { if (spec.onHover) spec.onHover(e, ctx); };
+      dlg.onmouseout = (e) => { if (spec.onHover) spec.onHover(e, ctx, true); };
       dlg.oncancel = () => resolve(null);
       ctx.draw();
       dlg.showModal();
@@ -1231,26 +1233,40 @@
     if (panels.length < 2) { toast('Create at least two patch panels (or a panel and a wall socket) first', true); return; }
     const po = panels.map((o) => [o.id, o.name + (o.type === 'socket' ? ' (wall socket)' : '')]);
     const a0 = prefA || (S.sel && S.sel.kind === 'object' && panels.some((x) => x.id === S.sel.id) ? S.sel.id : panels[0].id);
-    const st = { a: a0, b: (panels.find((x) => x.id !== a0) || panels[1]).id, sel: { a: [], b: [] }, last: { a: null, b: null }, n: 24, mapping: 'sequential', cableType: 'Cat6', length: '', route: '' };
+    const st = { place: null, a: a0, b: (panels.find((x) => x.id !== a0) || panels[1]).id, sel: { a: [], b: [] }, last: { a: null, b: null }, n: 24, mapping: 'sequential', cableType: 'Cat6', length: '', route: '' };
     const idx = M.buildIndex(S.p);
     const objOf = (side) => idx.objects[st[side]];
     const fmt = (o, ids) => ids.map((id) => idx.ports[id].label).join(', ');
+    /* every run of n consecutive rear ports on a panel: ok when all are free (where a group of n ports could land) */
+    function windows(side, n) {
+      const rear = M.rearPorts(objOf(side)), out = [];
+      for (let i = 0; i + n <= rear.length; i++) { const ids = rear.slice(i, i + n).map((x) => x.id); out.push({ i: i, ids: ids, ok: ids.every((id) => !idx.portUse[id]) }); }
+      return out;
+    }
+    const otherSide = (side) => (side === 'a' ? 'b' : 'a');
     function grid(side) {
       const o = objOf(side), rear = M.rearPorts(o), size = M.effectiveSectionSize(o, rear.length) || rear.length;
       let h = '', gl = '';
       (o.portGroups || []).forEach((g) => {
         const ids = g.portIds.filter((id) => idx.ports[id] && idx.ports[id].side === 'rear');
-        if (ids.length) gl += '<button class="pk-group" data-pickgroup="' + esc(g.id) + '" data-side="' + side + '" style="border-color:' + esc(g.color) + ';background:' + esc(g.color) + '33" title="Pick the free ports of this group">' + esc(g.name) + ' (' + ids.length + ')</button>';
+        if (!ids.length) return;
+        const used = ids.some((id) => idx.portUse[id]), on = st.place && st.place.from === side && st.place.gid === g.id;
+        gl += '<button class="pk-group' + (on ? ' on' : '') + '" data-pickgroup="' + esc(g.id) + '" data-side="' + side + '"' + (used ? ' disabled' : '') + ' style="border-color:' + esc(g.color) + ';background:' + esc(g.color) + '33" title="' +
+          (used ? 'Some ports of this group are already connected' : 'Select this group, then place it on the other panel') + '">' + esc(g.name) + ' (' + ids.length + ')</button>';
       });
+      const placeOn = st.place && st.place.active && st.place.from !== side;
+      const cand = {};
+      if (placeOn) windows(side, st.place.n).forEach((w) => { if (w.ok) w.ids.forEach((id) => { cand[id] = true; }); });
       rear.forEach((pt, i) => {
         if (i && size && i % size === 0) h += '<span class="pk-gap"></span>';
         const busy = !!idx.portUse[pt.id], pos = st.sel[side].indexOf(pt.id), g = M.portGroupOf(o, pt.id);
-        h += '<button class="pk' + (busy ? ' busy' : '') + (pos >= 0 ? ' on' : '') + '" data-pick="' + esc(pt.id) + '" data-side="' + side + '"' + (busy ? ' disabled title="Already has a fixed wire"' : '') +
+        h += '<button class="pk' + (busy ? ' busy' : '') + (pos >= 0 ? ' on' : '') + (cand[pt.id] && pos < 0 ? ' cand' : '') + '" data-pick="' + esc(pt.id) + '" data-side="' + side + '"' + (busy ? ' disabled title="Already has a fixed wire"' : '') +
           (g ? ' style="border-bottom:4px solid ' + esc(g.color) + '" title="' + esc(g.name) + '"' : '') + '>' + esc(pt.label) + (pos >= 0 ? '<i>' + (pos + 1) + '</i>' : '') + '</button>';
       });
       const free = rear.filter((pt) => !idx.portUse[pt.id]).length;
       return '<div class="pk-side"><div class="pk-head"><b>Panel ' + side.toUpperCase() + ': ' + esc(o.name) + '</b> <span class="sub">' + free + ' of ' + rear.length + ' rear ports free - ' + st.sel[side].length + ' picked</span> ' +
-        '<button class="pk-tool" data-pickall="' + side + '">All free</button><button class="pk-tool" data-pickclear="' + side + '">Clear</button></div>' +
+        '<button class="pk-tool" data-pickall="' + side + '">All free</button><button class="pk-tool" data-pickclear="' + side + '">Clear</button>' +
+        '<button class="pk-tool pk-place' + (placeOn ? ' on' : '') + '" data-placegroup="' + side + '"' + (st.place && st.place.from !== side ? '' : ' disabled') + ' title="Select a group on the other panel first (click its name), then place it here: possible spots turn green">' + (placeOn ? 'Placing group - click a spot' : 'Place selected group') + '</button></div>' +
         (gl ? '<div class="pk-groups">' + gl + '</div>' : '') + '<div class="pk-grid">' + h + '</div></div>';
     }
     function problem() {
@@ -1266,6 +1282,7 @@
         return {
           body: fld('Panel A', '<select data-s="a">' + opts(po, st.a) + '</select>') + fld('Panel B', '<select data-s="b">' + opts(po, st.b) + '</select>') +
             '<div class="sub" style="margin:6px 0">Click ports to pick them (Shift+click for a range, or click a group name). They are joined in the order picked: pick 1,3,5,7 on A and 1-4 on B to wire A1-B1, A3-B2, A5-B3, A7-B4. Greyed ports already have a wire.</div>' +
+            (st.place && st.place.active ? '<div class="pk-banner">Placing <b>' + esc(st.place.name) + '</b> (' + st.place.n + ' port' + (st.place.n === 1 ? '' : 's') + '): hover over Panel ' + otherSide(st.place.from).toUpperCase() + ' - possible spots are green, the exact ports light up under the pointer - and click where its first wire should land. <button data-placegroup="cancel" class="pk-tool">Cancel</button></div>' : '') +
             grid('a') + grid('b') +
             (picked ? '<div class="pk-sum">' + (st.sel.a.length ? 'A: ' + esc(fmt(objOf('a'), st.sel.a)) : 'A: -') + ' &harr; ' + (st.sel.b.length ? 'B: ' + esc(fmt(objOf('b'), st.sel.b)) : 'B: -') + '</div>' + (pr ? '<div class="err-text">' + esc(pr) + '</div>' : '') :
               fld('Wires', '<input type="number" data-s="n" value="' + st.n + '" min="1" max="288">') +
@@ -1276,14 +1293,25 @@
       },
       onChange: (e, c) => {
         const t = e.target, k = t.dataset.s; if (!k) return;
-        if (k === 'a' || k === 'b') { st[k] = t.value; st.sel[k] = []; st.last[k] = null; c.draw(); }
+        if (k === 'a' || k === 'b') { st[k] = t.value; st.sel[k] = []; st.last[k] = null; st.place = null; c.draw(); }
         else st[k] = k === 'n' ? (parseInt(t.value, 10) || 1) : t.value;
       },
       onClick: (e, c) => {
-        const el = e.target.closest('[data-pick],[data-pickgroup],[data-pickall],[data-pickclear]');
+        const el = e.target.closest('[data-pick],[data-pickgroup],[data-pickall],[data-pickclear],[data-placegroup]');
         if (!el) return;
+        if (el.dataset.placegroup) { // "Place selected group" / cancel
+          if (st.place) st.place.active = el.dataset.placegroup === 'cancel' ? false : !st.place.active;
+          c.draw(); return;
+        }
         const side = el.dataset.side || el.dataset.pickall || el.dataset.pickclear, rear = M.rearPorts(objOf(side)), free = (pt) => !idx.portUse[pt.id];
         const sel = st.sel[side], add = (id) => { if (sel.indexOf(id) < 0) sel.push(id); };
+        if (el.dataset.pick && st.place && st.place.active && side !== st.place.from) { // drop the selected group here
+          const w = windows(side, st.place.n).find((x) => x.ids[0] === el.dataset.pick);
+          if (!w || !w.ok) { toast('The ' + st.place.n + ' ports of the group do not fit there: they must be consecutive and free', true); return; }
+          st.sel[side] = w.ids.slice(); st.last[side] = w.ids[0]; st.place.active = false;
+          c.draw(); return;
+        }
+        if (side === (st.place && st.place.from) && (el.dataset.pick || el.dataset.pickall || el.dataset.pickclear)) st.place = null; // the selection is no longer just the group
         if (el.dataset.pick) {
           const id = el.dataset.pick, at = sel.indexOf(id);
           if (e.shiftKey && st.last[side]) {
@@ -1291,12 +1319,24 @@
             rear.slice(Math.min(i0, i1), Math.max(i0, i1) + 1).filter(free).forEach((pt) => add(pt.id));
           } else if (at >= 0) sel.splice(at, 1); else add(id);
           st.last[side] = id;
-        } else if (el.dataset.pickgroup) {
+        } else if (el.dataset.pickgroup) { // select the whole (unconnected) group, then it can be placed on the other panel
           const g = (objOf(side).portGroups || []).find((x) => x.id === el.dataset.pickgroup);
-          if (g) rear.filter((pt) => g.portIds.indexOf(pt.id) >= 0 && free(pt)).forEach((pt) => add(pt.id));
+          const ids = g ? rear.filter((pt) => g.portIds.indexOf(pt.id) >= 0).map((pt) => pt.id) : [];
+          if (!g || !ids.length || ids.some((id) => idx.portUse[id])) { toast('That group already has connected ports', true); return; }
+          st.sel[side] = ids; st.last[side] = ids[0]; st.sel[otherSide(side)] = [];
+          st.place = { from: side, gid: g.id, name: g.name, n: ids.length, active: true };
         } else if (el.dataset.pickall) rear.filter(free).forEach((pt) => add(pt.id));
         else if (el.dataset.pickclear) st.sel[side] = [];
         c.draw();
+      },
+      onHover: (e, c, out) => { // live preview while placing a group: the exact ports it would take light up green (or red when it does not fit)
+        c.root.querySelectorAll('.pk.win-ok,.pk.win-bad').forEach((x) => x.classList.remove('win-ok', 'win-bad'));
+        if (out || !st.place || !st.place.active) return;
+        const el = e.target.closest ? e.target.closest('.pk[data-pick]') : null;
+        if (!el || el.dataset.side === st.place.from) return;
+        const rear = M.rearPorts(objOf(el.dataset.side)), i = rear.findIndex((x) => x.id === el.dataset.pick), n = st.place.n;
+        const ids = rear.slice(i, i + n).map((x) => x.id), ok = ids.length === n && ids.every((id) => !idx.portUse[id]);
+        ids.forEach((id) => { const b = c.root.querySelector('.pk[data-side="' + el.dataset.side + '"][data-pick="' + id + '"]'); if (b) b.classList.add(ok ? 'win-ok' : 'win-bad'); });
       },
       onButton: (k, c) => c.close(k === 'ok' ? 'ok' : null)
     });

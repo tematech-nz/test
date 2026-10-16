@@ -827,6 +827,39 @@ const ok = (m) => console.log('  ok   ' + m);
     await page.click('#btnUndo');
   });
 
+  await step('fixed link: click a group, "Place selected group" shows green spots and a live preview on the other panel', async () => {
+    await page.evaluate(() => NetMap.app.api.commit('group place test', (p) => {
+      const B = NetMap.builder, M = NetMap.model, mid = p.maps[0].id;
+      const a = B.addObjectPlaced(p, mid, { type: 'patchpanel', name: 'GP-A', portCount: 8, straight: true }, 5900, 40);
+      const b = B.addObjectPlaced(p, mid, { type: 'patchpanel', name: 'GP-B', portCount: 8, straight: true }, 5900, 300);
+      M.addPortGroup(p, a.id, { name: 'block', color: '#2ca02c', portsText: '5-8', side: 'rear' });
+      M.addPortGroup(p, a.id, { name: 'taken', color: '#d62728', portsText: '1-2', side: 'rear' });
+      M.addFixedLink(p, { aObjectId: a.id, bObjectId: b.id, wireCount: 1, pairs: [[a.ports.find(x => x.side === 'rear' && x.label === '1').id, b.ports.find(x => x.side === 'rear' && x.label === '6').id]] });
+    }));
+    await page.click('#toolbar button[data-act="newLink"]');
+    await page.selectOption('#dlg select[data-s="a"]', { label: 'GP-A' });
+    await page.selectOption('#dlg select[data-s="b"]', { label: 'GP-B' });
+    assert.ok(await page.isDisabled('#dlg .pk-group:has-text("taken")'), 'a group that already has a wire cannot be placed');
+    assert.ok(await page.isDisabled('#dlg .pk-place[data-placegroup="b"]'), 'place button waits for a group');
+    await page.click('#dlg .pk-group:has-text("block")');
+    assert.ok(/Placing/.test(await page.innerText('#dlg .pk-banner')));
+    assert.ok(await page.isEnabled('#dlg .pk-place[data-placegroup="b"]'));
+    // free runs of 4 on B (port 6 is wired): 1-4 and 2-5 only
+    assert.strictEqual(await page.locator('#dlg .pk.cand[data-side="b"]').count(), 5, 'possible spots are green');
+    const bp = (l) => page.locator('#dlg .pk[data-side="b"]').filter({ hasText: new RegExp('^' + l + '$') });
+    await bp('2').hover();
+    assert.strictEqual(await page.locator('#dlg .pk.win-ok').count(), 4, 'the exact ports light up');
+    await bp('7').hover();
+    assert.ok(await page.locator('#dlg .pk.win-bad').count() >= 1 && await page.locator('#dlg .pk.win-ok').count() === 0, 'a spot that does not fit is red');
+    await bp('2').click();
+    assert.ok(/A: 5, 6, 7, 8/.test(await page.innerText('#dlg .pk-sum')) && /B: 2, 3, 4, 5/.test(await page.innerText('#dlg .pk-sum')), await page.innerText('#dlg .pk-sum'));
+    await page.click('#dlg button[data-btn="ok"]');
+    await page.waitForTimeout(150);
+    const pairs = await page.evaluate(() => { const S = NetMap.app.S, l = S.p.fixedLinks[S.p.fixedLinks.length - 1], idx = NetMap.model.buildIndex(S.p); return l.wires.map((w) => idx.ports[w.aPortId].label + '-' + idx.ports[w.bPortId].label); });
+    assert.deepStrictEqual(pairs, ['5-2', '6-3', '7-4', '8-5']);
+    await page.click('#btnUndo'); await page.click('#btnUndo');
+  });
+
   await step('W hotkey: one-shot wire from the selected port keeps the new cable selected; plain W toggles the repeating tool', async () => {
     const ids = await page.evaluate(() => {
       let out;
