@@ -486,6 +486,19 @@ const ok = (m) => console.log('  ok   ' + m);
     await page.click('#btnUndo');
   });
 
+
+  await step('clicking the colour swatch switches to custom and shows the RGB picker', async () => {
+    const cid = await page.evaluate(() => NetMap.app.S.p.patchCables[0].id);
+    await page.evaluate((id) => NetMap.app.api.select({ kind: 'cable', id }), cid);
+    await page.selectOption('#detailsPane select[data-f="colorPreset"]', { label: 'green' });
+    assert.strictEqual(await page.locator('#detailsPane input[type="color"]').count(), 0);
+    await page.click('#detailsPane .swatch');
+    assert.strictEqual(await page.locator('#detailsPane input[type="color"]').count(), 1, 'picker shown');
+    assert.strictEqual(await page.$eval('#detailsPane select[data-f="colorPreset"]', (s) => s.value), 'custom', 'list switched to Custom...');
+    assert.strictEqual(await page.evaluate((id) => NetMap.app.S.p.patchCables.find(c => c.id === id).color, cid), '#2ca02c', 'colour unchanged until you pick');
+    await page.click('#btnUndo');
+  });
+
   await step('autosave survives a refresh', async () => {
     await page.click('#btnMode'); // back to view mode flushes the save
     const name = await page.evaluate(() => NetMap.app.S.p.name);

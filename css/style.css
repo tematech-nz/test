@@ -101,7 +101,7 @@ dialog .df { padding: 10px 16px; border-top: 1px solid var(--line); display: fle
 #graphView { position: absolute; inset: 0; background: #fff; overflow: auto; padding: 10px 14px; z-index: 5; }
 #graphView[hidden] { display: none; }
 body.view-graph #canvas, body.view-graph #toolbar, body.view-graph #zoomctl, body.view-graph #toolHint, body.view-graph #emptyHint { display: none !important; }
-.swatch { display: inline-block; width: 22px; height: 12px; border: 1px solid #555; border-radius: 2px; vertical-align: middle; }
+.swatch { cursor: pointer; display: inline-block; width: 22px; height: 12px; border: 1px solid #555; border-radius: 2px; vertical-align: middle; }
 .cable-colour { display: inline-flex; align-items: center; gap: 4px; padding: 0 4px; }
 .gv-controls { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; margin-bottom: 6px; }
 .gv-controls label { display: flex; gap: 6px; align-items: center; }

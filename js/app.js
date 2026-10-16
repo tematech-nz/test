@@ -523,7 +523,7 @@
     const preset = M.CABLE_COLORS.find((c) => c[1].toLowerCase() === String(value).toLowerCase());
     const custom = !preset || S.customColorFor === ownerId;
     const o = M.CABLE_COLORS.map((c) => [c[1], c[0]]).concat([['custom', 'Custom...']]);
-    return '<span class="swatch" style="background:' + esc(value) + '"></span> <select data-f="' + presetField + '">' + opts(o, custom ? 'custom' : preset[1]) + '</select>' +
+    return '<span class="swatch" role="button" data-act="customColor" data-owner="' + esc(ownerId) + '" title="Click to choose any colour" style="background:' + esc(value) + '"></span> <select data-f="' + presetField + '">' + opts(o, custom ? 'custom' : preset[1]) + '</select>' +
       (custom ? ' <input type="color" data-f="' + colorField + '" value="' + esc(value) + '" title="Custom colour">' : '');
   }
   function fld(label, html) { return '<div class="field"><label>' + label + '</label><div>' + html + '</div></div>'; }
@@ -1210,6 +1210,13 @@
         case 'removeFromMap': commit('Remove from map', (p) => { p.placements = p.placements.filter((q) => !(q.mapId === curMap().id && q.refId === d.id)); }); break;
         case 'deleteSel': deleteSelection(); break;
         case 'deleteCable': { S.sel = { kind: 'cable', id: d.id }; deleteSelection(); break; }
+        case 'customColor': {
+          S.customColorFor = d.owner;
+          if (d.owner === '__tool') renderToolbar(); else renderRight();
+          const pick = document.querySelector(d.owner === '__tool' ? '#toolbar input[type="color"]' : '#detailsPane input[type="color"]');
+          if (pick) { try { pick.showPicker(); } catch (_) { pick.click(); } }
+          break;
+        }
         case 'applyPortCount': { const n = parseInt($('pcInput').value, 10), id = S.sel.id; commit('Set port count', (p) => { M.setPortCount(p, id, n); B.refitObject(p, id); }); break; }
         case 'applyRouterPorts': { const id = S.sel.id, w = parseInt($('wanInput').value, 10), l = parseInt($('lanInput').value, 10); commit('Set router ports', (p) => M.setRouterPorts(p, id, w, l)); break; }
         case 'presetPorts': { const id = S.sel.id, n = parseInt(d.n, 10); commit('Set port count', (p) => { M.setPortCount(p, id, n); B.refitObject(p, id); }); break; }
