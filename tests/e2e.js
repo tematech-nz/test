@@ -121,6 +121,25 @@ const ok = (m) => console.log('  ok   ' + m);
     await shot('edit-mode');
   });
 
+  await step('edit history lists actions and jumps back and forward', async () => {
+    await page.evaluate(() => { const A = NetMap.app; A.commit('History test one', (p) => { p.name = 'H1'; }); A.commit('History test two', (p) => { p.name = 'H2'; }); });
+    const n0 = await page.evaluate(() => NetMap.app.S.undo.length);
+    const names = await page.evaluate(() => { const S = NetMap.app.S; return S.undo.map((e) => e.label); });
+    assert.ok(n0 >= 2, 'edit steps recorded');
+    await page.click('#btnHistory');
+    await page.waitForSelector('.hist-row');
+    assert.strictEqual(await page.locator('.hist-row.current').count(), 1);
+    assert.ok((await page.locator('.hist-row').first().innerText()).indexOf(names[names.length - 1]) >= 0, 'newest first');
+    const snapNow = await page.evaluate(() => JSON.stringify(NetMap.app.S.p));
+    await page.click('.hist-row[data-btn="go:' + (n0 - 1) + '"]');
+    assert.strictEqual(await page.evaluate(() => NetMap.app.S.undo.length), n0 - 1);
+    assert.strictEqual(await page.evaluate(() => NetMap.app.S.redo.length), 1);
+    assert.strictEqual(await page.locator('.hist-row.future').count(), 1);
+    await page.click('.hist-row[data-btn="go:' + n0 + '"]');
+    assert.strictEqual(await page.evaluate(() => JSON.stringify(NetMap.app.S.p)), snapNow, 'forward restores the exact state');
+    await page.click('dialog button[data-btn="x"]');
+  });
+
   await step('dragging by handle moves visuals but not connections', async () => {
     const before = await page.evaluate(() => JSON.stringify([NetMap.app.S.p.fixedLinks, NetMap.app.S.p.patchCables]));
     const pl0 = await page.evaluate(() => { const S = NetMap.app.S; return JSON.stringify(S.p.placements.filter(q => q.mapId === S.mapId).map(q => [q.x, q.y])); });

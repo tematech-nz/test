@@ -14,7 +14,7 @@
     collapsed: {}, pgroup: null, hoverPort: null, preview: null, drop: null, cableColor: 'auto', customColorFor: null, ring: null,
     fileDirty: false, newVersion: null, updateHidden: false, place: null, rev: 0, netRev: -1, netCache: [], view: 'map', graph: { from: '', to: '', via: false }
   };
-  NM.app = { S: S, M: M }; // exposed for tests
+  NM.app = { S: S, M: M, commit: (l, f) => commit(l, f) }; // exposed for tests
 
   /* ---------------------------------------------------------------- utils */
   let toastT = null;
@@ -84,13 +84,36 @@
     scheduleSave(); afterChange();
     return r === undefined ? true : r;
   }
-  function restore(from, to) {
+  function restore(from, to, quiet) {
     const e = from.pop();
     if (!e) return;
     to.push({ label: e.label, snap: JSON.stringify(S.p) });
     S.p = JSON.parse(e.snap); S.rev++;
-    toast((from === S.undo ? 'Undid: ' : 'Redid: ') + e.label);
+    if (!quiet) toast((from === S.undo ? 'Undid: ' : 'Redid: ') + e.label);
     scheduleSave(); afterChange();
+  }
+  /* edit history: states 0..n+m, the current one is S.undo.length; state i (> 0) is the result of the i-th recorded action */
+  function historyStates() {
+    const n = S.undo.length, m = S.redo.length, out = [{ label: 'Oldest state kept', t: 0 }];
+    S.undo.forEach((e, i) => out.push({ label: e.label, t: i + 1 }));
+    for (let j = 1; j <= m; j++) out.push({ label: S.redo[m - j].label, t: n + j });
+    return { states: out, cur: n };
+  }
+  function jumpTo(t) {
+    let n = S.undo.length; const back = t < n;
+    if (t < 0 || t > n + S.redo.length || t === n) return;
+    if (t < n) { for (; n > t; n--) restore(S.undo, S.redo, true); } else { for (; n < t; n++) restore(S.redo, S.undo, true); }
+    toast(back ? 'Reverted' : 'Moved on');
+  }
+  async function historyDlg() {
+    await openDialog({
+      title: 'Edit history', render: () => {
+        const h = historyStates();
+        const rows = h.states.slice().reverse().map((s) => '<button data-btn="go:' + s.t + '" class="hist-row' + (s.t === h.cur ? ' current' : (s.t > h.cur ? ' future' : '')) + '"><span class="hn">' + s.t + '</span><span class="grow">' + esc(s.label) + '</span><span class="tag">' + (s.t === h.cur ? 'you are here' : (s.t > h.cur ? 'redo' : 'revert here')) + '</span></button>').join('');
+        return { body: '<div class="sub">Newest first. Click an entry to return the project to the state right after it (greyed entries are undone changes you can still redo; making a new change drops them). The history is cleared when a project is loaded or imported.</div><div class="hist">' + rows + '</div>', buttons: [{ key: 'x', label: 'Close' }] };
+      },
+      onButton: (k, c) => { if (k.indexOf('go:') === 0) { jumpTo(+k.slice(3)); c.draw(); } else c.close(); }
+    });
   }
   const undo = () => restore(S.undo, S.redo);
   const redo = () => restore(S.redo, S.undo);
@@ -451,7 +474,7 @@
     const d = S.drag; S.drag = null;
     const slot = S.drop; S.drop = null;
     if (!d.moved) return;
-    S.undo.push({ label: d.kind === 'move' ? 'Move' : 'Resize', snap: d.snap }); S.redo = [];
+    S.undo.push({ label: d.kind === 'move' ? 'Move' : 'Resize', snap: d.snap }); if (S.undo.length > 100) S.undo.shift(); S.redo = [];
     if (d.kind === 'move') {
       reassignContainer(d.plId, d);
       const q = S.p.placements.find((x) => x.id === d.plId), c = q && M.findContainer(S.p, q.refId);
@@ -1440,7 +1463,7 @@
 
   function bindUi() {
     $('btnMode').onclick = () => setMode(isEdit() ? 'view' : 'edit');
-    $('btnUndo').onclick = undo; $('btnRedo').onclick = redo;
+    $('btnHistory').onclick = historyDlg; $('btnUndo').onclick = undo; $('btnRedo').onclick = redo;
     $('btnFile').onclick = fileMenu;
     $('btnAlerts').onclick = runValidate;
     $('btnGraph').onclick = () => setView(S.view === 'graph' ? 'map' : 'graph');
