@@ -34,7 +34,7 @@
   function overlaps(a, b) { var ah = effH(a), bh = effH(b); return a.x < b.x + b.w + GAP && b.x < a.x + a.w + GAP && a.y < b.y + bh + GAP && b.y < a.y + ah + GAP; }
   function siblingsOf(p, pm, pl) {
     return p.placements.filter(function (q) {
-      return q.mapId === pl.mapId && q.id !== pl.id && Object.prototype.hasOwnProperty.call(pm, q.refId) && pm[q.refId] === pm[pl.refId];
+      return !q.ghost && !pl.ghost && q.mapId === pl.mapId && q.id !== pl.id && Object.prototype.hasOwnProperty.call(pm, q.refId) && pm[q.refId] === pm[pl.refId];
     });
   }
   function boundsFor(p, pm, pl) {
@@ -286,7 +286,7 @@
     banned[pl.refId] = true;
     M.descendants(p, pl.refId).forEach(function (x) { banned[x.id] = true; });
     p.placements.forEach(function (q) {
-      if (q.mapId !== pl.mapId || banned[q.refId]) return;
+      if (q.ghost || q.mapId !== pl.mapId || banned[q.refId]) return;
       var cc = M.findContainer(p, q.refId);
       if (!cc || (cc.kind === 'object' && cc.item.type !== 'rack')) return;
       if (cx >= q.x && cx <= q.x + q.w && cy >= q.y && cy <= q.y + q.h && (!best || q.w * q.h < best.w * best.h)) best = q;
@@ -300,7 +300,7 @@
    */
   function stackSiblings(p, mapId, rackId, exceptRefId) {
     return M.containerChildren(p, rackId).filter(function (c) { return c.id !== exceptRefId; })
-      .map(function (c) { return M.placementOf(p, mapId, c.id); }).filter(Boolean)
+      .map(function (c) { return M.placementOf(p, mapId, c.id); }).filter(function (q) { return q && !q.ghost; })
       .sort(function (a, b) { return a.y - b.y; });
   }
   /*
@@ -387,7 +387,7 @@
     var changed = 0, touched = [];
     p.placements.forEach(function (pl) {
       var c = M.findContainer(p, pl.refId);
-      if (!c || c.kind !== 'object') return;
+      if (pl.ghost || !c || c.kind !== 'object') return;
       var mn = L.minSizeAt(c.item, pl.w);
       if (pl.w < mn.w || pl.h < mn.h) { pl.w = Math.max(pl.w, mn.w); pl.h = Math.max(pl.h, mn.h); changed++; touched.push(pl); }
     });
@@ -417,7 +417,7 @@
     if (!s || g <= 1 || (!force && s.gridAligned)) return 0;
     var pm = parentMap(p), changed = 0;
     function depth(pl) { var d = 0, id = pm[pl.refId], n = 0; while (id && n++ < 20) { d++; id = pm[id]; } return d; }
-    var list = p.placements.map(function (pl) { return { pl: pl, d: depth(pl) }; }).sort(function (a, b) { return a.d - b.d; });
+    var list = p.placements.filter(function (pl) { return !pl.ghost; }).map(function (pl) { return { pl: pl, d: depth(pl) }; }).sort(function (a, b) { return a.d - b.d; });
     list.forEach(function (it) {
       var pl = it.pl, par = pm[pl.refId], cp = par ? M.placementOf(p, pl.mapId, par) : null;
       var fc = M.findContainer(p, pl.refId);
@@ -440,6 +440,51 @@
     s.gridAligned = true;
     return changed;
   }
+  /*
+   * Add an item that lives on another map to this one, in one of two ways:
+   *  - ghost: a semi-transparent, non-editable copy of the item (and, for racks/groups, of what is inside it) that mirrors every
+   *    change made on its own map; the real placement stays where it is
+   *  - move: the item (with its contents) leaves the map(s) it was on, keeping its layout, and appears here
+   * (x, y) is the top-left corner of the item on this map.
+   */
+  function sourceBox(p, kind, id, fromMapId) {
+    var ids = [{ kind: kind, id: id }].concat(M.descendants(p, id).map(function (d) { return { kind: d.kind, id: d.id }; })), root = null, list = [];
+    ids.forEach(function (it) {
+      var q = fromMapId ? M.placementOf(p, fromMapId, it.id) : M.realPlacement(p, it.id);
+      if (q && !q.ghost) { list.push({ it: it, q: q }); if (it.id === id) root = q; }
+    });
+    return root ? { root: root, list: list } : null;
+  }
+  function addGhost(p, mapId, kind, id, x, y, withContents) {
+    var src = sourceBox(p, kind, id);
+    if (!src) throw new Error('This item is not on any map yet, so there is nothing to mirror. Add it normally first.');
+    var out = null;
+    src.list.forEach(function (e) {
+      if (!withContents && e.it.id !== id) return;
+      if (M.placementOf(p, mapId, e.it.id)) return;
+      var pl = M.addPlacement(p, mapId, e.it.kind, e.it.id, x + e.q.x - src.root.x, y + e.q.y - src.root.y, e.q.w, e.q.h);
+      pl.ghost = true;
+      if (e.it.id === id) out = pl;
+    });
+    return out;
+  }
+  function relocate(p, mapId, kind, id, x, y, fromMapId) {
+    var src = sourceBox(p, kind, id, fromMapId);
+    if (!src) throw new Error('This item is not on the other map');
+    var gone = {}; src.list.forEach(function (e) { gone[e.q.id] = true; });
+    var moved = src.list.map(function (e) { return { it: e.it, dx: e.q.x - src.root.x, dy: e.q.y - src.root.y, w: e.q.w, h: e.q.h }; });
+    p.placements = p.placements.filter(function (q) { return !gone[q.id]; });
+    var rootPl = null;
+    moved.forEach(function (m) {
+      p.placements = p.placements.filter(function (q) { return !(q.mapId === mapId && q.refId === m.it.id && q.ghost); }); // a ghost of it here becomes the real thing
+      var pl = M.addPlacement(p, mapId, m.it.kind, m.it.id, x + m.dx, y + m.dy, m.w, m.h);
+      if (m.it.id === id) rootPl = pl;
+    });
+    var c = M.findContainer(p, id), par = c && (c.kind === 'group' ? c.item.parentGroupId : c.item.containerId);
+    if (par && M.placementOf(p, mapId, par) && !M.placementOf(p, mapId, par).ghost) M.growToFit(p, mapId, par);
+    resolveDrop(p, rootPl.id);
+    return rootPl;
+  }
   /* after a label/port change: grow (never shrink) the object's placements to the new minimum */
   function fitMinimum(p, objectId) {
     var o = M.buildIndex(p).objects[objectId];
@@ -456,7 +501,7 @@
   function containerAt(p, mapId, cx, cy, kind, type) {
     var best = null;
     p.placements.forEach(function (q) {
-      if (q.mapId !== mapId || !(cx >= q.x && cx <= q.x + q.w && cy >= q.y && cy <= q.y + q.h)) return;
+      if (q.ghost || q.mapId !== mapId || !(cx >= q.x && cx <= q.x + q.w && cy >= q.y && cy <= q.y + q.h)) return;
       var c = M.findContainer(p, q.refId);
       if (!c) return;
       var ok = c.kind === 'group' || (c.kind === 'object' && c.item.type === 'rack' && kind === 'object' && type !== 'rack');
@@ -562,6 +607,6 @@
     return m[1] + n;
   }
 
-  NM.builder = { containerAt: containerAt, placeNewAt: placeNewAt, copyClip: copyClip, pasteClipAt: pasteClipAt, copyName: copyName, nextName: nextName, applyFullWidth: applyFullWidth, applyFullWidthFor: applyFullWidthFor, minPlacementSize: minPlacementSize, normalizeSizes: normalizeSizes, setHeightFn: setHeightFn, stackedBelow: stackedBelow, followFold: followFold, alignToGrid: alignToGrid, fitMinimum: fitMinimum, resolveDrop: resolveDrop, settle: settle, findDropContainer: findDropContainer, dropSlot: dropSlot, restack: restack, captureChain: captureChain, restoreChain: restoreChain, applyExtension: applyExtension, refitObject: refitObject, placeItem: placeItem, addGroupPlaced: addGroupPlaced, addObjectPlaced: addObjectPlaced, buildDemoProject: buildDemoProject };
+  NM.builder = { containerAt: containerAt, placeNewAt: placeNewAt, copyClip: copyClip, pasteClipAt: pasteClipAt, copyName: copyName, nextName: nextName, applyFullWidth: applyFullWidth, applyFullWidthFor: applyFullWidthFor, minPlacementSize: minPlacementSize, normalizeSizes: normalizeSizes, addGhost: addGhost, relocate: relocate, setHeightFn: setHeightFn, stackedBelow: stackedBelow, followFold: followFold, alignToGrid: alignToGrid, fitMinimum: fitMinimum, resolveDrop: resolveDrop, settle: settle, findDropContainer: findDropContainer, dropSlot: dropSlot, restack: restack, captureChain: captureChain, restoreChain: restoreChain, applyExtension: applyExtension, refitObject: refitObject, placeItem: placeItem, addGroupPlaced: addGroupPlaced, addObjectPlaced: addObjectPlaced, buildDemoProject: buildDemoProject };
   if (typeof module !== 'undefined' && module.exports) module.exports = NM.builder;
 })(typeof window !== 'undefined' ? window : globalThis);

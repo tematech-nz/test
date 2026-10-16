@@ -93,7 +93,7 @@
   function commit(label, fn) {
     const snap = JSON.stringify(S.p);
     let r;
-    try { r = fn(S.p); }
+    try { r = fn(S.p); M.syncGhosts(S.p); }
     catch (e) { S.p = JSON.parse(snap); toast(e.message, true); renderAll(); return false; }
     S.undo.push({ label: label, snap: snap }); if (S.undo.length > 100) S.undo.shift();
     S.redo = [];
@@ -143,6 +143,7 @@
     return !!(t && t[id]);
   }
   function afterChange() {
+    M.syncGhosts(S.p);
     if (!S.p.maps.some((m) => m.id === S.mapId)) S.mapId = S.p.maps[0].id;
     if (!selExists()) S.sel = null;
     if (S.pgroup && !M.buildIndex(S.p).objects[S.pgroup.objId]) clearPgroup();
@@ -359,6 +360,11 @@
     const tg = target.closest ? target.closest('[data-toggle]') : null;
     if (tg) { toggleCollapse(tg.dataset.pl, tg.dataset.toggle); return; }
     const el = target.closest ? target.closest('[data-kind]') : null;
+    if (el && target.closest('[data-ghost]')) { // a ghost copy is not editable here: take me to the real thing
+      if (S.tool || S.pgroup) { toast('That is a ghost copy: edit it on its own map', true); return; }
+      const gid = el.dataset.id, gk = el.dataset.kind, oid = gk === 'port' ? (M.buildIndex(S.p).portObj[gid] || {}).id : gid, real = oid && M.realPlacement(S.p, oid);
+      if (real) { goTo(M.findContainer(S.p, oid).kind, oid, real.mapId); toast('Ghost copy: showing the original on ' + (S.p.maps.find((m) => m.id === real.mapId) || {}).name); return; }
+    }
     if (isEdit() && !S.tool && ev && (ev.ctrlKey || ev.metaKey) && el && el.dataset.kind === 'port') { pickGroupPort(el.dataset.id, ev.shiftKey); return; }
     if (S.pgroup) {
       if (el && el.dataset.kind === 'port' && el.dataset.id !== undefined) {
@@ -423,6 +429,11 @@
         gesture = null; S.drag = null; return;
       }
       const h = isEdit() && !S.place && e.target.closest ? e.target.closest('[data-handle]') : null;
+      if (h && h.dataset.handle === 'unghost') {
+        const gq = S.p.placements.find((x) => x.id === h.dataset.pl);
+        if (gq) { const ids = M.placementGroup(S.p, gq.id).map((x) => x.id); commit('Remove ghost copy', (p) => { p.placements = p.placements.filter((x) => ids.indexOf(x.id) < 0); }); }
+        pointers.delete(e.pointerId); return;
+      }
       if (h) {
         const q = S.p.placements.find((x) => x.id === h.dataset.pl);
         if (!q) return;
@@ -1399,16 +1410,50 @@
     }
   }
 
+  /*
+   * Add an item from another map to this one: as a ghost copy (semi-transparent, non-editable, mirrors every change made on its
+   * own map) or by relocating it (it leaves its old map). Items that are on no map yet are simply placed.
+   */
   async function addExisting() {
-    const mid = curMap().id;
+    const mid = curMap().id, idx = M.buildIndex(S.p);
     const items = [];
-    S.p.groups.forEach((g) => { if (!M.placementOf(S.p, mid, g.id)) items.push(['group:' + g.id, 'Group: ' + g.name]); });
-    S.p.objects.forEach((o) => { if (!M.placementOf(S.p, mid, o.id)) items.push(['object:' + o.id, M.typeLabel(o) + ': ' + o.name]); });
+    S.p.groups.forEach((g) => { if (!M.placementOf(S.p, mid, g.id)) items.push({ key: 'group:' + g.id, kind: 'group', id: g.id, label: 'Group: ' + g.name }); });
+    S.p.objects.forEach((o) => { if (!M.placementOf(S.p, mid, o.id)) items.push({ key: 'object:' + o.id, kind: 'object', id: o.id, label: M.typeLabel(o) + ': ' + o.name }); });
     if (!items.length) { toast('Everything is already on this map'); return; }
-    const v = await formDlg('Add existing item to this map', [{ k: 'it', label: 'Item', type: 'select', opts: items, v: items[0][0] }, { k: 'contents', label: 'With contents', type: 'check', v: true, hint: 'The same equipment record is shown again - no duplicate is created.' }], 'Add');
-    if (!v) return;
-    const a = v.it.split(':'), pos = viewCentre();
-    commit('Add to map', (p) => { B.placeItem(p, mid, a[0], a[1], pos.x, pos.y, v.contents); });
+    const realMaps = (it) => S.p.placements.filter((q) => q.refId === it.id && !q.ghost).map((q) => q.mapId).filter((m, i, a) => a.indexOf(m) === i && m !== mid);
+    const st = { item: items[0].key, mode: 'ghost', from: '', contents: true };
+    const cur = () => items.find((x) => x.key === st.item);
+    const isCont = (it) => it.kind === 'group' || (idx.objects[it.id] && idx.objects[it.id].type === 'rack');
+    const v = await openDialog({
+      title: 'Add existing item to this map',
+      render: () => {
+        const it = cur(), maps = realMaps(it), hasSrc = maps.length > 0;
+        if (!hasSrc) st.mode = 'place';
+        else if (st.mode === 'place') st.mode = 'ghost';
+        if (!maps.some((m) => m === st.from)) st.from = maps[0] || '';
+        const modeOpts = hasSrc ? [['ghost', 'Ghost copy - semi-transparent, not editable, mirrors the other map'], ['move', 'Relocate - move it here and remove it from the other map']] : [['place', 'Place it on this map (it is not on any map yet)']];
+        return {
+          body: fld('Item', '<select data-s="item">' + opts(items.map((x) => [x.key, x.label]), st.item) + '</select>') +
+            fld('How', '<select data-s="mode">' + opts(modeOpts, st.mode) + '</select>' + (hasSrc ? '<div class="sub">' + (st.mode === 'ghost' ? 'The same record is drawn here faintly. Edit it on the map where it lives; its size follows that map. A ghost never changes layout here and can be removed with the red x.' : 'Layout of the item (and what is inside it) is kept. It is removed from the other map and is editable here.') + '</div>' : '')) +
+            (hasSrc && st.mode === 'move' && maps.length > 1 ? fld('Move from', '<select data-s="from">' + opts(maps.map((m) => [m, S.p.maps.find((x) => x.id === m).name]), st.from) + '</select>') : '') +
+            (isCont(it) && st.mode !== 'move' ? fld('With contents', '<label><input type="checkbox" data-s="contents"' + (st.contents ? ' checked' : '') + '> include what is inside</label>') : ''),
+          buttons: [{ key: 'no', label: 'Cancel' }, { key: 'ok', label: st.mode === 'move' ? 'Relocate here' : (st.mode === 'ghost' ? 'Add ghost copy' : 'Add'), cls: 'primary' }]
+        };
+      },
+      onChange: (e, c) => {
+        const t = e.target, k = t.dataset.s; if (!k) return;
+        st[k] = k === 'contents' ? t.checked : t.value;
+        c.draw();
+      },
+      onButton: (k, c) => c.close(k === 'ok' ? 'ok' : null)
+    });
+    if (v !== 'ok') return;
+    const it = cur(), pos = viewCentre(), mode = st.mode;
+    commit(mode === 'move' ? 'Relocate to this map' : (mode === 'ghost' ? 'Add ghost copy' : 'Add to map'), (p) => {
+      if (mode === 'ghost') B.addGhost(p, mid, it.kind, it.id, pos.x, pos.y, isCont(it) ? st.contents : false);
+      else if (mode === 'move') B.relocate(p, mid, it.kind, it.id, pos.x, pos.y, st.from);
+      else B.placeItem(p, mid, it.kind, it.id, pos.x, pos.y, true);
+    });
   }
 
   /* ---------------------------------------------------------------- field editing */

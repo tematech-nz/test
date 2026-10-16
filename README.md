@@ -148,6 +148,10 @@ Try it: File -> Load demo project (two rooms, a fixed link between racks, a wall
   longer cuts across unrelated equipment; it shows over its own endpoint groups, racks and panels and over empty canvas.
   Select the link (or trace it) to see its full length on top.
 - **Selecting a fixed link, wire or patch cable** highlights its ports (yellow) on both ends, on whichever map they appear.
+- **Add existing here** (toolbar) brings an item from another map to this one in one of two ways: a **ghost copy** (semi-transparent,
+  not editable, mirrors every change made on its own map - name, ports, size; it takes no part in layout; tap it to jump to the
+  original, remove it with its red x in edit mode) or **Relocate** (the item with its contents and layout moves here and leaves the
+  other map). Items that are on no map yet are simply placed.
 - **Maps**: the same object can be shown on several maps ("Add existing here"); connections reference the shared
   object and port records. Trace results offer "open <map>" links to continue across maps.
 

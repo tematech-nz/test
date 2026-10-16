@@ -170,6 +170,22 @@
     }
     return null;
   }
+  /*
+   * Ghost placements: a semi-transparent, non-editable copy of an item on another map. It shows the same record, so every change
+   * made on the item's own map shows here; its size follows the real placement (position is its own). Ghosts take no part in
+   * layout (overlaps, containers, racks).
+   */
+  function realPlacement(p, refId) {
+    for (var i = 0; i < p.placements.length; i++) if (p.placements[i].refId === refId && !p.placements[i].ghost) return p.placements[i];
+    return null;
+  }
+  function syncGhosts(p) {
+    p.placements.forEach(function (pl) {
+      if (!pl.ghost) return;
+      var r = realPlacement(p, pl.refId);
+      if (r) { pl.w = r.w; pl.h = r.h; }
+    });
+  }
   /* the placement itself plus placements of its visual contents on the same map */
   function placementGroup(p, placementId) {
     var pl = p.placements.filter(function (x) { return x.id === placementId; })[0];
@@ -177,7 +193,7 @@
     var list = [pl];
     descendants(p, pl.refId).forEach(function (d) {
       var q = placementOf(p, pl.mapId, d.id);
-      if (q) list.push(q);
+      if (q && !!q.ghost === !!pl.ghost) list.push(q);
     });
     return list;
   }
@@ -189,11 +205,11 @@
     var guard = 0;
     while (containerId && guard++ < 20) {
       var cp = placementOf(p, mapId, containerId);
-      if (cp) {
+      if (cp && !cp.ghost) {
         var maxR = 0, maxB = 0, any = false;
         containerChildren(p, containerId).forEach(function (c) {
           var q = placementOf(p, mapId, c.id);
-          if (q) { any = true; maxR = Math.max(maxR, q.x + q.w); maxB = Math.max(maxB, q.y + q.h); }
+          if (q && !q.ghost) { any = true; maxR = Math.max(maxR, q.x + q.w); maxB = Math.max(maxB, q.y + q.h); }
         });
         if (any) {
           cp.w = Math.max(cp.w, maxR + PAD - cp.x);
@@ -1033,7 +1049,7 @@
     findContainer: findContainer, groupOf: groupOf, parentOf: parentOf, containerChildren: containerChildren, descendants: descendants,
     addPlacement: addPlacement, placementOf: placementOf, placementGroup: placementGroup, movePlacement: movePlacement,
     growToFit: growToFit, mapsFor: mapsFor, addGroup: addGroup, addObject: addObject, setContainer: setContainer,
-    setPortCount: setPortCount, findPortGroup: findPortGroup, parsePortRange: parsePortRange, addPortGroup: addPortGroup, updatePortGroup: updatePortGroup, deletePortGroup: deletePortGroup, portGroupOf: portGroupOf, prunePortGroups: prunePortGroups, hasDeviceIp: hasDeviceIp, pseudoOf: pseudoOf, pseudoDevices: pseudoDevices, hasPortIp: hasPortIp, setDeviceIp: setDeviceIp, effectivePortIp: effectivePortIp, ipList: ipList, setPortIp: setPortIp, IP_ERROR: IP_ERROR, setDeviceKind: setDeviceKind, isTermination: isTermination, DEVICE_KINDS: DEVICE_KINDS, deviceKindInfo: deviceKindInfo, typeLabel: typeLabel, accessPorts: accessPorts, validSectionRows: validSectionRows, setUplinkPorts: setUplinkPorts, setSwitchLayout: setSwitchLayout, setFullWidth: setFullWidth, setSectionSize: setSectionSize, validSectionSizes: validSectionSizes, defaultSectionSize: defaultSectionSize, effectiveSectionSize: effectiveSectionSize, setRouterPorts: setRouterPorts, isValidIp: isValidIp, canConnectPatch: canConnectPatch, addPatchCable: addPatchCable,
+    setPortCount: setPortCount, findPortGroup: findPortGroup, parsePortRange: parsePortRange, addPortGroup: addPortGroup, updatePortGroup: updatePortGroup, deletePortGroup: deletePortGroup, portGroupOf: portGroupOf, prunePortGroups: prunePortGroups, hasDeviceIp: hasDeviceIp, realPlacement: realPlacement, syncGhosts: syncGhosts, pseudoOf: pseudoOf, pseudoDevices: pseudoDevices, hasPortIp: hasPortIp, setDeviceIp: setDeviceIp, effectivePortIp: effectivePortIp, ipList: ipList, setPortIp: setPortIp, IP_ERROR: IP_ERROR, setDeviceKind: setDeviceKind, isTermination: isTermination, DEVICE_KINDS: DEVICE_KINDS, deviceKindInfo: deviceKindInfo, typeLabel: typeLabel, accessPorts: accessPorts, validSectionRows: validSectionRows, setUplinkPorts: setUplinkPorts, setSwitchLayout: setSwitchLayout, setFullWidth: setFullWidth, setSectionSize: setSectionSize, validSectionSizes: validSectionSizes, defaultSectionSize: defaultSectionSize, effectiveSectionSize: effectiveSectionSize, setRouterPorts: setRouterPorts, isValidIp: isValidIp, canConnectPatch: canConnectPatch, addPatchCable: addPatchCable,
     updatePatchCable: updatePatchCable, deletePatchCable: deletePatchCable, addInternalMapping: addInternalMapping,
     removeInternalMapping: removeInternalMapping, autoMapPanel: autoMapPanel, rearPorts: rearPorts,
     sequentialPorts: sequentialPorts, addFixedLink: addFixedLink, updateLinkMeta: updateLinkMeta,

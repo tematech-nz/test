@@ -15,7 +15,7 @@ cannot break a connection. Files use LF line endings and are written with 2-spac
   "objects":    [ { "id", "type", "name", "location", "description", "containerId": id|null,
                     "rackHeight"?: n, "ports": [ { "id", "label", "side": "front"|"rear",
                     "portType"?, "speed"?, "media"? } ] } ],
-  "placements": [ { "id", "mapId", "refType": "group"|"object", "refId", "x", "y", "w", "h" } ],
+  "placements": [ { "id", "mapId", "refType": "group"|"object", "refId", "x", "y", "w", "h", "ghost"? } ],
   "patchCables":[ { "id", "name", "aPortId", "bPortId", "cableType", "color", "length", "status" } ],
   "fixedLinks": [ { "id", "name", "aObjectId", "bObjectId", "cableType", "length", "route", "status",
                     "wires": [ { "id", "number", "aPortId": id|null, "bPortId": id|null, "status" } ] } ],
@@ -49,7 +49,8 @@ cannot break a connection. Files use LF line endings and are written with 2-spac
 - Patch panels have `front` and `rear` ports and an optional `sectionSize` (ports per visual section; must divide the
   per-side port count, otherwise the automatic split is used). It is cosmetic and never affects connectivity. All other equipment has `front` ports only.
 - A **placement** is the visual position of a group or object on one map. The same record may have placements
-  on several maps; connection records reference object and port IDs only, never placements.
+  on several maps; connection records reference object and port IDs only, never placements. `ghost: true` marks a faded,
+  non-editable copy of an item that lives (non-ghost) on another map; its size follows the real placement.
 - Statuses: patch cable `planned|active|faulty|spare`; wire `connected|spare|unused|faulty`;
   link `planned|installed|faulty|decommissioned`.
 

@@ -179,6 +179,36 @@ const ok = (m) => console.log('  ok   ' + m);
     assert.strictEqual(await page.evaluate(() => localStorage.getItem('netmap.quickstart.seen')), '1');
   });
 
+  await step('add existing here: ghost copy mirrors the other map (faded, click goes to the original); relocate moves it', async () => {
+    const ids = await page.evaluate(() => {
+      const A = NetMap.app, B = NetMap.builder, M = NetMap.model, out = { m1: A.S.mapId };
+      A.commit('ghost setup', (p) => {
+        const m2 = { id: M.uid('map'), name: 'Ghost map', location: '', viewport: { x: 0, y: 0, zoom: 1 } };
+        p.maps.push(m2); out.m2 = m2.id;
+        out.sw = B.addObjectPlaced(p, m2.id, { type: 'switch', name: 'GhostSrc', portCount: 8 }, 40, 40).id;
+      });
+      return out;
+    });
+    await page.click('#toolbar button[data-act="addMapItems"]');
+    await page.selectOption('#dlg select[data-s="item"]', { label: 'Switch: GhostSrc' });
+    assert.ok(/Ghost copy/.test(await page.innerText('#dlg select[data-s="mode"]')) && /Relocate/.test(await page.innerText('#dlg select[data-s="mode"]')));
+    await page.click('#dlg button[data-btn="ok"]');
+    await page.waitForTimeout(200);
+    const g = await page.evaluate((i) => NetMap.app.S.p.placements.filter((q) => q.refId === i.sw).map((q) => ({ map: q.mapId, ghost: !!q.ghost })), ids);
+    assert.deepStrictEqual(g.sort((x, y) => (x.ghost ? 1 : 0) - (y.ghost ? 1 : 0)), [{ map: ids.m2, ghost: false }, { map: ids.m1, ghost: true }]);
+    assert.ok(await page.locator('#vp [data-ghost="1"]').count() >= 1, 'faded copy drawn');
+    assert.strictEqual(await page.locator('#vp [data-ghost="1"] [data-handle="move"]').count(), 0);
+    await page.evaluate((i) => { NetMap.app.S.p.objects.find((o) => o.id === i.sw).name = 'GhostSrc renamed'; document.getElementById('btnMode').click(); document.getElementById('btnMode').click(); }, ids);
+    await page.evaluate(() => { // a tap on the faded copy (synthetic pointer events: other items may lie on top of it on screen)
+      const r = document.querySelector('#vp [data-ghost="1"] rect[data-kind="object"]'), o = { bubbles: true, pointerId: 77, pointerType: 'mouse', button: 0, clientX: 5, clientY: 5 };
+      r.dispatchEvent(new PointerEvent('pointerdown', o)); r.dispatchEvent(new PointerEvent('pointerup', o));
+    });
+    await page.waitForTimeout(200);
+    assert.strictEqual(await page.evaluate(() => NetMap.app.S.mapId), ids.m2, 'tapping a ghost opens the original');
+    await page.selectOption('#mapSelect', ids.m1);
+    await page.click('#btnUndo'); await page.click('#btnUndo');
+  });
+
   await step('hidden navigation stays hidden when clicking the map or changing mode', async () => {
     await page.click('#btnMenu');
     assert.ok(!(await page.isVisible('#left')));

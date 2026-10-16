@@ -1311,6 +1311,48 @@ test('graph view: an edge spanning several columns is routed around the devices 
   const near = GV.edgePath(A, nodes.find(n => n.col === 1 && n.row === 2), 'lk8');
   assert.ok(!near.pts, 'neighbouring columns keep the smooth curve');
 });
+test('ghost copies mirror the real item on another map; relocate moves it with its layout', () => {
+  const p = M.createProject('gh'), m1 = p.maps[0].id;
+  const m2 = M.uid('map'); p.maps.push({ id: m2, name: 'Second', location: '', viewport: { x: 0, y: 0, zoom: 1 } });
+  const rack = B.addObjectPlaced(p, m1, { type: 'rack', name: 'Rack' }, 40, 40);
+  const sw = B.addObjectPlaced(p, m1, { type: 'switch', name: 'Sw', portCount: 8, containerId: rack.id });
+  const solo = B.addObjectPlaced(p, m1, { type: 'generic', name: 'Solo', portCount: 1 }, 800, 40);
+  const rp = M.placementOf(p, m1, rack.id), sp = M.placementOf(p, m1, sw.id);
+  // ghost of one item
+  const g = B.addGhost(p, m2, 'object', solo.id, 100, 100, false);
+  assert.ok(g.ghost && g.mapId === m2);
+  assert.strictEqual(M.realPlacement(p, solo.id).mapId, m1);
+  const real = M.placementOf(p, m1, solo.id);
+  assert.deepStrictEqual([g.w, g.h], [real.w, real.h]);
+  solo.name = 'Solo renamed'; real.w += 40; // changed on its own map
+  let svg = R.renderMap(p, m2, {}).content;
+  assert.ok(svg.indexOf('Solo renamed') > 0 && svg.indexOf('data-ghost="1"') > 0 && svg.indexOf('opacity="0.42"') > 0, 'ghost mirrors the name and is faded');
+  assert.ok(svg.indexOf('width="' + (real.w) + '"') > 0, 'ghost follows the new size');
+  assert.ok(!/data-handle="move"/.test(R.renderMap(p, m2, { mode: 'edit' }).content), 'no move handle on a ghost');
+  assert.ok(/data-handle="unghost"/.test(R.renderMap(p, m2, { mode: 'edit' }).content), 'but a remove handle in edit mode');
+  M.syncGhosts(p); assert.strictEqual(g.w, real.w);
+  // a ghost takes no part in layout: a real item dropped on it is not pushed away
+  const other = B.placeNewAt(p, m2, 'object', { type: 'generic', name: 'Other', portCount: 1 }, 100, 100);
+  assert.strictEqual(other.placement.x, 100); assert.strictEqual(other.placement.y, 100);
+  assert.ok(!B.containerAt(p, m2, 110, 110, 'object', 'generic') || !B.containerAt(p, m2, 110, 110, 'object', 'generic').ghost);
+  // ghost of a rack with contents keeps the layout
+  const gr = B.addGhost(p, m2, 'object', rack.id, 600, 300, true);
+  const gs = M.placementOf(p, m2, sw.id);
+  assert.ok(gs.ghost && gs.x - gr.x === sp.x - rp.x && gs.y - gr.y === sp.y - rp.y);
+  assert.throws(() => B.addGhost(p, m2, 'object', M.addObject(p, { type: 'switch', name: 'Unplaced', portCount: 4 }).id, 0, 0, false), /not on any map/);
+  // survives export / import; removing the item removes its ghosts
+  assert.ok(M.importProject(JSON.stringify(p)).project.placements.some(q => q.ghost));
+  // relocate the switch (a ghost of it already sits on map 2 and becomes the real thing)
+  const moved = B.relocate(p, m2, 'object', solo.id, 300, 400, m1);
+  assert.ok(!moved.ghost && !M.placementOf(p, m1, solo.id) && M.placementOf(p, m2, solo.id) === moved);
+  assert.strictEqual(p.placements.filter(q => q.refId === solo.id).length, 1);
+  // relocating a rack moves it with its contents, layout intact
+  const rr = B.relocate(p, m2, 'object', rack.id, 900, 600, m1);
+  assert.ok(!M.placementOf(p, m1, rack.id) && !M.placementOf(p, m1, sw.id));
+  const ns = M.placementOf(p, m2, sw.id);
+  assert.ok(!ns.ghost && ns.x - rr.x === sp.x - rp.x && ns.y - rr.y === sp.y - rp.y, 'contents keep their offsets');
+  assert.deepStrictEqual(overlapPairs(p), []);
+});
 test('route optimisation: a route 1 > 3 > 2 is flagged when a fixed link 1-2 has free wires', () => {
   const p = M.createProject('ro');
   const sw = M.addObject(p, { type: 'switch', name: 'SW', portCount: 8 }), pc = M.addObject(p, { type: 'generic', name: 'PC', portCount: 1 });

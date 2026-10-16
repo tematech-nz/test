@@ -72,10 +72,11 @@
       var pl = it.pl, coll = (!exporting && !it.isGroup && opts.collapsed && opts.collapsed[pl.id]) || null;
       it.coll = coll;
       // never draw equipment below the size where its port labels are readable (old or hand-edited files)
-      var mn = it.isGroup ? { w: 0, h: 0 } : L.minSizeAt(it.ref, pl.w), bw = Math.max(pl.w, mn.w), bh = Math.max(pl.h, mn.h);
+      var gsrc = pl.ghost ? M.realPlacement(p, pl.refId) : null, gw = gsrc ? gsrc.w : pl.w, gh = gsrc ? gsrc.h : pl.h; // a ghost is as big as the real thing
+      var mn = it.isGroup ? { w: 0, h: 0 } : L.minSizeAt(it.ref, gw), bw = Math.max(gw, mn.w), bh = Math.max(gh, mn.h);
       it.lay = !it.isGroup && it.ref.ports.length ? L.computeLayout(it.ref, bw, bh, coll) : null;
       var anyColl = coll && Object.keys(coll).some(function (k) { return coll[k]; });
-      it.box = { x: pl.x, y: pl.y, w: bw, h: it.lay && anyColl ? it.lay.h : bh, id: pl.id };
+      it.box = { x: pl.x, y: pl.y, w: bw, h: it.lay && anyColl ? it.lay.h : bh, id: pl.id, ghost: !!pl.ghost };
       byRef[pl.refId] = it.box;
     });
 
@@ -87,7 +88,8 @@
       var container = it.isGroup || ref.type === 'rack';
       var dim = hl && !container && !hl.objects[ref.id];
       var x = [];
-      x.push('<g data-kind="' + (it.isGroup ? 'group' : 'object') + '" data-id="' + esc(ref.id) + '"' + (dim ? ' opacity="0.25"' : '') + '>');
+      var ghost = !!pl.ghost;
+      x.push('<g data-kind="' + (it.isGroup ? 'group' : 'object') + '" data-id="' + esc(ref.id) + '"' + (ghost ? ' data-ghost="1" opacity="0.42"' : (dim ? ' opacity="0.25"' : '')) + '>');
       x.push('<rect data-kind="' + (it.isGroup ? 'group' : 'object') + '" data-id="' + esc(ref.id) + '" x="' + num(pl.x) + '" y="' + num(pl.y) + '" width="' + num(pl.w) + '" height="' + num(pl.h) + '" rx="' + (container ? 6 : (ref.type === 'internet' ? 14 : 3)) + '" fill="' + st.fill + '"' +
         (hl && container ? ' fill-opacity="0.6"' : '') + ' stroke="' + (isDrop ? '#00c853' : (isSel ? SEL : st.stroke)) + '" stroke-width="' + (isDrop ? 4 : (isSel ? 3 : 1.5)) + '"' + (st.dash ? ' stroke-dasharray="' + st.dash + '"' : '') + '/>');
       var tx = pl.x + (editing ? 22 : 6);
@@ -166,7 +168,10 @@
             '<text x="' + num(abs.x + abs.w / 2) + '" y="' + num(abs.y + abs.h / 2 + 3) + '" font-size="' + num(Math.min(9, abs.h * 0.55)) + '" text-anchor="middle" fill="#111" font-family="sans-serif" pointer-events="none">' + esc(trunc(pt.label, Math.max(1, Math.floor(abs.w / 5.5)))) + '</text>' + netBar + '</g>');
         });
       }
-      if (editing) {
+      if (ghost) {
+        x.push('<text x="' + num(pl.x + pl.w - 6) + '" y="' + num(pl.y + pl.h - 5) + '" font-size="9" font-style="italic" text-anchor="end" fill="#555" font-family="sans-serif" pointer-events="none">ghost copy - edit it on its own map</text>');
+        if (editing) x.push('<g data-handle="unghost" data-pl="' + esc(plId) + '" style="cursor:pointer"><title>Remove this ghost copy from the map</title><rect data-handle="unghost" data-pl="' + esc(plId) + '" x="' + num(pl.x + 3) + '" y="' + num(pl.y + 3) + '" width="16" height="14" rx="2" fill="#b71c1c"/><path data-handle="unghost" data-pl="' + esc(plId) + '" d="M' + num(pl.x + 7) + ' ' + num(pl.y + 6) + 'l8 8M' + num(pl.x + 15) + ' ' + num(pl.y + 6) + 'l-8 8" stroke="#fff" stroke-width="1.6"/></g>');
+      } else if (editing) {
         x.push('<rect data-handle="move" data-pl="' + esc(plId) + '" x="' + num(pl.x + 3) + '" y="' + num(pl.y + 3) + '" width="16" height="14" rx="2" fill="#37474f" style="cursor:move"/>' +
           '<path d="M' + num(pl.x + 6) + ' ' + num(pl.y + 8) + 'h10M' + num(pl.x + 6) + ' ' + num(pl.y + 12) + 'h10" stroke="#fff" stroke-width="1.5" pointer-events="none"/>');
         x.push('<rect data-handle="resize" data-pl="' + esc(plId) + '" x="' + num(pl.x + pl.w - 12) + '" y="' + num(pl.y + pl.h - 12) + '" width="12" height="12" fill="#37474f" opacity="0.7" style="cursor:nwse-resize"/>');
