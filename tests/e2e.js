@@ -922,6 +922,37 @@ const ok = (m) => console.log('  ok   ' + m);
     for (let i = 0; i < 12; i++) await page.click('#btnUndo');
   });
 
+
+  await step('adding a device to a row inside a rack is free placement (no magnet line, row untouched)', async () => {
+    const ids = await page.evaluate(() => {
+      let out;
+      NetMap.app.api.commit('row rack', (p) => {
+        const B = NetMap.builder, M = NetMap.model, mid = p.maps[0].id;
+        const rack = B.addObjectPlaced(p, mid, { type: 'rack', name: 'RowRack' }, 9600, 40);
+        const rp = M.placementOf(p, mid, rack.id); rp.w = 800; rp.h = 360;
+        const mk = (n, x) => { const o = B.addObjectPlaced(p, mid, { type: 'internet', name: n, portCount: 1, containerId: rack.id }, 0, 0); const q = M.placementOf(p, mid, o.id); q.x = rp.x + x; q.y = rp.y + 60; return q.id; };
+        const outside = B.addObjectPlaced(p, mid, { type: 'internet', name: 'RowNew', portCount: 1 }, 9600, 520);
+        out = { rack: rack.id, row: [mk('R1', 12), mk('R2', 212), mk('R3', 412)], mover: M.placementOf(p, mid, outside.id).id, outside: outside.id };
+      });
+      NetMap.app.api.goTo('object', out.rack, NetMap.app.S.p.maps[0].id);
+      return out;
+    });
+    const rowPos = () => page.evaluate((r) => r.map(id => { const q = NetMap.app.S.p.placements.find(x => x.id === id); return [q.x, q.y]; }), ids.row);
+    const before = JSON.stringify(await rowPos());
+    const info = await page.evaluate((i) => { const S = NetMap.app.S, q = S.p.placements.find(x => x.id === i.mover), rp = S.p.placements.find(x => x.refId === i.rack), r1 = S.p.placements.find(x => x.id === i.row[0]); return { zoom: S.p.maps[0].viewport.zoom, dx: (rp.x + 640 - q.x), dy: (r1.y + 5 - q.y) }; }, ids);
+    const box = await page.locator('[data-handle="move"][data-pl="' + ids.mover + '"]').boundingBox();
+    await page.mouse.move(box.x + 5, box.y + 5); await page.mouse.down();
+    await page.mouse.move(box.x + 5 + info.dx * info.zoom, box.y + 5 + info.dy * info.zoom, { steps: 10 });
+    await page.waitForTimeout(100);
+    assert.strictEqual(await page.locator('#vp [data-drop="line"]').count(), 0, 'no magnet line beside the row');
+    await page.mouse.up();
+    await page.waitForTimeout(100);
+    assert.strictEqual(JSON.stringify(await rowPos()), before, 'the existing row did not move');
+    const inRack = await page.evaluate((i) => NetMap.app.S.p.objects.find(o => o.id === i.outside).containerId === i.rack, ids);
+    assert.ok(inRack, 'it joined the rack');
+    for (let i = 0; i < 2; i++) await page.click('#btnUndo');
+  });
+
   await step('autosave survives a refresh', async () => {
     await page.click('#btnMode'); // back to view mode flushes the save
     const name = await page.evaluate(() => NetMap.app.S.p.name);

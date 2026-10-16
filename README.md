@@ -104,10 +104,11 @@ Try it: File -> Load demo project (two rooms, a fixed link between racks, a wall
 - **Dragging into container edges**: drag an item toward the bottom or right edge of its group or rack and the container
   grows live to hold it (up to about 60 units past the edge). Drag further and the extension disappears again; drop outside
   or inside another container to move it there. Dropping inside the extension keeps the larger container.
-- **Rack stacking**: dragging equipment from outside into a rack outlines the rack in green and shows a line where it will attach;
-  on drop the rack's equipment is re-stacked with it at that position. Moving equipment around inside its own rack is free: the
-  magnet only applies at a seam between two items that are stuck together, so you can insert an item between them (the line
-  shows where) or place it anywhere else without snapping.
+- **Rack stacking**: dragging equipment from outside into a rack outlines the rack in green and shows a line where it will attach.
+  The magnet only applies in stack-like spots: it is off when you place a device **beside** others in a row (so you can line
+  devices up freely) and, for items already in the rack, it only appears at a seam between two items that are stuck together.
+  A magnet drop inserts at the line and pushes what is below it down - it never re-flows the rest of the rack, and it only
+  aligns the item to the left edge when the rack really is a left-aligned stack.
 - **No overlaps**: items inside the same container (or at the top level of a map) never overlap. A dropped, newly placed or
   resized item slides to the nearest free spot; containers grow to hold what is inside and push neighbouring
   containers away (with their contents), cascading outward.
