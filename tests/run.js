@@ -1280,6 +1280,18 @@ test('a new item dropped into a free gap between two rack items stays there; a d
   assert.strictEqual(low.y, lowY, 'the item below is not pushed');
   assert.deepStrictEqual(overlapPairs(p), []);
 });
+test('copy placed right under an item in a rack sits there, not at the next item far below', () => {
+  const p = M.createProject('under'), mid = p.maps[0].id;
+  const rack = B.addObjectPlaced(p, mid, { type: 'rack', name: 'R' }, 0, 0);
+  const rp = M.placementOf(p, mid, rack.id); rp.w = 600; rp.h = 1200;
+  const mk = (n, y) => { const o = B.addObjectPlaced(p, mid, { type: 'patchpanel', name: n, portCount: 24, straight: true, containerId: rack.id }, 0, 0); const q = M.placementOf(p, mid, o.id); q.x = rp.x + M.PAD; q.y = rp.y + y; return { o, q }; };
+  const one = mk('1', 100), three = mk('3', 800);
+  const y3 = three.q.y;
+  const copy = B.pasteClipAt(p, mid, B.copyClip(p, mid, 'object', one.o.id), one.q.x, one.q.y + one.q.h + 4);
+  assert.ok(copy.placement.y >= one.q.y + one.q.h && copy.placement.y <= one.q.y + one.q.h + 30, 'right under the original: ' + (copy.placement.y - one.q.y - one.q.h));
+  assert.strictEqual(three.q.y, y3, 'the item further down did not move');
+  assert.deepStrictEqual(overlapPairs(p), []);
+});
 test('folded sections: stacked items follow when the one above folds or unfolds; dropping under a folded item is not pushed away', () => {
   const p = M.createProject('f'), mid = p.maps[0].id, L = NM.layout;
   const a = B.addObjectPlaced(p, mid, { type: 'patchpanel', name: 'A', portCount: 16, straight: true }, 100, 100);

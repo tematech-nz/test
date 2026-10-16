@@ -351,8 +351,13 @@
     var sibs = stackSiblings(p, mapId, rackId, dragRefId), left = rackPl.x + M.PAD;
     var stacked = sibs.every(function (s) { return Math.abs(s.x - left) < 3; });
     var lastBottom = sibs.reduce(function (m, s) { return Math.max(m, s.y + s.h); }, rackPl.y + M.HEADER - 2);
-    var slotTop = index < sibs.length ? sibs[index].y : lastBottom + 8;
-    var below = sibs.filter(function (s) { return s.y >= slotTop - 1; });
+    var prevBottom = index > 0 ? sibs[index - 1].y + effH(sibs[index - 1]) : rackPl.y + M.HEADER - 2;
+    var nextTop = index < sibs.length ? sibs[index].y : Infinity;
+    // room for it between its neighbours: it sits right under the item above (the rack's usual 8px spacing) and nothing moves;
+    // in a tight stack it takes the place of the next item and pushes that one and everything below down
+    var fits = nextTop - prevBottom >= dragPl.h + 8 + 8;
+    var slotTop = index >= sibs.length ? lastBottom + 8 : (fits ? prevBottom + 8 : nextTop);
+    var below = fits || index >= sibs.length ? [] : sibs.filter(function (s) { return s.y >= slotTop - 1; });
     dragPl.y = slotTop;
     dragPl.x = stacked ? left : Math.max(dragPl.x, left);
     below.forEach(function (s) { s.y += dragPl.h + 8; });
