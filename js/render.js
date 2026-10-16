@@ -10,6 +10,7 @@
     rack: { fill: '#e6e6e6', stroke: '#555', dash: '' },
     patchpanel: { fill: '#fdf6e3', stroke: '#b58900', dash: '' },
     'switch': { fill: '#e6f4ea', stroke: '#2e7d32', dash: '' },
+    router: { fill: '#e3f2fd', stroke: '#1565c0', dash: '' },
     socket: { fill: '#f3e5f5', stroke: '#7b1fa2', dash: '' },
     generic: { fill: '#ffffff', stroke: '#777', dash: '' }
   };
@@ -87,12 +88,17 @@
       var tx = pl.x + (editing ? 22 : 6);
       var label = ref.name + (!it.isGroup && ref.type === 'rack' && ref.rackHeight ? ' (' + ref.rackHeight + 'U)' : '');
       x.push('<text x="' + num(tx) + '" y="' + num(pl.y + 14) + '" font-size="12" font-weight="bold" fill="#222" font-family="sans-serif" pointer-events="none">' + esc(trunc(label, Math.floor((pl.w - (tx - pl.x) - 4) / 6.5))) + '</text>');
+      if (!it.isGroup && ref.type === 'router' && ref.ipAddress) {
+        x.push('<text x="' + num(pl.x + pl.w - 5) + '" y="' + num(pl.y + 14) + '" font-size="9" text-anchor="end" fill="#0d47a1" font-family="sans-serif" pointer-events="none">' + esc(ref.ipAddress) + '</text>');
+      }
       if (it.lay) {
         if (it.lay.sections.length) {
           it.lay.sections.forEach(function (sec) {
-            var rear = sec.side === 'rear', coll = sec.collapsed;
-            x.push('<rect x="' + num(pl.x + sec.x) + '" y="' + num(pl.y + sec.y) + '" width="' + num(sec.w) + '" height="' + num(sec.h) + '" rx="3" fill="' + (rear ? '#ffe9cc' : '#fffdf0') + '" stroke="' + (rear ? '#d38b2c' : '#d4b44a') + '" stroke-width="1"' + (rear ? ' stroke-dasharray="4 2"' : '') + ' pointer-events="none"/>');
-            x.push('<text x="' + num(pl.x + sec.x + 5) + '" y="' + num(pl.y + sec.y + 10.5) + '" font-size="8.5" font-weight="bold" fill="' + (rear ? '#8a4b00' : '#7a6200') + '" font-family="sans-serif" pointer-events="none">' + (rear ? 'REAR' : 'FRONT') + ' (' + sec.count + ')</text>');
+            var rear = sec.side === 'rear' || sec.side === 'wan', coll = sec.collapsed;
+            var title = { front: 'FRONT', rear: 'REAR', wan: 'WAN', lan: 'LAN' }[sec.side];
+            var wanSec = sec.side === 'wan';
+            x.push('<rect x="' + num(pl.x + sec.x) + '" y="' + num(pl.y + sec.y) + '" width="' + num(sec.w) + '" height="' + num(sec.h) + '" rx="3" fill="' + (wanSec ? '#fde4e1' : (rear ? '#ffe9cc' : (sec.side === 'lan' ? '#e8f5e9' : '#fffdf0'))) + '" stroke="' + (wanSec ? '#c0504d' : (rear ? '#d38b2c' : (sec.side === 'lan' ? '#4c9a50' : '#d4b44a'))) + '" stroke-width="1"' + (sec.side === 'rear' ? ' stroke-dasharray="4 2"' : '') + ' pointer-events="none"/>');
+            x.push('<text x="' + num(pl.x + sec.x + 5) + '" y="' + num(pl.y + sec.y + 10.5) + '" font-size="8.5" font-weight="bold" fill="' + (wanSec ? '#8e2a26' : (rear ? '#8a4b00' : '#444')) + '" font-family="sans-serif" pointer-events="none">' + title + ' (' + sec.count + ')</text>');
             if (!exporting) {
               x.push('<g data-toggle="' + sec.side + '" data-pl="' + esc(plId) + '" style="cursor:pointer"><title>' + (coll ? 'Expand' : 'Collapse') + ' ' + sec.side + ' ports</title>' +
                 '<rect data-toggle="' + sec.side + '" data-pl="' + esc(plId) + '" x="' + num(pl.x + sec.x) + '" y="' + num(pl.y + sec.y) + '" width="' + num(sec.w) + '" height="' + sec.headH + '" fill="transparent"/>' +
@@ -107,12 +113,13 @@
           if (r.hidden) return;
           var use = idx.portUse[pt.id], mapped = idx.mapByPort[pt.id];
           var fill = use ? (use.kind === 'patch' ? '#bbdefb' : '#ffe0b2') : (mapped ? '#f5f5f5' : '#ffffff');
+          if (!use && pt.role === 'wan') fill = '#fff3f1';
           var isHi = hl && hl.ports[pt.id], isSelPort = sel && sel.kind === 'port' && sel.id === pt.id, isPending = opts.pendingPortId === pt.id;
           if (isHi) fill = HI;
           var stroke = isPending ? '#d500f9' : (isSelPort ? SEL : '#444'), sw = isPending || isSelPort ? 2.5 : 1;
           if (groupSet[pt.id]) { fill = '#e1bee7'; stroke = '#8e24aa'; sw = 2.5; }
           if (prevSet[pt.id]) { fill = prev.ok ? '#c8e6c9' : '#ffcdd2'; stroke = prev.ok ? '#2e7d32' : '#c62828'; sw = 2.5; }
-          x.push('<g data-kind="port" data-id="' + esc(pt.id) + '"><title>' + esc(ref.name + ' / ' + pt.label + (pt.side === 'rear' ? ' (rear)' : '')) + '</title>' +
+          x.push('<g data-kind="port" data-id="' + esc(pt.id) + '"><title>' + esc(ref.name + ' / ' + pt.label + (pt.side === 'rear' ? ' (rear)' : '') + (pt.role ? ' (' + pt.role.toUpperCase() + ')' : '') + (pt.ip ? ' ' + pt.ip : '')) + '</title>' +
             '<rect data-kind="port" data-id="' + esc(pt.id) + '" x="' + num(abs.x) + '" y="' + num(abs.y) + '" width="' + num(abs.w) + '" height="' + num(abs.h) + '" rx="2" fill="' + fill + '" stroke="' + stroke + '" stroke-width="' + sw + '"' + (pt.side === 'rear' ? ' stroke-dasharray="3 1"' : '') + '/>' +
             '<text x="' + num(abs.x + abs.w / 2) + '" y="' + num(abs.y + abs.h / 2 + 3) + '" font-size="' + num(Math.min(9, abs.h * 0.55)) + '" text-anchor="middle" fill="#111" font-family="sans-serif" pointer-events="none">' + esc(trunc(pt.label, Math.max(1, Math.floor(abs.w / 5.5)))) + '</text></g>');
         });

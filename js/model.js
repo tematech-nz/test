@@ -4,8 +4,8 @@
   var NM = g.NetMap = g.NetMap || {};
 
   var SCHEMA_VERSION = 1;
-  var OBJECT_TYPES = ['rack', 'patchpanel', 'switch', 'socket', 'generic'];
-  var TYPE_LABELS = { rack: 'Rack', patchpanel: 'Patch panel', switch: 'Switch', socket: 'Wall socket', generic: 'Generic' };
+  var OBJECT_TYPES = ['rack', 'patchpanel', 'switch', 'router', 'socket', 'generic'];
+  var TYPE_LABELS = { rack: 'Rack', patchpanel: 'Patch panel', switch: 'Switch', router: 'Router', socket: 'Wall socket', generic: 'Generic' };
   var CABLE_STATUS = ['planned', 'active', 'faulty', 'spare'];
   var WIRE_STATUS = ['connected', 'spare', 'unused', 'faulty'];
   var LINK_STATUS = ['planned', 'installed', 'faulty', 'decommissioned'];
@@ -208,6 +208,13 @@
     return grp;
   }
 
+  /* routers: WAN ports first, then LAN ports; each port has a role and an optional IP address */
+  function routerPorts(wan, lan) {
+    var ports = [], i;
+    for (i = 1; i <= wan; i++) ports.push({ id: uid('prt'), label: 'W' + i, side: 'front', role: 'wan', ip: '' });
+    for (i = 1; i <= lan; i++) ports.push({ id: uid('prt'), label: 'L' + i, side: 'front', role: 'lan', ip: '' });
+    return ports;
+  }
   function makePorts(type, count, labels) {
     var ports = [], i;
     if (type === 'patchpanel') {
@@ -230,13 +237,19 @@
     if (OBJECT_TYPES.indexOf(o.type) < 0) throw new Error('Unknown object type');
     checkContainerRule(p, 'object', o.type, o.containerId);
     var n = o.portCount == null ? defaultPortCount(o.type) : o.portCount;
+    var wan = o.wanPorts == null ? 1 : o.wanPorts, lan = o.lanPorts == null ? 4 : o.lanPorts;
+    if (o.type === 'router') {
+      if (!(wan >= 0 && lan >= 0 && wan + lan <= 96) || wan !== Math.floor(wan) || lan !== Math.floor(lan)) throw new Error('Router needs 0-96 ports in total');
+      n = 0;
+    }
     if (n < 0 || n > 96 || n !== Math.floor(n)) throw new Error('Port count must be 0-96');
     var same = p.objects.filter(function (x) { return x.type === o.type; }).length;
     var obj = {
       id: uid('obj'), type: o.type, name: o.name || (TYPE_LABELS[o.type] + ' ' + (same + 1)),
       location: o.location || '', description: o.description || '',
-      containerId: o.containerId || null, ports: makePorts(o.type, n)
+      containerId: o.containerId || null, ports: o.type === 'router' ? routerPorts(wan, lan) : makePorts(o.type, n)
     };
+    if (o.type === 'router') obj.ipAddress = o.ipAddress || '';
     if (o.type === 'rack') obj.rackHeight = o.rackHeight || 42;
     p.objects.push(obj);
     if (o.type === 'patchpanel' && o.straight) autoMapPanel(p, obj.id);
@@ -257,6 +270,7 @@
     var idx = buildIndex(p), o = idx.objects[objectId];
     if (!o) throw new Error('Object not found');
     if (o.type === 'rack') throw new Error('Racks have no ports');
+    if (o.type === 'router') throw new Error('Use setRouterPorts for routers');
     if (n < 0 || n > 96 || n !== Math.floor(n)) throw new Error('Port count must be 0-96');
     function used(pt) { return idx.portUse[pt.id] || idx.mapByPort[pt.id]; }
     function adjust(side) {
@@ -275,6 +289,25 @@
     }
     if (o.type === 'patchpanel') { adjust('front'); adjust('rear'); } else adjust('front');
     o.ports.sort(function (a, b) { return (a.side === b.side ? 0 : (a.side === 'front' ? -1 : 1)); });
+  }
+
+  /* routers: set WAN and LAN counts independently; ports in use cannot be removed */
+  function setRouterPorts(p, objectId, wan, lan) {
+    var idx = buildIndex(p), o = idx.objects[objectId];
+    if (!o || o.type !== 'router') throw new Error('Not a router');
+    if (!(wan >= 0 && lan >= 0 && wan + lan <= 96) || wan !== Math.floor(wan) || lan !== Math.floor(lan)) throw new Error('Router needs 0-96 ports in total');
+    function adjust(role, n, prefix) {
+      var list = o.ports.filter(function (pt) { return pt.role === role; });
+      if (n > list.length) {
+        for (var i = list.length + 1; i <= n; i++) o.ports.push({ id: uid('prt'), label: prefix + i, side: 'front', role: role, ip: '' });
+      } else if (n < list.length) {
+        var drop = list.slice(n);
+        drop.forEach(function (pt) { if (idx.portUse[pt.id]) throw new Error('Port ' + pt.label + ' is in use; disconnect it first'); });
+        o.ports = o.ports.filter(function (pt) { return drop.indexOf(pt) < 0; });
+      }
+    }
+    adjust('wan', wan, 'W'); adjust('lan', lan, 'L');
+    o.ports.sort(function (a, b) { return (a.role === b.role ? 0 : (a.role === 'wan' ? -1 : 1)); });
   }
 
   /* ---------- patch cables ---------- */
@@ -518,6 +551,15 @@
     if (kind === 'group') removeGroupCore(p, id); else removeObjectCore(p, id);
   }
 
+  /* accepts IPv4 (optionally /prefix), or anything with ':' that looks like IPv6; empty is fine */
+  function isValidIp(s) {
+    s = String(s || '').trim();
+    if (!s) return true;
+    var m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})(?:\/(\d{1,2}))?$/.exec(s);
+    if (m) return [m[1], m[2], m[3], m[4]].every(function (x) { return +x <= 255; }) && (m[5] === undefined || +m[5] <= 32);
+    return /^[0-9a-fA-F:.]+(?:\/\d{1,3})?$/.test(s) && s.indexOf(':') >= 0;
+  }
+
   /* ---------- search ---------- */
   function search(p, query, limit) {
     var q = String(query || '').trim().toLowerCase();
@@ -531,11 +573,11 @@
     p.maps.forEach(function (m) { if (has(m.name, m.location, m.id)) out.push({ kind: 'map', id: m.id, title: m.name, sub: 'Map' + (m.location ? ' - ' + m.location : '') }); });
     p.groups.forEach(function (x) { if (has(x.name, x.location, x.description, x.id)) out.push({ kind: 'group', id: x.id, title: x.name, sub: 'Group' + (x.location ? ' - ' + x.location : '') }); });
     p.objects.forEach(function (o) {
-      if (has(o.name, o.location, o.description, o.id, TYPE_LABELS[o.type])) out.push({ kind: 'object', id: o.id, title: o.name, sub: TYPE_LABELS[o.type] + (o.location ? ' - ' + o.location : '') });
+      if (has(o.name, o.location, o.description, o.id, TYPE_LABELS[o.type], o.ipAddress)) out.push({ kind: 'object', id: o.id, title: o.name, sub: TYPE_LABELS[o.type] + (o.location ? ' - ' + o.location : '') });
     });
     p.objects.forEach(function (o) {
       o.ports.forEach(function (pt) {
-        if (has(pt.label, pt.id)) out.push({ kind: 'port', id: pt.id, title: o.name + ' / ' + pt.label + (pt.side === 'rear' ? ' (rear)' : ''), sub: 'Port' });
+        if (has(pt.label, pt.id, pt.ip, pt.role)) out.push({ kind: 'port', id: pt.id, title: o.name + ' / ' + pt.label + (pt.side === 'rear' ? ' (rear)' : ''), sub: 'Port' + (pt.ip ? ' - ' + pt.ip : '') });
       });
     });
     p.patchCables.forEach(function (c) { if (has(c.name, c.id)) out.push({ kind: 'cable', id: c.id, title: c.name, sub: 'Patch cable: ' + portName(p, c.aPortId, idx) + ' <-> ' + portName(p, c.bPortId, idx) }); });
@@ -575,6 +617,8 @@
         if (!c) add('error', 'BAD_CONTAINER', 'Object "' + o.name + '" refers to a missing container', 'object', o.id);
         else if (c.kind === 'object' && c.item.type !== 'rack') add('error', 'BAD_CONTAINER', 'Object "' + o.name + '" is inside a non-container object', 'object', o.id);
       }
+      if (!isValidIp(o.ipAddress)) add('warning', 'BAD_IP', 'Router "' + o.name + '" has an invalid IP address: ' + o.ipAddress, 'object', o.id);
+      o.ports.forEach(function (pt) { if (!isValidIp(pt.ip)) add('warning', 'BAD_IP', o.name + ' / ' + pt.label + ' has an invalid IP address: ' + pt.ip, 'port', pt.id); });
       var unused = o.ports.filter(function (pt) { return !idx.portUse[pt.id] && !idx.mapByPort[pt.id]; }).length;
       if (o.ports.length && unused) add('info', 'UNUSED_PORTS', unused + ' of ' + o.ports.length + ' terminations on "' + o.name + '" are unused', 'object', o.id);
     });
@@ -672,7 +716,7 @@
     findContainer: findContainer, parentOf: parentOf, containerChildren: containerChildren, descendants: descendants,
     addPlacement: addPlacement, placementOf: placementOf, placementGroup: placementGroup, movePlacement: movePlacement,
     growToFit: growToFit, mapsFor: mapsFor, addGroup: addGroup, addObject: addObject, setContainer: setContainer,
-    setPortCount: setPortCount, canConnectPatch: canConnectPatch, addPatchCable: addPatchCable,
+    setPortCount: setPortCount, setRouterPorts: setRouterPorts, isValidIp: isValidIp, canConnectPatch: canConnectPatch, addPatchCable: addPatchCable,
     updatePatchCable: updatePatchCable, deletePatchCable: deletePatchCable, addInternalMapping: addInternalMapping,
     removeInternalMapping: removeInternalMapping, autoMapPanel: autoMapPanel, rearPorts: rearPorts,
     sequentialPorts: sequentialPorts, addFixedLink: addFixedLink, updateLinkMeta: updateLinkMeta,

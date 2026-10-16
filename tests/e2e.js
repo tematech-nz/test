@@ -198,6 +198,27 @@ const ok = (m) => console.log('  ok   ' + m);
     assert.ok(before);
   });
 
+
+  await step('router: create with WAN/LAN ports and IP via the toolbar', async () => {
+    await page.click('#toolbar button[data-add="router"]');
+    await page.fill('#dlg input[name="name"]', 'Edge GW');
+    await page.fill('#dlg input[name="wanPorts"]', '2');
+    await page.fill('#dlg input[name="lanPorts"]', '5');
+    await page.fill('#dlg input[name="ipAddress"]', '192.168.50.1');
+    await page.click('#dlg button[data-btn="ok"]');
+    await page.waitForTimeout(100);
+    const r = await page.evaluate(() => { const o = NetMap.app.S.p.objects.find(x => x.name === 'Edge GW'); return { n: o.ports.length, ip: o.ipAddress }; });
+    assert.deepStrictEqual(r, { n: 7, ip: '192.168.50.1' });
+    assert.ok(/IP address/i.test(await page.innerText('#detailsPane')));
+    assert.ok((await page.innerHTML('#vp')).indexOf('192.168.50.1') > 0, 'IP drawn on the map');
+    await page.fill('#detailsPane input[data-f="pip"] >> nth=0', '203.0.113.2');
+    await page.keyboard.press('Tab');
+    assert.strictEqual(await page.evaluate(() => NetMap.app.S.p.objects.find(x => x.name === 'Edge GW').ports[0].ip), '203.0.113.2');
+    await shot('router');
+    await page.click('#btnUndo'); await page.click('#btnUndo'); await page.click('#btnUndo');
+    assert.ok(!(await page.evaluate(() => NetMap.app.S.p.objects.some(x => x.name === 'Edge GW'))));
+  });
+
   await step('autosave survives a refresh', async () => {
     await page.click('#btnMode'); // back to view mode flushes the save
     const name = await page.evaluate(() => NetMap.app.S.p.name);

@@ -4,13 +4,17 @@
   var NM = g.NetMap = g.NetMap || {};
   var HEADER = 20, CELL = 18, MAXCOLS = 16, PADX = 6, SECHEAD = 14, SECGAP = 4, SECPAD = 3;
 
-  function sideCount(obj, side) { return obj.ports.filter(function (p) { return p.side === side; }).length; }
+  var SECTIONED = { patchpanel: true, router: true };
+  /* strip key of a port: front/rear on patch panels, wan/lan on routers */
+  function keyOf(obj, p) { return obj.type === 'router' ? (p.role === 'wan' ? 'wan' : 'lan') : p.side; }
+  function inSide(obj, side) { return obj.ports.filter(function (p) { return keyOf(obj, p) === side; }); }
+  function sideCount(obj, side) { return inSide(obj, side).length; }
   function gridFor(n) {
     if (n <= 0) return { rows: 0, cols: 0 };
     var rows = Math.ceil(n / MAXCOLS);
     return { rows: rows, cols: Math.ceil(n / rows) };
   }
-  function sidesOf(obj) { return ['front', 'rear'].filter(function (s) { return sideCount(obj, s) > 0; }); }
+  function sidesOf(obj) { return (obj.type === 'router' ? ['wan', 'lan'] : ['front', 'rear']).filter(function (s) { return sideCount(obj, s) > 0; }); }
 
   /* natural height of a patch panel: title + one strip per side + port rows of expanded sides */
   function panelHeight(obj, collapsed) {
@@ -23,10 +27,12 @@
   function defaultSize(obj) {
     if (obj.type === 'rack') return { w: 340, h: 300 };
     if (obj.type === 'generic') return { w: 120, h: 60 };
-    var front = gridFor(sideCount(obj, 'front')), rear = gridFor(sideCount(obj, 'rear'));
+    var ks = sidesOf(obj), gs = ks.map(function (k) { return gridFor(sideCount(obj, k)); });
+    var front = gs[0] || { rows: 0, cols: 0 }, rear = gs[1] || { rows: 0, cols: 0 };
     var cols = Math.max(front.cols, rear.cols, 4);
-    var w = cols * CELL + PADX * 2 + (obj.type === 'patchpanel' ? 6 : 0);
-    if (obj.type === 'patchpanel') return { w: w, h: panelHeight(obj, {}) };
+    var w = cols * CELL + PADX * 2 + (SECTIONED[obj.type] ? 6 : 0);
+    if (obj.type === 'router') w = Math.max(w, 150);
+    if (SECTIONED[obj.type]) return { w: w, h: panelHeight(obj, {}) };
     return { w: w, h: HEADER + (front.rows + rear.rows) * (CELL + 2) + 8 };
   }
   function defaultGroupSize() { return { w: 420, h: 340 }; }
@@ -53,7 +59,7 @@
     var out = { ports: {}, sections: [], h: h };
     var sides = sidesOf(obj);
     if (!sides.length) return out;
-    if (obj.type === 'patchpanel') {
+    if (SECTIONED[obj.type]) {
       var chrome = HEADER + sides.length * (SECHEAD + SECGAP) + 4;
       var anyCollapsed = sides.some(function (s) { return collapsed[s]; });
       var rows = 0;
@@ -61,7 +67,7 @@
       var rowH = anyCollapsed || !rows ? CELL + 2 : Math.max(10, (h - chrome) / rows);
       var y = HEADER;
       sides.forEach(function (side) {
-        var list = obj.ports.filter(function (p) { return p.side === side; });
+        var list = inSide(obj, side);
         var gr = gridFor(list.length), coll = !!collapsed[side];
         var sh = SECHEAD + (coll ? 0 : gr.rows * rowH);
         out.sections.push({ side: side, x: SECPAD, y: y, w: w - SECPAD * 2, h: sh, headH: SECHEAD, collapsed: coll, count: list.length });
@@ -77,7 +83,7 @@
     var totalRows = grids.reduce(function (a, x) { return a + x.rows; }, 0);
     var rh = Math.max(10, (h - HEADER - 8) / totalRows), y0 = HEADER + 2;
     sides.forEach(function (side, si) {
-      placeGrid(obj, side, obj.ports.filter(function (p) { return p.side === side; }), 0, y0, w, rh, out.ports, false);
+      placeGrid(obj, side, inSide(obj, side), 0, y0, w, rh, out.ports, false);
       y0 += grids[si].rows * rh;
     });
     return out;

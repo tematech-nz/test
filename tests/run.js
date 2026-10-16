@@ -287,5 +287,53 @@ test('collapsing a panel section shrinks it and anchors cables to the strip', ()
   assert.ok(full.content.indexOf('data-toggle="rear"') > 0 && full.content.indexOf('REAR (24)') > 0);
 });
 
+console.log('Router');
+test('router has configurable WAN/LAN ports and IP addresses', () => {
+  const p = M.createProject('r');
+  const r = M.addObject(p, { type: 'router', name: 'Edge', wanPorts: 2, lanPorts: 6, ipAddress: '192.168.1.1/24' });
+  assert.strictEqual(r.ports.length, 8);
+  assert.deepStrictEqual(r.ports.slice(0, 3).map(x => x.role + ':' + x.label), ['wan:W1', 'wan:W2', 'lan:L1']);
+  assert.strictEqual(r.ipAddress, '192.168.1.1/24');
+  M.setRouterPorts(p, r.id, 1, 15);
+  assert.strictEqual(r.ports.filter(x => x.role === 'wan').length, 1);
+  assert.strictEqual(r.ports.filter(x => x.role === 'lan').length, 15);
+  assert.ok(r.ports.every((x, i, a) => i === 0 || !(a[i - 1].role === 'lan' && x.role === 'wan')), 'WAN ports stay first');
+  assert.throws(() => M.setPortCount(p, r.id, 4), /setRouterPorts/);
+  assert.throws(() => M.addObject(p, { type: 'router', wanPorts: 60, lanPorts: 60 }), /0-96/);
+});
+test('router ports cable like any port, cannot be removed while used, trace ends at the router', () => {
+  const p = B.buildDemoProject();
+  const sw = byName(p, 'Switch A');
+  const r = M.addObject(p, { type: 'router', name: 'Edge', wanPorts: 1, lanPorts: 4 });
+  const lan1 = r.ports.find(x => x.label === 'L1');
+  M.addPatchCable(p, { aPortId: port(sw, 20).id, bPortId: lan1.id });
+  assert.throws(() => M.setRouterPorts(p, r.id, 1, 0), /in use/);
+  const t = T.tracePort(p, port(sw, 20).id);
+  assert.ok(t.ends.some(e => /Terminates at Edge/.test(e.text)));
+  assert.ok(M.validateProject(p).every(i => i.severity !== 'error'));
+});
+test('IP validation warns, search finds routers and ports by IP', () => {
+  const p = M.createProject('r');
+  const r = M.addObject(p, { type: 'router', name: 'Edge', wanPorts: 1, lanPorts: 1, ipAddress: '10.0.0.1' });
+  r.ports[0].ip = '203.0.113.7';
+  assert.ok(M.search(p, '10.0.0.1').some(x => x.kind === 'object'));
+  assert.ok(M.search(p, '203.0.113').some(x => x.kind === 'port'));
+  assert.strictEqual(M.validateProject(p).filter(i => i.code === 'BAD_IP').length, 0);
+  r.ports[1].ip = '300.1.1.1'; r.ipAddress = 'not-an-ip';
+  assert.strictEqual(M.validateProject(p).filter(i => i.code === 'BAD_IP').length, 2);
+  ['10.0.0.1', '10.0.0.0/8', 'fe80::1', '2001:db8::1/64', ''].forEach(v => assert.ok(M.isValidIp(v), v));
+  ['1.2.3', '1.2.3.4/33', 'abc', '256.1.1.1'].forEach(v => assert.ok(!M.isValidIp(v), v));
+});
+test('router layout has WAN and LAN strips; export shows them', () => {
+  const p = M.createProject('r');
+  const r = B.addObjectPlaced(p, p.maps[0].id, { type: 'router', name: 'Edge', wanPorts: 2, lanPorts: 15, ipAddress: '10.0.0.1' }, 0, 0);
+  const sz = NM.layout.defaultSize(r);
+  const lay = NM.layout.computeLayout(r, sz.w, sz.h, {});
+  assert.deepStrictEqual(lay.sections.map(s => s.side), ['wan', 'lan']);
+  assert.strictEqual(Object.keys(lay.ports).length, 17);
+  const svg = R.svgDocument(p, p.maps[0].id);
+  assert.ok(svg.indexOf('WAN (2)') > 0 && svg.indexOf('LAN (15)') > 0 && svg.indexOf('10.0.0.1') > 0);
+});
+
 console.log('\n' + passed + ' passed, ' + failed + ' failed');
 process.exit(failed ? 1 : 0);
