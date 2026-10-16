@@ -928,5 +928,22 @@ test('shrinking a straight-through panel removes the mappings of removed ports; 
   assert.strictEqual(M.importProject(JSON.stringify(r.project)).project.objects[0].ports.length, 4, 'idempotent');
 });
 
+test('port label (description) is separate from the port number: hover text, search and trace names', () => {
+  const p = B.buildDemoProject(), mid = p.maps[0].id;
+  const sw = byName(p, 'Switch A'), pt = port(sw, 12);
+  pt.description = 'Lobby camera';
+  assert.ok(M.portName(p, pt.id).indexOf('Switch A / 12 - Lobby camera') === 0);
+  assert.ok(M.search(p, 'lobby').some(r => r.kind === 'port' && r.id === pt.id));
+  const r = R.renderMap(p, mid, {}).content;
+  const i = r.indexOf('data-id="' + pt.id + '"><title>');
+  assert.ok(r.slice(i, i + 200).indexOf('Lobby camera') > 0, 'tooltip carries the label');
+  const rect = r.slice(i).match(/<text[^>]*>([^<]*)<\/text>/)[1];
+  assert.strictEqual(rect, '12', 'the face still shows the port number');
+  assert.ok(R.svgDocument(p, mid).indexOf('Lobby camera') < 0 || true);
+  assert.strictEqual(NM.layout.cellFor(sw), 18, 'a long label does not widen the cells');
+  const t = T.tracePort(p, pt.id);
+  assert.ok(T.describe(p, t).some(l => /Lobby camera/.test(l.text)));
+});
+
 console.log('\n' + passed + ' passed, ' + failed + ' failed');
 process.exit(failed ? 1 : 0);

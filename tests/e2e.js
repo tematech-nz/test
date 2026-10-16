@@ -632,6 +632,63 @@ const ok = (m) => console.log('  ok   ' + m);
     await page.click('#btnUndo'); await page.click('#btnUndo');
   });
 
+
+  await step('W hotkey: one-shot wire from the selected port keeps the new cable selected; plain W toggles the repeating tool', async () => {
+    const ids = await page.evaluate(() => {
+      let out;
+      NetMap.app.api.commit('w test', (p) => {
+        const B = NetMap.builder, mid = p.maps[0].id;
+        const a = B.addObjectPlaced(p, mid, { type: 'switch', name: 'WA', portCount: 4 }, 6000, 40), b = B.addObjectPlaced(p, mid, { type: 'switch', name: 'WB', portCount: 4 }, 6000, 200);
+        out = { a1: a.ports[0].id, a2: a.ports[1].id, b1: b.ports[0].id, b2: b.ports[1].id, b3: b.ports[2].id };
+      });
+      NetMap.app.api.goTo('port', out.a1, NetMap.app.S.p.maps[0].id);
+      return out;
+    });
+    const port = (id) => page.locator('#vp rect[data-kind="port"][data-id="' + id + '"]');
+    const count = () => page.evaluate(() => NetMap.app.S.p.patchCables.length);
+    const c0 = await count();
+    await page.evaluate((id) => NetMap.app.api.select({ kind: 'port', id }), ids.a1);
+    await page.keyboard.press('w');
+    const t1 = await page.evaluate(() => NetMap.app.S.tool);
+    assert.ok(t1 && t1.type === 'patch' && t1.once && t1.pending, 'one-shot wire started from the selected port');
+    await port(ids.b1).click({ force: true });
+    await page.waitForTimeout(100);
+    assert.strictEqual(await count(), c0 + 1);
+    const after = await page.evaluate(() => ({ tool: NetMap.app.S.tool, sel: NetMap.app.S.sel }));
+    assert.strictEqual(after.tool, null, 'tool ended after the second port');
+    assert.strictEqual(after.sel.kind, 'cable', 'the new cable stays selected');
+    assert.ok(await page.locator('#detailsPane select[data-f="colorPreset"]').count() === 1, 'colour can be adjusted right away');
+    // plain W (nothing port-selected) = repeating tool, W again leaves it
+    await page.evaluate(() => NetMap.app.api.select(null));
+    await page.keyboard.press('w');
+    assert.ok(await page.evaluate(() => !!NetMap.app.S.tool && !NetMap.app.S.tool.once));
+    await port(ids.a2).click({ force: true }); await port(ids.b2).click({ force: true });
+    assert.ok(await page.evaluate(() => !!NetMap.app.S.tool), 'repeating tool stays active');
+    await page.keyboard.press('w');
+    assert.strictEqual(await page.evaluate(() => NetMap.app.S.tool), null);
+    // typing a w in a text field must not start the tool
+    await page.evaluate((id) => NetMap.app.api.select({ kind: 'object', id: NetMap.app.S.p.objects.find(o => o.name === 'WA').id }), ids.a1);
+    await page.fill('#detailsPane input[data-f="name"]', 'WAw');
+    assert.strictEqual(await page.evaluate(() => NetMap.app.S.tool), null);
+    // 'Patch cable from here' behaves like W
+    await page.evaluate((id) => NetMap.app.api.select({ kind: 'port', id }), ids.b3);
+    await page.click('#detailsPane button[data-act="startPatchFrom"]');
+    assert.ok(await page.evaluate(() => !!NetMap.app.S.tool && NetMap.app.S.tool.once));
+    await page.keyboard.press('Escape');
+    for (let i = 0; i < 4; i++) await page.click('#btnUndo');
+  });
+
+  await step('port label shows on hover; the face keeps the number', async () => {
+    const id = await page.evaluate(() => { const o = NetMap.app.S.p.objects.find(x => x.name === 'Switch A'); return o.ports.find(x => x.label === '12').id; });
+    await page.evaluate((i) => NetMap.app.api.select({ kind: 'port', id: i }), id);
+    await page.fill('#detailsPane input[data-f="pdesc"]', 'Uplink to core');
+    await page.keyboard.press('Tab');
+    const g = page.locator('#vp g[data-kind="port"][data-id="' + id + '"]');
+    assert.ok(/Uplink to core/.test(await g.locator('title').innerHTML()), 'tooltip has the label');
+    assert.strictEqual((await g.locator('text').textContent()).trim(), '12', 'face shows the number');
+    await page.click('#btnUndo');
+  });
+
   await step('autosave survives a refresh', async () => {
     await page.click('#btnMode'); // back to view mode flushes the save
     const name = await page.evaluate(() => NetMap.app.S.p.name);

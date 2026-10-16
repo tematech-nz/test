@@ -37,6 +37,8 @@ cannot break a connection. Files use LF line endings and are written with 2-spac
 - Any object inside a rack or group may carry `fullWidth: true` (stretch to the container's inner width).
 - Wall sockets, like patch panels, have `front` and `rear` ports with internal mappings (schema 2; files from schema 1 get rear
   ports and straight-through mappings added when imported). Fixed links join patch panels and wall sockets.
+- Any port may carry an optional `description` (free text label shown on hover and in descriptions); `label` is the number
+  drawn on the port's face.
 - Patch panels have `front` and `rear` ports and an optional `sectionSize` (ports per visual section; must divide the
   per-side port count, otherwise the automatic split is used). It is cosmetic and never affects connectivity. All other equipment has `front` ports only.
 - A **placement** is the visual position of a group or object on one map. The same record may have placements

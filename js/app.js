@@ -195,6 +195,24 @@
     if (!ga || !gb || ga.id === gb.id) return null;
     return '<p><b>' + esc(oa.name) + '</b> is in group <b>' + esc(ga.name) + '</b> and <b>' + esc(ob.name) + '</b> is in group <b>' + esc(gb.name) + '</b>.</p><p>A patch cable normally stays inside one group. Do you want to continue?</p>';
   }
+  /*
+   * 'W' / "Patch cable from here": with a free port selected, start a one-shot wire from it (the tool ends after the
+   * second click and the new cable stays selected so colour etc. can be adjusted); otherwise toggle the repeating tool.
+   */
+  function startWire(fromPortId) {
+    if (!isEdit()) { toast('Switch to edit mode to draw patch cables', true); return; }
+    const pid = fromPortId || (S.sel && S.sel.kind === 'port' ? S.sel.id : null);
+    if (!fromPortId && S.tool && S.tool.type === 'patch') { cancelTool(); return; }
+    if (pid) {
+      const idx = M.buildIndex(S.p), pt = idx.ports[pid];
+      if (!pt) return;
+      if (pt.side === 'rear') { toast('Rear terminations take fixed links, not patch cables', true); return; }
+      if (idx.portUse[pid]) { toast('That port is already occupied', true); return; }
+      S.tool = { type: 'patch', pending: pid, cableType: 'Cat6', once: true };
+      renderAll(); return;
+    }
+    setTool({ type: 'patch', pending: null, cableType: 'Cat6' });
+  }
   function clearPgroup() { S.pgroup = null; S.hoverPort = null; S.preview = null; }
 
   /* Ctrl+click builds a group of free rear ports on one patch panel (Shift extends a range) */
@@ -266,7 +284,8 @@
       const make = () => {
         const cable = commit('Add patch cable', (p) => M.addPatchCable(p, { aPortId: a, bPortId: id, color: S.cableColor, cableType: tool.cableType }));
         tool.pending = null;
-        if (cable) { toast('Added ' + cable.name); S.sel = { kind: 'cable', id: cable.id }; renderAll(); } else renderAll();
+        if (tool.once) S.tool = null; // one-shot wire: leave the tool, the new cable stays selected for colour/type edits
+        if (cable) { toast('Added ' + cable.name + (tool.once ? ' - adjust colour and type in the panel' : '')); S.sel = { kind: 'cable', id: cable.id }; showTab('details'); openRight(); renderAll(); } else renderAll();
       };
       if (warn) confirmDlg('Connect across groups?', warn, 'Connect anyway').then((ok) => { if (ok) make(); else { tool.pending = null; renderAll(); } });
       else make();
@@ -442,7 +461,7 @@
         (S.p.objects.length ? '' : '<button data-act="demo">Load demo project</button>');
     }
     const th = $('toolHint');
-    if (S.tool && S.tool.type === 'patch') { th.hidden = false; th.textContent = S.tool.pending ? 'Tap the destination port (Esc to cancel)' : 'Patch cable: tap the first port (Esc to stop)'; }
+    if (S.tool && S.tool.type === 'patch') { th.hidden = false; th.textContent = S.tool.pending ? 'Tap the destination port (Esc to cancel)' : 'Patch cable: tap the first port (W or Esc to stop)'; }
     else if (S.pgroup) {
       th.hidden = false;
       const pv = S.preview;
@@ -459,7 +478,7 @@
       ['group:Group', 'rack:Rack', 'patchpanel:Patch panel', 'switch:Switch', 'router:Router', 'internet:Internet / ISP', 'socket:Wall socket', 'generic:Generic'].map((s) => {
         const a = s.split(':'); return '<button data-add="' + a[0] + '" title="Create a new ' + a[1].toLowerCase() + ' on this map">+ ' + a[1] + '</button>';
       }).join('') + '<span class="sep"></span>' +
-      '<button data-act="patchTool" title="' + esc(TIPS.patchTool) + '" class="' + (pc ? 'active' : '') + '">Patch cable tool</button>' +
+      '<button data-act="patchTool" title="' + esc(TIPS.patchTool) + '" class="' + (pc ? 'active' : '') + '">Patch cable tool (W)</button>' +
       (pc ? ' <span class="cable-colour">' + colorPicker('toolPreset', 'toolColor', S.cableColor, '__tool') + '</span>' : '') +
       '<button data-act="newLink" title="' + esc(TIPS.newLink) + '">+ Fixed link</button>' +
       '<button data-act="addMapItems" title="' + esc(TIPS.addMapItems) + '">Add existing here...</button>';
@@ -548,10 +567,10 @@
     applyRouterPorts: 'Set the number of WAN and LAN ports (ports in use cannot be removed)',
     addToMap: 'Show this item on the current map (the same record, not a copy)',
     removeFromMap: 'Hide this item from the current map only; the equipment and its connections stay in the project',
-    startPatchFrom: 'Start a patch cable at this port: then click the other port on the map',
+    startPatchFrom: 'Start one patch cable at this port (hotkey W): click the other port on the map; the new cable then stays selected so you can set its colour',
     clearTrace: 'Remove the trace highlight and return to the normal map',
     fitTrace: 'Zoom the map to the parts of the trace that are on this map',
-    patchTool: 'Draw patch cables: click one port, then another. Esc stops.',
+    patchTool: 'Draw patch cables: click one port, then another (hotkey W). Select a port first and press W to draw a single cable from it. Esc stops.',
     newLink: 'Create a fixed link between two patch panels',
     addMapItems: 'Show equipment that exists in the project but is not drawn on this map',
     help: 'How NetMap works'
@@ -674,6 +693,7 @@
       h += '<table class="t"><tr><th>Port</th><th>Connection</th><th></th></tr>' + o.ports.map((pt) =>
         '<tr><td>' + (isEdit() ? '<input type="text" data-f="plabel" data-t="' + esc(pt.id) + '" value="' + esc(pt.label) + '" style="width:5em">' : '<a class="lnk" data-act="select" data-kind="port" data-id="' + esc(pt.id) + '">' + esc(pt.label) + '</a>') +
         (M.isTermination(o) ? ' <span class="tag">' + pt.side + '</span>' : '') + ((o.type === 'router' || pt.role === 'uplink') ? ' <span class="tag">' + esc(pt.role) + '</span>' : '') + '</td><td>' +
+        (isEdit() ? '<input type="text" data-f="pdesc" data-t="' + esc(pt.id) + '" value="' + esc(pt.description || '') + '" placeholder="Label (shown on hover)" style="width:100%;margin-bottom:2px">' : (pt.description ? '<div><b>' + esc(pt.description) + '</b></div>' : '')) +
         (hasIp(o) ? (isEdit() ? '<input type="text" data-f="pip" data-t="' + esc(pt.id) + '" value="' + esc(pt.ip || '') + '" placeholder="IP" style="width:100%;margin-bottom:2px">' : (pt.ip ? '<div>' + esc(pt.ip) + '</div>' : '')) : '') +
         portState(o, pt, idx) + '</td><td>' +
         '<button data-act="trace" data-kind="port" data-id="' + esc(pt.id) + '" title="Trace connection">Trace</button></td></tr>').join('') + '</table>';
@@ -688,7 +708,7 @@
 
   function detPort(id) {
     const idx = M.buildIndex(S.p), pt = idx.ports[id], o = idx.portObj[id];
-    let h = '<h3>Port</h3>' + fld('Equipment', lnk('object', o.id, o.name)) + inp('Label', 'plabel', pt.label, pt.id);
+    let h = '<h3>Port</h3>' + fld('Equipment', lnk('object', o.id, o.name)) + inp('Number', 'plabel', pt.label, pt.id) + inp('Label', 'pdesc', pt.description || '', pt.id, 'placeholder="shown on hover"');
     if (M.isTermination(o)) h += fld('Side', pt.side);
     if (o.type === 'router') h += fld('Role', esc((pt.role || '').toUpperCase()));
     if (hasIp(o)) h += inp('IP address', 'pip', pt.ip || '', pt.id);
@@ -1071,6 +1091,7 @@
     const sel = S.sel; if (!sel && !t) return;
     commit('Edit ' + f, (p) => {
       const idx = M.buildIndex(p);
+      if (f === 'pdesc') { const pt = idx.ports[t || sel.id]; if (pt) { if (val.trim()) pt.description = val.trim(); else delete pt.description; } return; }
       if (f === 'plabel' || f === 'ptype' || f === 'pspeed' || f === 'pmedia' || f === 'pip') {
         const pt = idx.ports[t || sel.id]; if (!pt) return;
         if (f === 'pip' && !M.isValidIp(val)) toast('That does not look like a valid IP address (kept as typed)', true);
@@ -1186,7 +1207,7 @@
       title: 'How NetMap works', render: () => ({
         body: '<p><b>View mode</b> is read-only: browse, search, inspect ports and trace connections. <b>Edit</b> unlocks editing; moving anything never changes cabling.</p>' +
           '<p><b>Fixed links</b> are installed cable runs between patch panels. Each has numbered wires with explicit mappings; change them only with "Edit installed wiring".</p>' +
-          '<p><b>Patch cables</b> are removable leads between two ports. Use the "Patch cable tool" and tap two ports.</p>' +
+          '<p><b>Patch cables</b> are removable leads between two ports. Press <b>W</b> (or use the "Patch cable tool") and click two ports; with a port selected, W draws a single cable from it and leaves the new cable selected so you can set its colour.</p>' +
           '<p><b>Trace</b> follows only documented connections: patch cables, fixed wires and internal panel mappings. Proximity, groups and shared switches imply nothing.</p>' +
           '<p>Autosave goes to this browser only. Use File -> Export JSON for real backups.</p>',
         buttons: [{ key: 'x', label: 'Close', cls: 'primary' }]
@@ -1268,7 +1289,7 @@
         case 'automap': { const id = S.sel.id; commit('Map front to rear', (p) => { const n = M.autoMapPanel(p, id); toast(n + ' mapping(s) added'); }); break; }
         case 'mapPort': mapPort(d.id); break;
         case 'unmap': commit('Remove internal mapping', (p) => M.removeInternalMapping(p, d.id)); break;
-        case 'startPatchFrom': S.tool = { type: 'patch', pending: d.id, cableType: 'Cat6' }; renderAll(); break;
+        case 'startPatchFrom': startWire(d.id); break;
         case 'patchTool': break;
         case 'reconnect': S.tool = { type: 'reconnect', cableId: S.sel.id, end: d.end }; renderAll(); break;
         case 'editWiring': editWiring(S.sel.id); break;
@@ -1301,6 +1322,7 @@
       else if (isEdit() && !typing && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); }
       else if (isEdit() && !typing && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') { e.preventDefault(); redo(); }
       else if (isEdit() && !typing && (e.key === 'Delete')) deleteSelection();
+      else if (!typing && !e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'w' || e.key === 'W')) { e.preventDefault(); startWire(); }
     });
     window.addEventListener('pagehide', () => { if (S.unsaved) saveNow(); });
     window.addEventListener('beforeunload', () => { if (S.unsaved) saveNow(); });

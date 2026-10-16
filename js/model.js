@@ -101,7 +101,7 @@
     idx = idx || buildIndex(p);
     var pt = idx.ports[portId], o = idx.portObj[portId];
     if (!pt || !o) return '(missing port)';
-    return o.name + ' / ' + pt.label + (pt.side === 'rear' ? ' (rear)' : (isTermination(o) ? ' (front)' : ''));
+    return o.name + ' / ' + pt.label + (pt.side === 'rear' ? ' (rear)' : (isTermination(o) ? ' (front)' : '')) + (pt.description ? ' - ' + pt.description : '');
   }
   function wireName(link, wire) { return link.name + ' w' + wire.number; }
 
@@ -710,7 +710,7 @@
     });
     p.objects.forEach(function (o) {
       o.ports.forEach(function (pt) {
-        if (has(pt.label, pt.id, pt.ip, pt.role)) out.push({ kind: 'port', id: pt.id, title: o.name + ' / ' + pt.label + (pt.side === 'rear' ? ' (rear)' : ''), sub: 'Port' + (pt.ip ? ' - ' + pt.ip : '') });
+        if (has(pt.label, pt.id, pt.ip, pt.role, pt.description)) out.push({ kind: 'port', id: pt.id, title: o.name + ' / ' + pt.label + (pt.side === 'rear' ? ' (rear)' : ''), sub: 'Port' + (pt.description ? ' - ' + pt.description : '') + (pt.ip ? ' - ' + pt.ip : '') });
       });
     });
     p.patchCables.forEach(function (c) { if (has(c.name, c.id)) out.push({ kind: 'cable', id: c.id, title: c.name, sub: 'Patch cable: ' + portName(p, c.aPortId, idx) + ' <-> ' + portName(p, c.bPortId, idx) }); });
