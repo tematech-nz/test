@@ -118,6 +118,19 @@ Try it: File -> Load demo project (two rooms, a fixed link between racks, a wall
 - **Maps**: the same object can be shown on several maps ("Add existing here"); connections reference the shared
   object and port records. Trace results offer "open <map>" links to continue across maps.
 
+## Updates and unsaved changes
+
+- **New-version notice**: every build has a version stamp (a short hash of the sources: `js/version.js` is what this page runs,
+  `version.json` is what the server has). When the page is served over http(s) it reads `version.json` every minute (and when you
+  return to the tab). If it differs, the header shows **New version available** and a banner asks you to export your project and
+  reload with **F5** or **Ctrl+R**. Nothing is ever reloaded for you. Opened from disk (`file://`) there is nothing to poll, so no notice.
+- **Stamp the version** whenever you change source files before publishing: `npm run stamp` (`npm test` does it first), or enable
+  the optional hook once with `git config core.hooksPath .githooks`. `node tools/version.js --check` fails when the stamp is stale.
+  `npm run serve` always reports the current files' version, so local edits are noticed immediately.
+- **Leave-page protection**: reloading or closing the tab with changes that were not exported to a file asks for confirmation
+  (the browser autosave is not a backup). Exporting a JSON file, or importing / loading a project, clears the flag; zooming and
+  folding do not set it. The flag also survives a reload, so you are asked again until you export.
+
 ## Saving and backup
 
 - Autosave writes to this browser's localStorage after a short pause. It is a convenience only and is tied to the
@@ -140,6 +153,7 @@ connectivity rules, and migration strategy.
 | `js/model.js` | Data model, rules, validation, search, migration. No DOM. |
 | `js/trace.js` | End-to-end tracing. |
 | `js/layout.js`, `js/render.js` | Geometry and SVG rendering (shared by screen and exports). |
+| `tools/version.js`, `tools/serve.js` | Version stamp (`version.json`, `js/version.js`) and the optional dev server. |
 | `js/exporters.js` | Connection table, PDF writer, download helpers. |
 | `js/builder.js` | Placement helpers and the demo project. |
 | `js/topology.js`, `js/graphview.js` | Device-level graph, reachability tree, path search and the Graph view. |

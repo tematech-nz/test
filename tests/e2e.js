@@ -18,6 +18,8 @@ const ok = (m) => console.log('  ok   ' + m);
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, acceptDownloads: true });
   const page = await ctx.newPage();
   const errors = [];
+  const dialogs = []; // beforeunload prompts etc: record and accept so reloads in the tests proceed
+  page.on('dialog', (d) => { dialogs.push(d.type()); d.accept(); });
   page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
   page.on('console', (m) => { if (m.type() === 'error') errors.push('console: ' + m.text()); });
   const shot = async (name) => { if (shots) await page.screenshot({ path: path.join(shots, String(++n).padStart(2, '0') + '-' + name + '.png') }); };
@@ -974,9 +976,69 @@ const ok = (m) => console.log('  ok   ' + m);
     await page.click('#dlg button[data-btn="close"]');
   });
 
+
+  await step('leaving with changes that were never exported asks first; after an export it does not', async () => {
+    const n0 = dialogs.length;
+    await page.evaluate(() => NetMap.app.api.commit('touch', (p) => { p.name = p.name + ' '; }));
+    assert.strictEqual(await page.evaluate(() => NetMap.app.S.fileDirty), true);
+    await page.reload();
+    assert.ok(dialogs.slice(n0).indexOf('beforeunload') >= 0, 'reload prompted: ' + dialogs.slice(n0));
+    assert.strictEqual(await page.evaluate(() => NetMap.app.S.fileDirty), true, 'the unsaved state survives the reload');
+    const n1 = dialogs.length;
+    await page.click('#btnFile');
+    await Promise.all([page.waitForEvent('download'), page.click('#dlg button[data-btn="json"]')]);
+    assert.strictEqual(await page.evaluate(() => NetMap.app.S.fileDirty), false);
+    await page.reload();
+    assert.strictEqual(dialogs.slice(n1).indexOf('beforeunload'), -1, 'clean: no prompt');
+    // zooming / folding are view state and must not make the project dirty
+    await page.evaluate(() => { document.getElementById('zoomIn').click(); });
+    assert.strictEqual(await page.evaluate(() => NetMap.app.S.fileDirty), false);
+  });
+
+  await step('new-version detection: polls version.json, shows a header warning and a banner, never reloads', async () => {
+    const cp = require('child_process'), os = require('os');
+    const repo = path.resolve(__dirname, '..');
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'netmap-e2e-'));
+    ['index.html', 'version.json'].forEach((f) => fs.copyFileSync(path.join(repo, f), path.join(tmp, f)));
+    ['css', 'js'].forEach((d) => { fs.mkdirSync(path.join(tmp, d)); fs.readdirSync(path.join(repo, d)).forEach((f) => fs.copyFileSync(path.join(repo, d, f), path.join(tmp, d, f))); });
+    const port = 20000 + Math.floor(Math.random() * 20000);
+    const server = cp.spawn(process.execPath, [path.join(repo, 'tools', 'serve.js'), String(port)], { env: Object.assign({}, process.env, { NETMAP_ROOT: tmp }), stdio: ['ignore', 'pipe', 'pipe'] });
+    try {
+      await new Promise((res, rej) => { server.stdout.on('data', (d) => { if (/NetMap on/.test(String(d))) res(); }); server.on('error', rej); setTimeout(() => rej(new Error('server did not start')), 8000); });
+      const vp = await ctx.newPage();
+      vp.on('dialog', (d) => d.accept());
+      await vp.goto('http://127.0.0.1:' + port + '/');
+      await vp.waitForSelector('#vp, #canvas');
+      const cur = await vp.evaluate(() => NetMap.version);
+      assert.ok(/^[0-9a-f]{10}$/.test(cur));
+      assert.strictEqual(await vp.evaluate(() => NetMap.app.api.pollMs), 60000, 'polls once a minute');
+      assert.ok((await vp.innerText('#verInfo')).indexOf(cur) >= 0, 'header shows the running version');
+      await vp.evaluate(() => { window.__marker = 'same page'; });
+      assert.strictEqual(await vp.evaluate(() => NetMap.app.api.checkVersion()), cur);
+      assert.ok(await vp.isHidden('#btnUpdate') && await vp.isHidden('#updateBar'), 'no warning while up to date');
+      fs.appendFileSync(path.join(tmp, 'css', 'style.css'), '\n/* deployed change */\n');
+      const latest = await vp.evaluate(() => NetMap.app.api.checkVersion());
+      assert.notStrictEqual(latest, cur);
+      assert.ok(await vp.isVisible('#btnUpdate'), 'header warning');
+      const bar = await vp.innerText('#updateBar');
+      assert.ok(/new version/i.test(bar) && /F5/.test(bar) && /Ctrl\+R/.test(bar) && /Export JSON/i.test(bar), bar);
+      await vp.screenshot({ path: shots ? path.join(shots, 'new-version.png') : path.join(tmp, 'x.png') });
+      assert.strictEqual(await vp.evaluate(() => window.__marker), 'same page', 'the page was not reloaded');
+      await vp.click('#updateBar button[data-upd="hide"]');
+      assert.ok(await vp.isHidden('#updateBar') && await vp.isVisible('#btnUpdate'), 'banner hidden, header warning stays');
+      await vp.click('#btnUpdate');
+      assert.ok(await vp.isVisible('#updateBar'));
+      const [dl] = await Promise.all([vp.waitForEvent('download'), vp.click('#updateBar button[data-upd="export"]')]);
+      assert.ok(/\.json$/.test(dl.suggestedFilename()));
+      assert.strictEqual(await vp.evaluate(() => window.__marker), 'same page');
+      await vp.close();
+    } finally { server.kill(); fs.rmSync(tmp, { recursive: true, force: true }); }
+  });
+
   /* ---- phone ---- */
   const mctx = await browser.newContext({ viewport: { width: 390, height: 780 }, hasTouch: true, isMobile: true });
   const m = await mctx.newPage();
+  m.on('dialog', (d) => d.accept());
   m.on('pageerror', (e) => errors.push('mobile pageerror: ' + e.message));
   await m.goto(URL);
   await m.evaluate((txt) => { localStorage.setItem('netmap.autosave.v1', txt); }, await page.evaluate(() => JSON.stringify(NetMap.app.S.p)));

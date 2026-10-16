@@ -4,14 +4,15 @@
   const NM = window.NetMap, M = NM.model, L = NM.layout, T = NM.trace, R = NM.render, X = NM.exporters, B = NM.builder;
   const $ = (id) => document.getElementById(id);
   const esc = R.esc;
-  const KEY = 'netmap.autosave.v1', KEY_EXPORT = 'netmap.lastExport', KEY_COLL = 'netmap.collapsed.v1';
+  const KEY = 'netmap.autosave.v1', KEY_EXPORT = 'netmap.lastExport', KEY_COLL = 'netmap.collapsed.v1', KEY_DIRTY = 'netmap.fileDirty';
+  const POLL_MS = 60000;
 
   const S = {
     p: null, mapId: null, mode: 'view', sel: null, trace: null, tool: null,
     undo: [], redo: [], unsaved: false, saveErr: null, savedAt: null, lastExport: null,
     drag: null, geo: null, query: '', showIssues: false, issues: [],
     collapsed: {}, pgroup: null, hoverPort: null, preview: null, drop: null, cableColor: 'auto', customColorFor: null, ring: null,
-    rev: 0, netRev: -1, netCache: [], view: 'map', graph: { from: '', to: '', via: false }
+    fileDirty: false, newVersion: null, updateHidden: false, rev: 0, netRev: -1, netCache: [], view: 'map', graph: { from: '', to: '', via: false }
   };
   NM.app = { S: S, M: M }; // exposed for tests
 
@@ -36,11 +37,17 @@
     else {
       txt = 'Autosaved ' + (S.savedAt ? time(S.savedAt) : '') + ' (browser only)';
       txt += S.lastExport ? ' - file backup ' + S.lastExport : ' - no file backup yet';
+      if (S.fileDirty && S.lastExport) txt += ' (changed since)';
     }
     el.className = cls; el.textContent = txt;
   }
   let saveT = null;
-  function scheduleSave(quiet) { if (!quiet) { S.unsaved = true; setStatus(); } clearTimeout(saveT); saveT = setTimeout(saveNow, 600); }
+  /* "dirty" = changed since the last export/import: the browser autosave is not a backup, so closing asks first */
+  function markDirty(on) {
+    S.fileDirty = on;
+    try { localStorage.setItem(KEY_DIRTY, on ? '1' : '0'); } catch (_) { /* ignore */ }
+  }
+  function scheduleSave(quiet) { if (!quiet) { S.unsaved = true; markDirty(true); setStatus(); } clearTimeout(saveT); saveT = setTimeout(saveNow, 600); }
   function saveNow() {
     clearTimeout(saveT);
     try { localStorage.setItem(KEY, JSON.stringify(S.p)); S.unsaved = false; S.saveErr = null; S.savedAt = new Date(); }
@@ -1269,6 +1276,7 @@
     saveNow();
     X.download(slug(S.p.name) + '-' + new Date().toISOString().slice(0, 10) + '.json', M.exportProject(S.p), 'application/json');
     S.lastExport = time(new Date()); try { localStorage.setItem(KEY_EXPORT, S.lastExport); } catch (_) { /* ignore */ }
+    markDirty(false);
     setStatus();
   }
   async function exportImages(kind) {
@@ -1316,7 +1324,7 @@
   function loadProject(p) {
     const fixed = B.normalizeSizes(p);
     if (fixed) setTimeout(() => toast('Enlarged ' + fixed + ' item(s) that were too small to read', false), 100);
-    S.rev++; S.p = p; S.mapId = p.maps[0].id; S.sel = null; S.trace = null; S.tool = null; S.undo = []; S.redo = []; S.issues = []; S.showIssues = false;
+    S.rev++; markDirty(false); S.p = p; S.mapId = p.maps[0].id; S.sel = null; S.trace = null; S.tool = null; S.undo = []; S.redo = []; S.issues = []; S.showIssues = false;
     saveNow(); renderAll();
     if (p.placements.some((q) => q.mapId === S.mapId)) fitMap();
   }
@@ -1492,12 +1500,20 @@
       else if (!typing && !e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'w' || e.key === 'W')) { e.preventDefault(); startWire(); }
     });
     window.addEventListener('pagehide', () => { if (S.unsaved) saveNow(); });
-    window.addEventListener('beforeunload', () => { if (S.unsaved) saveNow(); });
+    // never lose work silently: reloading or closing with changes that were not exported asks first (the browser shows its own wording)
+    window.addEventListener('beforeunload', (e) => {
+      if (S.unsaved) saveNow();
+      if (S.fileDirty) { e.preventDefault(); e.returnValue = ''; return ''; }
+      return undefined;
+    });
+    $('btnUpdate').onclick = () => { S.updateHidden = false; renderUpdate(); };
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) checkVersion(); });
+    setInterval(checkVersion, POLL_MS);
     window.addEventListener('resize', () => applyVp());
   }
 
   function init() {
-    try { S.lastExport = localStorage.getItem(KEY_EXPORT); } catch (_) { S.lastExport = null; }
+    try { S.lastExport = localStorage.getItem(KEY_EXPORT); S.fileDirty = localStorage.getItem(KEY_DIRTY) === '1'; } catch (_) { S.lastExport = null; }
     S.p = loadSaved() || M.createProject('Untitled project');
     if (B.normalizeSizes(S.p)) saveNow();
     S.mapId = S.p.maps[0].id;
@@ -1505,10 +1521,44 @@
     bindUi(); bindCanvas();
     renderAll();
     if (S.p.placements.some((q) => q.mapId === S.mapId)) { const v = vpState(); if (v.zoom === 1 && v.x === 0 && v.y === 0) fitMap(); }
-    S.savedAt = new Date(); setStatus();
+    S.savedAt = new Date(); setStatus(); renderUpdate();
+    setTimeout(checkVersion, 3000);
     NM.app.ready = true;
   }
+  /* ---- new-version detection: version.json is polled every minute; the page is never reloaded for the user ---- */
+  function renderUpdate() {
+    const cur = NM.version || 'dev', stale = !!S.newVersion;
+    $('verInfo').textContent = 'v' + cur;
+    $('btnUpdate').hidden = !stale;
+    const bar = $('updateBar');
+    bar.hidden = !stale || S.updateHidden;
+    if (stale && !S.updateHidden) {
+      bar.innerHTML = '<span class="msg"><b>A new version of NetMap is available</b> (this page runs v' + esc(cur) + ', latest v' + esc(S.newVersion) + '). ' +
+        'Save your work first - ' + (S.fileDirty ? 'you have changes that were not exported - ' : '') + 'use <b>Export JSON</b> - then reload with <b>F5</b> or <b>Ctrl+R</b>. Nothing is reloaded automatically.</span>' +
+        '<button data-upd="export" class="primary">Export JSON now</button><button data-upd="hide">Remind me later</button>';
+    }
+  }
+  async function checkVersion() {
+    if (!NM.version || location.protocol === 'file:') return null; // opened from disk (no server to ask) or without version info
+    try {
+      const r = await fetch('version.json?t=' + Date.now(), { cache: 'no-store' });
+      if (!r.ok) return null;
+      const v = (await r.json()).version;
+      if (v && v !== NM.version && v !== S.newVersion) {
+        S.newVersion = v; S.updateHidden = false;
+        toast('A new version of NetMap is available - export your project, then reload (F5)', true);
+      }
+      renderUpdate();
+      return v;
+    } catch (e) { return null; } // offline, file:// or no version.json
+  }
+  document.addEventListener('click', (e) => {
+    const b = e.target.closest && e.target.closest('[data-upd]');
+    if (!b) return;
+    if (b.dataset.upd === 'export') { exportJson(); renderUpdate(); } else { S.updateHidden = true; renderUpdate(); }
+  });
   NM.app.api = {
+    checkVersion: checkVersion, pollMs: POLL_MS,
     commit: commit, goTo: goTo, setMode: setMode, startTrace: startTrace, loadProject: loadProject, select: select,
     undo: undo, redo: redo, saveNow: saveNow, fitMap: fitMap
   };

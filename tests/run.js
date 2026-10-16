@@ -1178,5 +1178,30 @@ test('port groups are drawn as a coloured band with a name tag, and exported', (
   assert.ok(c.content.indexOf('to rack office</text>') < 0);
 });
 
+console.log('Version stamp');
+test('version files match the sources; the stamp tracks content, ignores CRLF and its own files', () => {
+  const V = require('../tools/version.js'), fs = require('fs'), os = require('os'), path = require('path');
+  const root = path.resolve(__dirname, '..');
+  assert.ok(V.isCurrent(root), 'run "npm run stamp"');
+  const v = V.computeVersion(root);
+  assert.ok(/^[0-9a-f]{10}$/.test(v));
+  assert.strictEqual(JSON.parse(fs.readFileSync(path.join(root, 'version.json'), 'utf8')).version, v);
+  assert.ok(fs.readFileSync(path.join(root, 'js/version.js'), 'utf8').indexOf('NetMap.version = "' + v + '"') > 0);
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'netmap-ver-'));
+  try {
+    V.sources(root).forEach((f) => { fs.mkdirSync(path.dirname(path.join(tmp, f)), { recursive: true }); fs.copyFileSync(path.join(root, f), path.join(tmp, f)); });
+    fs.copyFileSync(path.join(root, 'js/version.js'), path.join(tmp, 'js/version.js'));
+    assert.strictEqual(V.computeVersion(tmp), v);
+    fs.writeFileSync(path.join(tmp, 'js/version.js'), '// anything');
+    assert.strictEqual(V.computeVersion(tmp), v, 'js/version.js is not part of the hash');
+    const css = fs.readFileSync(path.join(tmp, 'css/style.css'), 'utf8');
+    fs.writeFileSync(path.join(tmp, 'css/style.css'), css.replace(/\n/g, '\r\n'));
+    assert.strictEqual(V.computeVersion(tmp), v, 'line endings do not change the version');
+    fs.writeFileSync(path.join(tmp, 'css/style.css'), css + '\n/* edit */\n');
+    assert.notStrictEqual(V.computeVersion(tmp), v, 'a source change changes the version');
+    assert.ok(!V.isCurrent(tmp), 'stale version files are detected');
+  } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
+});
+
 console.log('\n' + passed + ' passed, ' + failed + ' failed');
 process.exit(failed ? 1 : 0);
