@@ -78,6 +78,18 @@
     return p;
   }
 
-  NM.builder = { placeItem: placeItem, addGroupPlaced: addGroupPlaced, addObjectPlaced: addObjectPlaced, buildDemoProject: buildDemoProject };
+  /* after the port count or section size changes: resize every placement of the object to its natural size */
+  function refitObject(p, objectId) {
+    var o = M.buildIndex(p).objects[objectId];
+    if (!o) return;
+    var size = L.defaultSize(o);
+    p.placements.forEach(function (pl) {
+      if (pl.refId !== objectId) return;
+      pl.w = size.w; pl.h = size.h;
+      if (o.containerId) M.growToFit(p, pl.mapId, o.containerId);
+    });
+  }
+
+  NM.builder = { refitObject: refitObject, placeItem: placeItem, addGroupPlaced: addGroupPlaced, addObjectPlaced: addObjectPlaced, buildDemoProject: buildDemoProject };
   if (typeof module !== 'undefined' && module.exports) module.exports = NM.builder;
 })(typeof window !== 'undefined' ? window : globalThis);

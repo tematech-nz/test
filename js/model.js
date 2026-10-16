@@ -208,6 +208,32 @@
     return grp;
   }
 
+  /* patch panel sections: equal parts only, so the section size must divide the per-side port count */
+  function validSectionSizes(n) {
+    var out = [];
+    for (var d = 1; d <= n; d++) if (n % d === 0 && (d >= 2 || n === 1)) out.push(d);
+    return out;
+  }
+  /* default: largest divisor between 4 and 8 (24 -> 8, 12 -> 6, 16 -> 8, 15 -> 5); otherwise one section */
+  function defaultSectionSize(n) {
+    if (n <= 8) return Math.max(n, 1);
+    for (var d = 8; d >= 4; d--) if (n % d === 0) return d;
+    return n;
+  }
+  function effectiveSectionSize(obj, n) {
+    var s = obj && obj.sectionSize;
+    return s && n % s === 0 ? s : defaultSectionSize(n);
+  }
+  function setSectionSize(p, objectId, size) {
+    var o = buildIndex(p).objects[objectId];
+    if (!o || o.type !== 'patchpanel') throw new Error('Sections apply to patch panels');
+    var n = o.ports.filter(function (x) { return x.side === 'front'; }).length;
+    if (!(size >= 1) || size !== Math.floor(size) || n % size !== 0) {
+      throw new Error('Sections must be equal: ' + n + ' ports cannot be split into sections of ' + size + ' (valid: ' + validSectionSizes(n).join(', ') + ')');
+    }
+    o.sectionSize = size;
+  }
+
   /* routers: WAN ports first, then LAN ports; each port has a role and an optional IP address */
   function routerPorts(wan, lan) {
     var ports = [], i;
@@ -253,6 +279,11 @@
     if (o.type === 'router' || o.type === 'internet') obj.ipAddress = o.ipAddress || '';
     if (o.type === 'rack') obj.rackHeight = o.rackHeight || 42;
     p.objects.push(obj);
+    if (o.type === 'patchpanel' && o.sectionSize) {
+      var sz = o.sectionSize;
+      if (!(sz >= 1) || sz !== Math.floor(sz) || n % sz !== 0) { p.objects.pop(); throw new Error('Sections must be equal: ' + n + ' ports cannot be split into sections of ' + sz + ' (valid: ' + validSectionSizes(n).join(', ') + ')'); }
+      obj.sectionSize = sz;
+    }
     if (o.type === 'patchpanel' && o.straight) autoMapPanel(p, obj.id);
     return obj;
   }
@@ -288,7 +319,10 @@
         o.ports = o.ports.filter(function (pt) { return drop.indexOf(pt) < 0; });
       }
     }
-    if (o.type === 'patchpanel') { adjust('front'); adjust('rear'); } else adjust('front');
+    if (o.type === 'patchpanel') {
+      adjust('front'); adjust('rear');
+      if (o.sectionSize && n % o.sectionSize !== 0) delete o.sectionSize;
+    } else adjust('front');
     o.ports.sort(function (a, b) { return (a.side === b.side ? 0 : (a.side === 'front' ? -1 : 1)); });
   }
 
@@ -717,7 +751,7 @@
     findContainer: findContainer, parentOf: parentOf, containerChildren: containerChildren, descendants: descendants,
     addPlacement: addPlacement, placementOf: placementOf, placementGroup: placementGroup, movePlacement: movePlacement,
     growToFit: growToFit, mapsFor: mapsFor, addGroup: addGroup, addObject: addObject, setContainer: setContainer,
-    setPortCount: setPortCount, setRouterPorts: setRouterPorts, isValidIp: isValidIp, canConnectPatch: canConnectPatch, addPatchCable: addPatchCable,
+    setPortCount: setPortCount, setSectionSize: setSectionSize, validSectionSizes: validSectionSizes, defaultSectionSize: defaultSectionSize, effectiveSectionSize: effectiveSectionSize, setRouterPorts: setRouterPorts, isValidIp: isValidIp, canConnectPatch: canConnectPatch, addPatchCable: addPatchCable,
     updatePatchCable: updatePatchCable, deletePatchCable: deletePatchCable, addInternalMapping: addInternalMapping,
     removeInternalMapping: removeInternalMapping, autoMapPanel: autoMapPanel, rearPorts: rearPorts,
     sequentialPorts: sequentialPorts, addFixedLink: addFixedLink, updateLinkMeta: updateLinkMeta,

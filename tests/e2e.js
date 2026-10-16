@@ -244,6 +244,24 @@ const ok = (m) => console.log('  ok   ' + m);
     assert.strictEqual(await page.evaluate(() => NetMap.app.S.sel.kind), 'object');
   });
 
+
+  await step('patch panel sections: change split in the properties panel', async () => {
+    await page.evaluate(() => NetMap.app.api.commit('panel', (p) => NetMap.builder.addObjectPlaced(p, p.maps[0].id, { type: 'patchpanel', name: 'PP-S', portCount: 24 }, 700, 500)));
+    const id = await page.evaluate(() => NetMap.app.S.p.objects.find(o => o.name === 'PP-S').id);
+    await page.evaluate((i) => NetMap.app.api.select({ kind: 'object', id: i }), id);
+    const ys = () => page.evaluate((i) => { const o = NetMap.app.S.p.objects.find(x => x.id === i); const geo = NetMap.app.S.geo.portGeo; return new Set(o.ports.filter(x => x.side === 'front').map(x => Math.round(geo[x.id].y))).size; }, id);
+    assert.strictEqual(await ys(), 1, 'default: 3 x 8 in one line');
+    assert.ok(/3 x 8/.test(await page.evaluate(() => document.querySelector('#detailsPane select[data-f="sectionSize"]').selectedOptions[0].textContent)));
+    await shot('sections-3x8');
+    await page.selectOption('#detailsPane select[data-f="sectionSize"]', '12');
+    await page.waitForTimeout(100);
+    assert.strictEqual(await page.evaluate((i) => NetMap.app.S.p.objects.find(x => x.id === i).sectionSize, id), 12);
+    assert.strictEqual(await ys(), 1);
+    const opts = await page.$$eval('#detailsPane select[data-f="sectionSize"] option', (os) => os.map(o => o.value));
+    assert.ok(opts.indexOf('7') < 0 && opts.indexOf('8') >= 0, 'only equal splits offered: ' + opts);
+    await page.click('#btnUndo'); await page.click('#btnUndo');
+  });
+
   await step('autosave survives a refresh', async () => {
     await page.click('#btnMode'); // back to view mode flushes the save
     const name = await page.evaluate(() => NetMap.app.S.p.name);

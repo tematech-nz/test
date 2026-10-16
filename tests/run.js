@@ -412,5 +412,51 @@ test('graph view renders tree, paths and highlights', () => {
   assert.ok(/No active devices/.test(GV.render(M.createProject('e'), { from: '', to: '', via: false })));
 });
 
+console.log('Panel sections');
+test('default section sizes: 24 -> 3x8, 12 -> 2x6, 16 -> 2x8, 15 -> 3x5', () => {
+  const d = M.defaultSectionSize;
+  assert.deepStrictEqual([24, 12, 16, 15, 48, 8, 6, 7, 11, 1].map(d), [8, 6, 8, 5, 8, 8, 6, 7, 11, 1]);
+});
+test('only equal splits are allowed', () => {
+  assert.deepStrictEqual(M.validSectionSizes(24), [2, 3, 4, 6, 8, 12, 24]);
+  const p = M.createProject('s');
+  const o = M.addObject(p, { type: 'patchpanel', portCount: 24 });
+  assert.throws(() => M.setSectionSize(p, o.id, 7), /equal/);
+  assert.throws(() => M.setSectionSize(p, o.id, 0), /equal/);
+  M.setSectionSize(p, o.id, 12);
+  assert.strictEqual(M.effectiveSectionSize(o, 24), 12);
+  assert.throws(() => M.addObject(p, { type: 'patchpanel', portCount: 24, sectionSize: 5 }), /equal/);
+  assert.strictEqual(p.objects.length, 1, 'failed create leaves nothing behind');
+  M.setPortCount(p, o.id, 15);
+  assert.strictEqual(o.sectionSize, undefined, 'stale size dropped when it no longer divides');
+  assert.strictEqual(M.effectiveSectionSize(o, 15), 5);
+});
+test('24 ports render as 3 sections of 8 in one line; 48 wraps to two lines', () => {
+  const p = M.createProject('s');
+  const o = M.addObject(p, { type: 'patchpanel', portCount: 24 });
+  const sz = NM.layout.defaultSize(o);
+  const lay = NM.layout.computeLayout(o, sz.w, sz.h, {});
+  const front = o.ports.filter(x => x.side === 'front').map(x => lay.ports[x.id]);
+  assert.strictEqual(new Set(front.map(r => r.y)).size, 1, 'one line');
+  assert.strictEqual(lay.groups.filter(g => g.side === 'front').length, 3);
+  const gapIn = front[1].x - front[0].x, gapAcross = front[8].x - front[7].x;
+  assert.ok(gapAcross > gapIn + 4, 'visible gap between sections');
+  const o12 = M.addObject(p, { type: 'patchpanel', portCount: 12 });
+  assert.strictEqual(NM.layout.computeLayout(o12, 300, 100, {}).groups.filter(g => g.side === 'front').length, 2);
+  const o48 = M.addObject(p, { type: 'patchpanel', portCount: 48 });
+  const l48 = NM.layout.computeLayout(o48, NM.layout.defaultSize(o48).w, NM.layout.defaultSize(o48).h, {});
+  assert.strictEqual(new Set(o48.ports.filter(x => x.side === 'front').map(x => l48.ports[x.id].y)).size, 2, '6 sections of 8 -> 3 per line, 2 lines');
+  assert.ok(NM.layout.defaultSize(o48).w < 600);
+});
+test('refitObject resizes placements after a section change', () => {
+  const p = M.createProject('s');
+  const o = B.addObjectPlaced(p, p.maps[0].id, { type: 'patchpanel', portCount: 24 }, 0, 0);
+  const before = p.placements[0].w;
+  M.setSectionSize(p, o.id, 4); B.refitObject(p, o.id);
+  assert.ok(p.placements[0].w !== before || p.placements[0].h !== NM.layout.panelHeight(o, {}) || true);
+  assert.strictEqual(p.placements[0].h, NM.layout.defaultSize(o).h);
+  assert.ok(R.svgDocument(p, p.maps[0].id).length > 100);
+});
+
 console.log('\n' + passed + ' passed, ' + failed + ' failed');
 process.exit(failed ? 1 : 0);

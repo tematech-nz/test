@@ -107,6 +107,9 @@
             }
           });
         }
+        (it.lay.groups || []).forEach(function (gp) {
+          x.push('<rect x="' + num(pl.x + gp.x) + '" y="' + num(pl.y + gp.y) + '" width="' + num(gp.w) + '" height="' + num(gp.h) + '" rx="3" fill="#ffffff" fill-opacity="0.7" stroke="' + (gp.side === 'rear' ? '#d9a35a' : '#cdb86a') + '" stroke-width="0.8" pointer-events="none"/>');
+        });
         ref.ports.forEach(function (pt) {
           var r = it.lay.ports[pt.id]; if (!r) return;
           var abs = { x: pl.x + r.x, y: pl.y + r.y, w: r.w, h: r.h, objId: ref.id, pl: pl, hidden: r.hidden };

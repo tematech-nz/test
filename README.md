@@ -43,7 +43,9 @@ Try it: File -> Load demo project (two rooms, a fixed link between racks, a wall
   (Shift+Ctrl+click extends a range). Move the pointer over another panel: the same number of rear ports, starting
   under the pointer, are highlighted (green = valid, red = occupied or not enough ports). Click to create the link
   and open its properties. Esc cancels. Wires map in port order, 1:1.
-- **Patch panels** have any number of ports (1-96, e.g. 15) and show separate FRONT and REAR strips. Click the `^`
+- **Patch panels** have any number of ports (1-96, e.g. 15). Ports are drawn in equal sections in one line: automatic
+  is 24 -> 3 x 8, 16 -> 2 x 8, 12 -> 2 x 6, 15 -> 3 x 5; choose another split in the properties (only equal splits that divide
+  the port count are offered, e.g. 12 x 2 or 6 x 4 for 24). Very long panels wrap to a second line of sections. They show separate FRONT and REAR strips. Click the `^`
   on a strip to fold it (`v` unfolds), like a details element; cables then attach to the strip. Folding is view state
   stored in the browser only, never in the project file, and exports always show everything.
   Patch panels have front and rear terminations. Front-to-rear internal mappings are explicit records

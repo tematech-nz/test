@@ -566,6 +566,11 @@
       const used = o.ports.filter((p) => idx.portUse[p.id]).length;
       h += '<h3>Ports (' + per + (o.type === 'patchpanel' ? ' front + ' + per + ' rear' : '') + ', ' + used + ' cabled)</h3>';
     }
+    if (o.type === 'patchpanel') {
+      const per = o.ports.length / 2, cur = M.effectiveSectionSize(o, per);
+      h += isEdit() ? fld('Sections', '<select data-f="sectionSize">' + opts(M.validSectionSizes(per).map((d) => [d, d + ' per section (' + per / d + ' x ' + d + ')']), cur) + '</select><div class="sub">Equal sections only.</div>') :
+        fld('Sections', per / cur + ' x ' + cur);
+    }
     if (isEdit() && o.type === 'router') {
       const nw = o.ports.filter((x) => x.role === 'wan').length, nl = o.ports.length - nw;
       h += fld('Ports', 'WAN <input type="number" id="wanInput" min="0" max="96" value="' + nw + '" style="width:60px"> LAN <input type="number" id="lanInput" min="0" max="96" value="' + nl + '" style="width:60px"> ' + btn('applyRouterPorts', 'Apply'));
@@ -778,6 +783,7 @@
     if (type === 'socket') fields.push({ k: 'portCount', label: 'Ports', type: 'number', v: 2, min: 1, max: 12 });
     if (type === 'generic') fields.push({ k: 'portCount', label: 'Ports', type: 'number', v: 0, min: 0, max: 96 });
     if (type === 'rack') fields.push({ k: 'rackHeight', label: 'Height (U)', type: 'number', v: 42, min: 1, max: 60 });
+    if (type === 'patchpanel') fields.push({ k: 'sectionSize', label: 'Ports per section', type: 'number', v: '', min: 1, max: 96, hint: 'Leave empty for automatic (24 -> 3 x 8, 12 -> 2 x 6, 16 -> 2 x 8). Must divide the port count evenly.' });
     if (type === 'patchpanel') fields.push({ k: 'straight', label: 'Front N <-> rear N', type: 'check', v: true, hint: 'Documents a straight-through internal mapping. Untick if this panel is not wired that way.' });
     fields.push({ k: 'container', label: 'Inside', type: 'select', opts: containerOptions(isGroup ? 'group' : 'object', type, null), v: defaultContainer(type) });
     const v = await formDlg('New ' + (isGroup ? 'group' : M.TYPE_LABELS[type]), fields, 'Create');
@@ -786,7 +792,7 @@
     const r = commit('Create ' + type, (p) => {
       if (isGroup) return B.addGroupPlaced(p, mid, { name: v.name || undefined, parentGroupId: v.container || null }, pos.x, pos.y).id;
       const portCount = v.portCount != null ? parseInt(v.portCount, 10) : undefined;
-      return B.addObjectPlaced(p, mid, { type: type, name: v.name || undefined, portCount: portCount, rackHeight: v.rackHeight, straight: v.straight, wanPorts: v.wanPorts, lanPorts: v.lanPorts, ipAddress: v.ipAddress, containerId: v.container || null }, pos.x, pos.y).id;
+      return B.addObjectPlaced(p, mid, { type: type, name: v.name || undefined, portCount: portCount, rackHeight: v.rackHeight, straight: v.straight, wanPorts: v.wanPorts, lanPorts: v.lanPorts, sectionSize: type === 'patchpanel' && v.sectionSize > 0 ? v.sectionSize : undefined, ipAddress: v.ipAddress, containerId: v.container || null }, pos.x, pos.y).id;
     });
     if (r && r !== true) { S.sel = { kind: isGroup ? 'group' : 'object', id: r }; renderAll(); openRight(); }
   }
@@ -970,7 +976,8 @@
       if (f === 'wstatus') { M.updateWireStatus(p, t, val); return; }
       if (sel.kind === 'group' || sel.kind === 'object') {
         const c = M.findContainer(p, sel.id);
-        if (f === 'container') {
+        if (f === 'sectionSize') { M.setSectionSize(p, sel.id, parseInt(val, 10)); B.refitObject(p, sel.id); }
+        else if (f === 'container') {
           M.setContainer(p, sel.kind, sel.id, val || null);
           M.mapsFor(p, sel.kind, sel.id).forEach((m) => { if (val) M.growToFit(p, m, val); });
         } else if (f === 'rackHeight') c.item.rackHeight = parseInt(val, 10) || null;
@@ -1130,9 +1137,9 @@
         case 'removeFromMap': commit('Remove from map', (p) => { p.placements = p.placements.filter((q) => !(q.mapId === curMap().id && q.refId === d.id)); }); break;
         case 'deleteSel': deleteSelection(); break;
         case 'deleteCable': { S.sel = { kind: 'cable', id: d.id }; deleteSelection(); break; }
-        case 'applyPortCount': { const n = parseInt($('pcInput').value, 10), id = S.sel.id; commit('Set port count', (p) => M.setPortCount(p, id, n)); break; }
+        case 'applyPortCount': { const n = parseInt($('pcInput').value, 10), id = S.sel.id; commit('Set port count', (p) => { M.setPortCount(p, id, n); B.refitObject(p, id); }); break; }
         case 'applyRouterPorts': { const id = S.sel.id, w = parseInt($('wanInput').value, 10), l = parseInt($('lanInput').value, 10); commit('Set router ports', (p) => M.setRouterPorts(p, id, w, l)); break; }
-        case 'presetPorts': { const id = S.sel.id, n = parseInt(d.n, 10); commit('Set port count', (p) => M.setPortCount(p, id, n)); break; }
+        case 'presetPorts': { const id = S.sel.id, n = parseInt(d.n, 10); commit('Set port count', (p) => { M.setPortCount(p, id, n); B.refitObject(p, id); }); break; }
         case 'automap': { const id = S.sel.id; commit('Map front to rear', (p) => { const n = M.autoMapPanel(p, id); toast(n + ' mapping(s) added'); }); break; }
         case 'mapPort': mapPort(d.id); break;
         case 'unmap': commit('Remove internal mapping', (p) => M.removeInternalMapping(p, d.id)); break;
