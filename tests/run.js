@@ -945,5 +945,53 @@ test('port label (description) is separate from the port number: hover text, sea
   assert.ok(T.describe(p, t).some(l => /Lobby camera/.test(l.text)));
 });
 
+console.log('Network colour');
+function colourNet() {
+  const p = M.createProject('nc');
+  const r = M.addObject(p, { type: 'router', name: 'R', wanPorts: 1, lanPorts: 3 });
+  const r2 = M.addObject(p, { type: 'router', name: 'R2', wanPorts: 0, lanPorts: 2 });
+  const s1 = M.addObject(p, { type: 'switch', name: 'S1', portCount: 8 }), s2 = M.addObject(p, { type: 'switch', name: 'S2', portCount: 8 });
+  const pp = M.addObject(p, { type: 'patchpanel', name: 'PP', portCount: 8, straight: true });
+  const pc = M.addObject(p, { type: 'generic', name: 'PC', deviceKind: 'pc', portCount: 1 }), other = M.addObject(p, { type: 'generic', name: 'Other', portCount: 1 });
+  const L = (o, n) => o.ports.find(x => x.label === n).id;
+  return { p, r, r2, s1, s2, pp, pc, other, L };
+}
+test('network colour: cables extending from a coloured router port default to it (through switches, not through routers)', () => {
+  const n = colourNet(), { p, r, r2, s1, s2, pc, other, L } = n, TP = NM.topology;
+  assert.strictEqual(TP.networkColorFor(p, [pc.ports[0].id, s1.ports[0].id]), null, 'no colour anywhere yet');
+  M.addPatchCable(p, { aPortId: L(r, 'L1'), bPortId: s1.ports[7].id });
+  M.addPatchCable(p, { aPortId: s1.ports[6].id, bPortId: s2.ports[7].id });
+  r.ports.find(x => x.label === 'L1').networkColor = '#d62728';
+  assert.strictEqual(TP.networkColorFor(p, [pc.ports[0].id, s1.ports[0].id]), '#d62728', 'PC onto a switch of that network');
+  assert.strictEqual(TP.networkColorFor(p, [other.ports[0].id, s2.ports[0].id]), '#d62728', 'two switches away');
+  assert.strictEqual(TP.networkColorFor(p, [L(r, 'L1'), pc.ports[0].id]), '#d62728', 'from the coloured router port itself');
+  // the router L2 side is a different network: its own colour, not L1's; a router is not traversed
+  M.addPatchCable(p, { aPortId: L(r, 'L2'), bPortId: L(r2, 'L1') });
+  assert.strictEqual(TP.networkColorFor(p, [L(r2, 'L2'), pc.ports[0].id]), null, 'R2 is a different network from R-L1');
+  r2.ports.find(x => x.label === 'L2').networkColor = '#2ca02c';
+  assert.strictEqual(TP.networkColorFor(p, [pc.ports[0].id, L(r2, 'L2')]), '#2ca02c');
+  const ids = TP.networkCables(p, L(r, 'L1'));
+  assert.strictEqual(ids.length, 2, 'router->S1 and S1->S2, but not the router-to-router cable');
+});
+test('network colour follows patch panels and fixed links', () => {
+  const n = colourNet(), { p, r, s1, pp, pc, L } = n;
+  const pp2 = M.addObject(p, { type: 'patchpanel', name: 'PP2', portCount: 8, straight: true });
+  M.addFixedLink(p, { aObjectId: pp.id, bObjectId: pp2.id, wireCount: 2, mapping: 'sequential' });
+  M.addPatchCable(p, { aPortId: L(r, 'L1'), bPortId: pp.ports.find(x => x.side === 'front' && x.label === '1').id });
+  M.addPatchCable(p, { aPortId: pp2.ports.find(x => x.side === 'front' && x.label === '1').id, bPortId: s1.ports[0].id });
+  r.ports.find(x => x.label === 'L1').networkColor = '#ff7f0e';
+  assert.strictEqual(NM.topology.networkColorFor(p, [pc.ports[0].id, s1.ports[2].id]), '#ff7f0e');
+  // a free panel front port whose chain leads back to the router
+  assert.strictEqual(NM.topology.networkColorFor(p, [pp2.ports.find(x => x.side === 'front' && x.label === '1').id, pc.ports[0].id]), '#ff7f0e');
+});
+test('network colour is drawn on the router port', () => {
+  const n = colourNet(), { p } = n;
+  const mid = p.maps[0].id;
+  B.placeItem(p, mid, 'object', n.r.id, 0, 0);
+  n.r.ports.find(x => x.label === 'L1').networkColor = '#d62728';
+  const svg = R.renderMap(p, mid, {}).content;
+  assert.ok(svg.indexOf('fill="#d62728" stroke="#333"') > 0);
+});
+
 console.log('\n' + passed + ' passed, ' + failed + ' failed');
 process.exit(failed ? 1 : 0);

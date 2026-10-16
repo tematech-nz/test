@@ -30,6 +30,11 @@ Try it: File -> Load demo project (two rooms, a fixed link between racks, a wall
   colour and type at once. With nothing selected `W` toggles the repeating tool (press `W` or `Esc` to stop).
 - **Port numbers and labels**: the face of a port shows its number; give a port a descriptive **label** (e.g. "Lobby camera")
   in the properties and it appears on hover, in search results and in trace/cable descriptions without widening the port.
+- **Network colour**: give a router port a network colour (port properties). New patch cables that extend from it - through
+  switches, patch panels and fixed links, but not through other routers - default to that colour when the patch cable tool
+  is on "Auto (network colour)" (the default; pick a colour in the tool's list to override, and you can always change a single
+  cable by hand). The port shows a colour bar. When you set or change the colour the app offers to **match the colours of the
+  downstream cables that already exist**; "Recolour this network's cables" in the port properties does it on demand.
 - **Cable colours**: pick white, grey, green, yellow, blue, orange, red or black from the list, or `Custom...` for an RGB
   picker. The patch cable tool has its own colour list for new cables. Cables are drawn with a thin dark outline so white and
   yellow stay visible.

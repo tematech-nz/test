@@ -10,7 +10,7 @@
     p: null, mapId: null, mode: 'view', sel: null, trace: null, tool: null,
     undo: [], redo: [], unsaved: false, saveErr: null, savedAt: null, lastExport: null,
     drag: null, geo: null, query: '', showIssues: false, issues: [],
-    collapsed: {}, pgroup: null, hoverPort: null, preview: null, drop: null, cableColor: '#1f77b4', customColorFor: null, ring: null,
+    collapsed: {}, pgroup: null, hoverPort: null, preview: null, drop: null, cableColor: 'auto', customColorFor: null, ring: null,
     view: 'map', graph: { from: '', to: '', via: false }
   };
   NM.app = { S: S, M: M }; // exposed for tests
@@ -282,7 +282,9 @@
       if (a === id) { S.tool.pending = null; renderAll(); return; }
       const tool = S.tool, warn = crossGroupWarning(a, id);
       const make = () => {
-        const cable = commit('Add patch cable', (p) => M.addPatchCable(p, { aPortId: a, bPortId: id, color: S.cableColor, cableType: tool.cableType }));
+        // 'auto': the colour of the network the cable extends from (router port network colour), else the default blue
+        const color = S.cableColor === 'auto' ? (NM.topology.networkColorFor(S.p, [a, id]) || '#1f77b4') : S.cableColor;
+        const cable = commit('Add patch cable', (p) => M.addPatchCable(p, { aPortId: a, bPortId: id, color: color, cableType: tool.cableType }));
         tool.pending = null;
         if (tool.once) S.tool = null; // one-shot wire: leave the tool, the new cable stays selected for colour/type edits
         if (cable) { toast('Added ' + cable.name + (tool.once ? ' - adjust colour and type in the panel' : '')); S.sel = { kind: 'cable', id: cable.id }; showTab('details'); openRight(); renderAll(); } else renderAll();
@@ -479,7 +481,7 @@
         const a = s.split(':'); return '<button data-add="' + a[0] + '" title="Create a new ' + a[1].toLowerCase() + ' on this map">+ ' + a[1] + '</button>';
       }).join('') + '<span class="sep"></span>' +
       '<button data-act="patchTool" title="' + esc(TIPS.patchTool) + '" class="' + (pc ? 'active' : '') + '">Patch cable tool (W)</button>' +
-      (pc ? ' <span class="cable-colour">' + colorPicker('toolPreset', 'toolColor', S.cableColor, '__tool') + '</span>' : '') +
+      (pc ? ' <span class="cable-colour">' + colorPicker('toolPreset', 'toolColor', S.cableColor, '__tool', { value: 'auto', label: 'Auto (network colour)', swatch: '#1f77b4' }) + '</span>' : '') +
       '<button data-act="newLink" title="' + esc(TIPS.newLink) + '">+ Fixed link</button>' +
       '<button data-act="addMapItems" title="' + esc(TIPS.addMapItems) + '">Add existing here...</button>';
   }
@@ -538,12 +540,17 @@
   const closeLeft = () => $('left').classList.remove('open');
 
   /* preset cable colours plus "Custom..." which reveals the RGB picker */
-  function colorPicker(presetField, colorField, value, ownerId) {
+  /* special: optional first choice {value, label, swatch[, dt]} for "no colour" / "auto"; dt = data-t of the port being edited */
+  function colorPicker(presetField, colorField, value, ownerId, special) {
+    const isSpecial = !!special && value === special.value;
     const preset = M.CABLE_COLORS.find((c) => c[1].toLowerCase() === String(value).toLowerCase());
-    const custom = !preset || S.customColorFor === ownerId;
-    const o = M.CABLE_COLORS.map((c) => [c[1], c[0]]).concat([['custom', 'Custom...']]);
-    return '<span class="swatch" role="button" data-act="customColor" data-owner="' + esc(ownerId) + '" title="Click to choose any colour" style="background:' + esc(value) + '"></span> <select data-f="' + presetField + '">' + opts(o, custom ? 'custom' : preset[1]) + '</select>' +
-      (custom ? ' <input type="color" data-f="' + colorField + '" value="' + esc(value) + '" title="Custom colour">' : '');
+    const custom = S.customColorFor === ownerId || (!isSpecial && !preset);
+    const o = (special ? [[special.value, special.label]] : []).concat(M.CABLE_COLORS.map((c) => [c[1], c[0]]), [['custom', 'Custom...']]);
+    const dt = special && special.dt ? ' data-t="' + esc(special.dt) + '"' : '';
+    const hex = /^#[0-9a-f]{6}$/i.test(value) ? value : '#1f77b4';
+    return '<span class="swatch" role="button" data-act="customColor" data-owner="' + esc(ownerId) + '" title="Click to choose any colour" style="background:' + esc(isSpecial ? (special.swatch || 'transparent') : value) + '"></span> <select data-f="' + presetField + '"' + dt + '>' +
+      opts(o, custom ? 'custom' : (isSpecial ? special.value : preset[1])) + '</select>' +
+      (custom ? ' <input type="color" data-f="' + colorField + '"' + dt + ' value="' + esc(hex) + '" title="Custom colour">' : '');
   }
   function fld(label, html) { return '<div class="field"><label>' + label + '</label><div>' + html + '</div></div>'; }
   function inp(label, f, val, t, extra) {
@@ -712,12 +719,14 @@
     if (M.isTermination(o)) h += fld('Side', pt.side);
     if (o.type === 'router') h += fld('Role', esc((pt.role || '').toUpperCase()));
     if (hasIp(o)) h += inp('IP address', 'pip', pt.ip || '', pt.id);
+    if (o.type === 'router') h += isEdit() ? fld('Network colour', colorPicker('netPreset', 'pnet', pt.networkColor || '', 'net:' + pt.id, { value: '', label: 'none', swatch: 'transparent', dt: pt.id }) + '<div class="sub">New patch cables extending from this port default to this colour.</div>') : (pt.networkColor ? fld('Network colour', '<span class="swatch" style="background:' + esc(pt.networkColor) + '"></span>') : '');
     if (o.type === 'switch') h += inp('Type', 'ptype', pt.portType || '', pt.id) + inp('Speed', 'pspeed', pt.speed || '', pt.id) + inp('Media', 'pmedia', pt.media || '', pt.id);
     h += fld('Connection', portState(o, pt, idx));
     h += '<div class="btn-row">' + btn('trace', 'Trace connection', 'data-kind="port" data-id="' + esc(id) + '"', 'primary');
     if (isEdit()) {
       const u = idx.portUse[id];
       if (pt.side !== 'rear' && !u) h += btn('startPatchFrom', 'Patch cable from here', 'data-id="' + esc(id) + '"');
+      if (o.type === 'router' && pt.networkColor) h += btn('recolorNet', 'Recolour this network\'s cables', 'data-id="' + esc(id) + '"');
       if (u && u.kind === 'patch') h += btn('deleteCable', 'Remove cable ' + idx.cables[u.id].name, 'data-id="' + esc(u.id) + '"', 'danger');
       const mp = S.p.internalMappings.find((m) => m.aPortId === id || m.bPortId === id);
       if (M.isTermination(o) && mp) h += btn('unmap', 'Remove internal mapping', 'data-id="' + esc(mp.id) + '"');
@@ -1084,13 +1093,19 @@
   function onFieldChange(el) {
     let f = el.dataset.f;
     const t = el.dataset.t, val = el.type === 'checkbox' ? el.checked : el.value;
+    if (f === 'netPreset') {
+      if (val === 'custom') { S.customColorFor = 'net:' + t; renderRight(); return; }
+      S.customColorFor = null; f = 'pnet';
+    } else if (f === 'pnet') S.customColorFor = null;
     if (f === 'colorPreset') {
       if (val === 'custom') { S.customColorFor = S.sel && S.sel.id; renderRight(); return; }
       S.customColorFor = null; f = 'color';
     } else if (f === 'color') S.customColorFor = null;
     const sel = S.sel; if (!sel && !t) return;
-    commit('Edit ' + f, (p) => {
+    const netPort = f === 'pnet' && val ? (t || (sel && sel.id)) : null;
+    const ok = commit('Edit ' + f, (p) => {
       const idx = M.buildIndex(p);
+      if (f === 'pnet') { const pt = idx.ports[t || sel.id]; if (pt) { if (val) pt.networkColor = val; else delete pt.networkColor; } return; }
       if (f === 'pdesc') { const pt = idx.ports[t || sel.id]; if (pt) { if (val.trim()) pt.description = val.trim(); else delete pt.description; } return; }
       if (f === 'plabel' || f === 'ptype' || f === 'pspeed' || f === 'pmedia' || f === 'pip') {
         const pt = idx.ports[t || sel.id]; if (!pt) return;
@@ -1118,6 +1133,19 @@
         }
       } else if (sel.kind === 'cable') M.updatePatchCable(p, sel.id, { [f]: val });
       else if (sel.kind === 'link') M.updateLinkMeta(p, sel.id, { [f]: val });
+    });
+    if (ok && netPort) offerMatchNetworkColor(netPort);
+  }
+
+  /* after a router port gets a network colour: offer to recolour the cables that already extend from it */
+  function offerMatchNetworkColor(portId) {
+    const pt = S.p.objects.flatMap((o) => o.ports).find((x) => x.id === portId);
+    if (!pt || !pt.networkColor) return;
+    const col = pt.networkColor, ids = NM.topology.networkCables(S.p, portId);
+    const cables = S.p.patchCables.filter((c) => ids.indexOf(c.id) >= 0), diff = cables.filter((c) => c.color.toLowerCase() !== col.toLowerCase());
+    if (!diff.length) return;
+    confirmDlg('Match colours on downstream cables?', '<p><b>' + diff.length + '</b> of the <b>' + cables.length + '</b> patch cable(s) extending from this router port have a different colour.</p><p>Change them to <span class="swatch" style="background:' + esc(col) + '"></span> to match the network colour? (Cables you draw from now on use it automatically.)</p>', 'Match colours').then((yes) => {
+      if (yes) commit('Match network cable colours', (p) => { p.patchCables.forEach((c) => { if (diff.some((d) => d.id === c.id)) c.color = col; }); });
     });
   }
 
@@ -1280,6 +1308,13 @@
           if (d.owner === '__tool') renderToolbar(); else renderRight();
           const pick = document.querySelector(d.owner === '__tool' ? '#toolbar input[type="color"]' : '#detailsPane input[type="color"]');
           if (pick) { try { pick.showPicker(); } catch (_) { pick.click(); } }
+          break;
+        }
+        case 'recolorNet': {
+          const pid = d.id, ids = NM.topology.networkCables(S.p, pid), col = S.p.objects.flatMap((o) => o.ports).find((x) => x.id === pid).networkColor;
+          confirmDlg('Recolour network cables', '<p>Set <span class="swatch" style="background:' + esc(col) + '"></span> on <b>' + ids.length + '</b> patch cable(s) extending from this router port (through switches and panels, not through other routers)? Cables with a manually chosen colour are included.</p>', 'Recolour').then((ok) => {
+            if (ok) commit('Recolour network cables', (p) => { p.patchCables.forEach((c) => { if (ids.indexOf(c.id) >= 0) c.color = col; }); });
+          });
           break;
         }
         case 'applyUplinks': { const n = parseInt($('upInput').value, 10), id = S.sel.id; commit('Set uplink ports', (p) => { M.setUplinkPorts(p, id, n); B.refitObject(p, id); }); break; }

@@ -689,6 +689,70 @@ const ok = (m) => console.log('  ok   ' + m);
     await page.click('#btnUndo');
   });
 
+
+  await step('network colour: set on a router port, new cables default to it, manual colour still wins, recolour action', async () => {
+    const ids = await page.evaluate(() => {
+      let out;
+      NetMap.app.api.commit('net test', (p) => {
+        const B = NetMap.builder, mid = p.maps[0].id;
+        const r = B.addObjectPlaced(p, mid, { type: 'router', name: 'NetR', wanPorts: 1, lanPorts: 2 }, 7000, 40);
+        const s = B.addObjectPlaced(p, mid, { type: 'switch', name: 'NetS', portCount: 4 }, 7000, 240);
+        const d = B.addObjectPlaced(p, mid, { type: 'generic', name: 'NetPC', deviceKind: 'pc', portCount: 1 }, 7300, 240);
+        out = { l1: r.ports.find(x => x.label === 'L1').id, s1: s.ports[0].id, s2: s.ports[1].id, s3: s.ports[2].id, pc: d.ports[0].id };
+      });
+      NetMap.app.api.goTo('port', out.l1, NetMap.app.S.p.maps[0].id);
+      return out;
+    });
+    const color = (a) => page.evaluate((x) => { const p = NetMap.app.S.p, c = p.patchCables.find(k => k.aPortId === x.a || k.bPortId === x.a); return c && c.color; }, { a });
+    const port = (id) => page.locator('#vp rect[data-kind="port"][data-id="' + id + '"]');
+    await page.evaluate((id) => NetMap.app.api.select({ kind: 'port', id }), ids.l1);
+    await page.selectOption('#detailsPane select[data-f="netPreset"]', { label: 'red' });
+    assert.strictEqual(await page.evaluate((id) => NetMap.app.S.p.objects.flatMap(o => o.ports).find(x => x.id === id).networkColor, ids.l1), '#d62728');
+    assert.ok((await page.innerHTML('#vp')).indexOf('fill="#d62728" stroke="#333"') > 0, 'colour bar on the router port');
+    await page.click('#toolbar button[data-act="patchTool"]');
+    await page.selectOption('#toolbar select[data-f="toolPreset"]', 'auto');
+    assert.strictEqual(await page.$eval('#toolbar select[data-f="toolPreset"]', (s) => s.value), 'auto', 'tool can be set to Auto (network colour)');
+    await port(ids.l1).click({ force: true }); await port(ids.s1).click({ force: true });
+    assert.strictEqual(await color(ids.s1), '#d62728', 'router -> switch cable takes the network colour');
+    await port(ids.pc).click({ force: true }); await port(ids.s2).click({ force: true });
+    assert.strictEqual(await color(ids.pc), '#d62728', 'PC -> switch cable too: it extends from that network');
+    await page.selectOption('#toolbar select[data-f="toolPreset"]', { label: 'green' });
+    await port(ids.s3).click({ force: true });
+    const free = await page.evaluate(() => NetMap.app.S.p.objects.find(o => o.name === 'NetPC').ports[0].id);
+    assert.ok(free);
+    await page.keyboard.press('Escape');
+    // manual override on a cable
+    const cid = await page.evaluate((a) => NetMap.app.S.p.patchCables.find(k => k.aPortId === a || k.bPortId === a).id, ids.pc);
+    await page.evaluate((id) => NetMap.app.api.select({ kind: 'cable', id }), cid);
+    await page.selectOption('#detailsPane select[data-f="colorPreset"]', { label: 'yellow' });
+    assert.strictEqual(await color(ids.pc), '#f2c200');
+    // changing the network colour offers to match the existing downstream cables
+    await page.evaluate((id) => NetMap.app.api.select({ kind: 'port', id }), ids.l1);
+    await page.selectOption('#detailsPane select[data-f="netPreset"]', { label: 'orange' });
+    await page.waitForSelector('#dlg[open]');
+    assert.ok(/Match colours on downstream cables/.test(await page.innerText('#dlg')) && /different colour/.test(await page.innerText('#dlg')));
+    await page.click('#dlg button[data-btn="no"]');
+    assert.strictEqual(await color(ids.pc), '#f2c200', 'declined: cables unchanged');
+    await page.selectOption('#detailsPane select[data-f="netPreset"]', { label: 'red' });
+    await page.waitForSelector('#dlg[open]');
+    await page.click('#dlg button[data-btn="yes"]');
+    await page.waitForTimeout(100);
+    assert.strictEqual(await color(ids.pc), '#d62728', 'accepted: downstream cables match the network colour');
+    assert.strictEqual(await color(ids.s1), '#d62728');
+    // the explicit button works too
+    await page.evaluate((id) => NetMap.app.api.select({ kind: 'cable', id }), cid);
+    await page.selectOption('#detailsPane select[data-f="colorPreset"]', { label: 'yellow' });
+    await page.evaluate((id) => NetMap.app.api.select({ kind: 'port', id }), ids.l1);
+    await page.click('#detailsPane button[data-act="recolorNet"]');
+    await page.waitForSelector('#dlg[open]');
+    await page.click('#dlg button[data-btn="yes"]');
+    await page.waitForTimeout(100);
+    assert.strictEqual(await color(ids.pc), '#d62728', 'recoloured, including the manual one');
+    await shot('network-colour');
+    for (let i = 0; i < 12; i++) await page.click('#btnUndo');
+    await page.evaluate(() => { NetMap.app.S.tool = null; });
+  });
+
   await step('autosave survives a refresh', async () => {
     await page.click('#btnMode'); // back to view mode flushes the save
     const name = await page.evaluate(() => NetMap.app.S.p.name);

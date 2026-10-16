@@ -159,6 +159,76 @@
     return out.slice(0, limit);
   }
 
-  NM.topology = { canPass: canPass, buildGraph: buildGraph, reachTree: reachTree, allPaths: allPaths, subnetOf: subnetOf, PASSIVE: PASSIVE, TERMINAL: TERMINAL };
+  /*
+   * Network colour: a router port may carry a networkColor. Patch cables extending from it - through switches and panels,
+   * not through other routers - default to that colour. ends are the port(s) a new cable would join.
+   */
+  function networkColorFor(p, portIds, graph) {
+    var idx = M.buildIndex(p);
+    graph = graph || buildGraph(p);
+    function colorOf(id) { var pt = idx.ports[id]; return pt && pt.networkColor ? pt.networkColor : null; }
+    function routerSide(node, link) {
+      for (var i = 0; i < link.paths.length; i++) {
+        var e = link.paths[i], pid = e.a === node ? e.aPortId : e.bPortId, c = colorOf(pid);
+        if (c) return c;
+      }
+      return null;
+    }
+    function bfs(startId) {
+      var node = graph.nodes[startId];
+      if (!node || node.type === 'router') return null;
+      var seen = {}, queue = [startId]; seen[startId] = true;
+      while (queue.length) {
+        var cur = queue.shift();
+        var adj = graph.adj[cur] || [];
+        for (var i = 0; i < adj.length; i++) {
+          var n = adj[i], to = graph.nodes[n.to];
+          if (to.type === 'router') { var c = routerSide(n.to, n.link); if (c) return c; continue; }
+          if (to.transit && !seen[n.to]) { seen[n.to] = true; queue.push(n.to); }
+        }
+      }
+      return null;
+    }
+    for (var k = 0; k < portIds.length; k++) {
+      var own = colorOf(portIds[k]);
+      if (own) return own;
+      var ends = [portIds[k]], tr = T.tracePort(p, portIds[k], idx);
+      if (tr) tr.path.forEach(function (s) { if (s.type === 'port' && s.id !== portIds[k]) ends.push(s.id); });
+      for (var j = 0; j < ends.length; j++) {
+        var c2 = colorOf(ends[j]); if (c2) return c2;
+        var o = idx.portObj[ends[j]];
+        if (o && graph.nodes[o.id]) { var c3 = bfs(o.id); if (c3) return c3; }
+      }
+    }
+    return null;
+  }
+
+  /* ids of the patch cables on the network that starts at a router port (the cables networkColorFor would colour) */
+  function networkCables(p, routerPortId, graph) {
+    var idx = M.buildIndex(p), start = idx.portObj[routerPortId];
+    graph = graph || buildGraph(p);
+    var out = {};
+    if (!start || !graph.nodes[start.id]) return [];
+    var seenNode = {}, queue = [], seenLink = {};
+    function collect(link) { link.paths.forEach(function (e) { e.trace.path.forEach(function (s) { if (s.type === 'patch') out[s.id] = true; }); }); }
+    (graph.adj[start.id] || []).forEach(function (n) {
+      var onThisPort = n.link.paths.some(function (e) { return e.aPortId === routerPortId || e.bPortId === routerPortId; });
+      if (!onThisPort) return;
+      seenLink[n.link.id] = true; collect(n.link);
+      if (graph.nodes[n.to].type !== 'router' && graph.nodes[n.to].transit && !seenNode[n.to]) { seenNode[n.to] = true; queue.push(n.to); }
+    });
+    while (queue.length) {
+      var cur = queue.shift();
+      (graph.adj[cur] || []).forEach(function (n) {
+        if (seenLink[n.link.id] || n.to === start.id) return;
+        if (graph.nodes[n.to].type === 'router') return;
+        seenLink[n.link.id] = true; collect(n.link);
+        if (graph.nodes[n.to].transit && !seenNode[n.to]) { seenNode[n.to] = true; queue.push(n.to); }
+      });
+    }
+    return Object.keys(out);
+  }
+
+  NM.topology = { networkColorFor: networkColorFor, networkCables: networkCables, canPass: canPass, buildGraph: buildGraph, reachTree: reachTree, allPaths: allPaths, subnetOf: subnetOf, PASSIVE: PASSIVE, TERMINAL: TERMINAL };
   if (typeof module !== 'undefined' && module.exports) module.exports = NM.topology;
 })(typeof window !== 'undefined' ? window : globalThis);
