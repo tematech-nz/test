@@ -98,6 +98,22 @@ dialog .df { padding: 10px 16px; border-top: 1px solid var(--line); display: fle
 #toast.show { opacity: 1; } #toast.bad { background: var(--edit); }
 
 /* ---------- narrow screens: phone-first view mode ---------- */
+#graphView { position: absolute; inset: 0; background: #fff; overflow: auto; padding: 10px 14px; z-index: 5; }
+#graphView[hidden] { display: none; }
+body.view-graph #canvas, body.view-graph #toolbar, body.view-graph #zoomctl, body.view-graph #toolHint, body.view-graph #emptyHint { display: none !important; }
+.gv-controls { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; margin-bottom: 6px; }
+.gv-controls label { display: flex; gap: 6px; align-items: center; }
+.gv-controls select { max-width: 60vw; }
+.gv-note { color: var(--muted); font-size: 12px; margin: 4px 0 8px; }
+.gv-scroll { overflow: auto; border: 1px solid var(--line); border-radius: 8px; background: #fafbfc; max-height: 55vh; margin-bottom: 8px; }
+.gv-svg { display: block; }
+.gv-empty { padding: 30px; color: var(--muted); text-align: center; }
+#graphView h3 { margin: 10px 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
+.gv-path { border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; margin: 5px 0; }
+.gv-path.best { border-color: #d32f2f; background: #fff6f6; }
+.gv-path .sub, .gv-tn .sub { color: var(--muted); font-size: 12px; }
+.gv-tn { padding: 2px 0; }
+#btnGraph.active { background: var(--accent); color: #fff; }
 @media (max-width: 760px) {
   #app { display: block; position: relative; }
   #topbar { flex-wrap: wrap; padding: 6px 8px; }

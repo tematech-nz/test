@@ -14,6 +14,7 @@
   <input id="searchBox" type="search" placeholder="Search ports, cables, objects..." aria-label="Search">
   <span id="saveStatus" role="status"></span>
   <span class="edit-only"><button id="btnUndo" title="Undo (Ctrl+Z)">Undo</button><button id="btnRedo" title="Redo (Ctrl+Y)">Redo</button></span>
+  <button id="btnGraph" title="Show how devices interconnect and what can reach what">Graph</button>
   <button id="btnFile" title="Import, export and project actions">File</button>
   <button id="btnMode" class="primary" title="Switch between view and edit mode">Edit</button>
 </header>
@@ -35,6 +36,7 @@
       <button id="zoomFit" aria-label="Fit map">Fit</button>
     </div>
     <div id="toolHint" hidden></div>
+    <div id="graphView" hidden></div>
     <div id="emptyHint" hidden></div>
   </main>
   <aside id="right" aria-label="Details">
@@ -56,6 +58,8 @@
 <script src="js/render.js"></script>
 <script src="js/exporters.js"></script>
 <script src="js/builder.js"></script>
+<script src="js/topology.js"></script>
+<script src="js/graphview.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>

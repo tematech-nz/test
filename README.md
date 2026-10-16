@@ -29,6 +29,16 @@ Try it: File -> Load demo project (two rooms, a fixed link between racks, a wall
 - **Routers** (`+ Router`): choose how many WAN and LAN ports (0-96 in total, changeable later) and an optional IP
   address; every port can have its own IP too. WAN and LAN ports sit in separate strips that fold with `^`.
   Routers cable like switches and are searchable by IP.
+- **Internet / ISP** (`+ Internet / ISP`): a special endpoint object (default name INTERNET) with one or more ISP ports
+  and an optional public IP / circuit note. Cable its ports to router WAN ports like anything else. Use several
+  for multiple ISPs.
+- **Graph** (header button): collapses patch cables, patch panels and fixed links into device-to-device links and shows
+  the interconnection graph from a chosen device (default: INTERNET). With "To" empty you get the reachability tree
+  (what can be reached, via which cables, how many hops, what is unreachable). Pick a target device to list every
+  route to it, shortest first, with redundant paths highlighted. Switches and routers pass traffic through; Internet,
+  wall sockets and generic devices are endpoints unless you tick "Allow paths through Internet". Subnets
+  are shown on devices that have IPs with a prefix (e.g. 192.168.1.1/24). Click a device or link to jump to it on the map.
+  It is theoretical physical reachability: no routing, VLAN or firewall rules are modelled.
 - **Quick fixed link from ports** (edit mode, mouse): Ctrl+click free rear ports on one patch panel to group them
   (Shift+Ctrl+click extends a range). Move the pointer over another panel: the same number of rear ports, starting
   under the pointer, are highlighted (green = valid, red = occupied or not enough ports). Click to create the link
@@ -65,6 +75,7 @@ connectivity rules, and migration strategy.
 | `js/layout.js`, `js/render.js` | Geometry and SVG rendering (shared by screen and exports). |
 | `js/exporters.js` | Connection table, PDF writer, download helpers. |
 | `js/builder.js` | Placement helpers and the demo project. |
+| `js/topology.js`, `js/graphview.js` | Device-level graph, reachability tree, path search and the Graph view. |
 | `js/app.js` | UI: state, undo/redo, canvas, panels, dialogs. |
 
 ## Tests

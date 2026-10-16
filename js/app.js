@@ -10,7 +10,8 @@
     p: null, mapId: null, mode: 'view', sel: null, trace: null, tool: null,
     undo: [], redo: [], unsaved: false, saveErr: null, savedAt: null, lastExport: null,
     drag: null, geo: null, query: '', showIssues: false, issues: [],
-    collapsed: {}, pgroup: null, hoverPort: null, preview: null
+    collapsed: {}, pgroup: null, hoverPort: null, preview: null,
+    view: 'map', graph: { from: '', to: '', via: false }
   };
   NM.app = { S: S, M: M }; // exposed for tests
 
@@ -374,8 +375,20 @@
   /* ---------------------------------------------------------------- rendering */
   function renderAll() {
     renderTop(); renderCanvas(); renderLeft(); renderRight(); renderToolbar();
-    document.body.className = 'mode-' + S.mode;
+    document.body.className = 'mode-' + S.mode + (S.view === 'graph' ? ' view-graph' : '');
+    renderGraph();
   }
+  function renderGraph() {
+    const gv = $('graphView'), on = S.view === 'graph';
+    gv.hidden = !on;
+    $('btnGraph').classList.toggle('active', on);
+    $('btnGraph').textContent = on ? 'Map' : 'Graph';
+    if (!on) return;
+    const top = gv.scrollTop;
+    gv.innerHTML = NM.graphview.render(S.p, S.graph);
+    gv.scrollTop = top;
+  }
+  function setView(v) { S.view = v; clearPgroup(); renderAll(); if (v === 'map' && S.p.placements.some((q) => q.mapId === S.mapId)) applyVp(); }
   function renderTop() {
     $('projTitle').textContent = S.p.name;
     $('mapSelect').innerHTML = opts(S.p.maps.map((m) => [m.id, m.name]), S.mapId);
@@ -416,7 +429,7 @@
     if (!isEdit()) { tb.innerHTML = ''; return; }
     const pc = S.tool && S.tool.type === 'patch';
     tb.innerHTML =
-      ['group:Group', 'rack:Rack', 'patchpanel:Patch panel', 'switch:Switch', 'router:Router', 'socket:Wall socket', 'generic:Generic'].map((s) => {
+      ['group:Group', 'rack:Rack', 'patchpanel:Patch panel', 'switch:Switch', 'router:Router', 'internet:Internet / ISP', 'socket:Wall socket', 'generic:Generic'].map((s) => {
         const a = s.split(':'); return '<button data-add="' + a[0] + '">+ ' + a[1] + '</button>';
       }).join('') + '<span class="sep"></span>' +
       '<button data-act="patchTool" class="' + (pc ? 'active' : '') + '">Patch cable tool</button>' +
@@ -498,6 +511,7 @@
     $('tabTrace').textContent = S.trace ? 'Trace *' : 'Trace';
   }
 
+  const hasIp = (o) => o.type === 'router' || o.type === 'internet';
   function containerOptions(forKind, forType, selfId) {
     const out = [['', '(none - standalone)']];
     S.p.groups.forEach((g) => {
@@ -540,7 +554,7 @@
     const idx = M.buildIndex(S.p), o = idx.objects[id];
     let h = '<h3>' + esc(M.TYPE_LABELS[o.type]) + '</h3>' + inp('Name', 'name', o.name) + inp('Location', 'location', o.location) + inp('Description', 'description', o.description);
     if (o.type === 'rack') h += inp('Height (U)', 'rackHeight', o.rackHeight || '');
-    if (o.type === 'router') h += inp('IP address', 'ipAddress', o.ipAddress || '');
+    if (hasIp(o)) h += inp(o.type === 'internet' ? 'Public IP' : 'IP address', 'ipAddress', o.ipAddress || '');
     const par = o.containerId ? M.findContainer(S.p, o.containerId) : null;
     h += isEdit() ? fld('Inside', '<select data-f="container">' + opts(containerOptions('object', o.type, id), o.containerId || '') + '</select>') : fld('Inside', par ? lnk(par.kind, par.id, par.item.name) : '-');
     h += fld('On maps', mapsLine('object', id)) + fld('ID', '<span class="sub">' + esc(o.id) + '</span>');
@@ -563,7 +577,7 @@
       h += '<table class="t"><tr><th>Port</th><th>Connection</th><th></th></tr>' + o.ports.map((pt) =>
         '<tr><td>' + (isEdit() ? '<input type="text" data-f="plabel" data-t="' + esc(pt.id) + '" value="' + esc(pt.label) + '" style="width:5em">' : '<a class="lnk" data-act="select" data-kind="port" data-id="' + esc(pt.id) + '">' + esc(pt.label) + '</a>') +
         (o.type === 'patchpanel' ? ' <span class="tag">' + pt.side + '</span>' : '') + (o.type === 'router' ? ' <span class="tag">' + esc(pt.role) + '</span>' : '') + '</td><td>' +
-        (o.type === 'router' ? (isEdit() ? '<input type="text" data-f="pip" data-t="' + esc(pt.id) + '" value="' + esc(pt.ip || '') + '" placeholder="IP" style="width:100%;margin-bottom:2px">' : (pt.ip ? '<div>' + esc(pt.ip) + '</div>' : '')) : '') +
+        (hasIp(o) ? (isEdit() ? '<input type="text" data-f="pip" data-t="' + esc(pt.id) + '" value="' + esc(pt.ip || '') + '" placeholder="IP" style="width:100%;margin-bottom:2px">' : (pt.ip ? '<div>' + esc(pt.ip) + '</div>' : '')) : '') +
         portState(o, pt, idx) + '</td><td>' +
         '<button data-act="trace" data-kind="port" data-id="' + esc(pt.id) + '" title="Trace connection">Trace</button></td></tr>').join('') + '</table>';
     }
@@ -579,7 +593,8 @@
     const idx = M.buildIndex(S.p), pt = idx.ports[id], o = idx.portObj[id];
     let h = '<h3>Port</h3>' + fld('Equipment', lnk('object', o.id, o.name)) + inp('Label', 'plabel', pt.label, pt.id);
     if (o.type === 'patchpanel') h += fld('Side', pt.side);
-    if (o.type === 'router') h += fld('Role', esc((pt.role || '').toUpperCase())) + inp('IP address', 'pip', pt.ip || '', pt.id);
+    if (o.type === 'router') h += fld('Role', esc((pt.role || '').toUpperCase()));
+    if (hasIp(o)) h += inp('IP address', 'pip', pt.ip || '', pt.id);
     if (o.type === 'switch') h += inp('Type', 'ptype', pt.portType || '', pt.id) + inp('Speed', 'pspeed', pt.speed || '', pt.id) + inp('Media', 'pmedia', pt.media || '', pt.id);
     h += fld('Connection', portState(o, pt, idx));
     h += '<div class="btn-row">' + btn('trace', 'Trace connection', 'data-kind="port" data-id="' + esc(id) + '"', 'primary');
@@ -754,6 +769,11 @@
       fields.push({ k: 'wanPorts', label: 'WAN ports', type: 'number', v: 1, min: 0, max: 96 });
       fields.push({ k: 'lanPorts', label: 'LAN ports', type: 'number', v: 4, min: 0, max: 96 });
       fields.push({ k: 'ipAddress', label: 'IP address', v: '', hint: 'Optional, e.g. 192.168.1.1 or 192.168.1.1/24. Each port can also have its own IP later.' });
+    }
+    if (type === 'internet') {
+      fields[0].v = 'INTERNET'; fields[0].hint = 'The ISP / upstream network. Cable its ports to your router WAN ports.';
+      fields.push({ k: 'portCount', label: 'ISP ports', type: 'number', v: 1, min: 1, max: 12 });
+      fields.push({ k: 'ipAddress', label: 'Public IP / circuit', v: '' });
     }
     if (type === 'socket') fields.push({ k: 'portCount', label: 'Ports', type: 'number', v: 2, min: 1, max: 12 });
     if (type === 'generic') fields.push({ k: 'portCount', label: 'Ports', type: 'number', v: 0, min: 0, max: 96 });
@@ -1068,6 +1088,20 @@
     $('btnMode').onclick = () => setMode(isEdit() ? 'view' : 'edit');
     $('btnUndo').onclick = undo; $('btnRedo').onclick = redo;
     $('btnFile').onclick = fileMenu;
+    $('btnGraph').onclick = () => setView(S.view === 'graph' ? 'map' : 'graph');
+    $('graphView').addEventListener('change', (e) => {
+      const k = e.target.dataset.g; if (!k) return;
+      if (k === 'via') S.graph.via = e.target.checked; else S.graph[k] = e.target.value;
+      renderGraph();
+    });
+    $('graphView').addEventListener('click', (e) => {
+      const n = e.target.closest('[data-gnode]'), l = e.target.closest('[data-gedge]');
+      if (n) { S.view = 'map'; renderAll(); goTo('object', n.dataset.gnode); }
+      else if (l) {
+        const g = NM.topology.buildGraph(S.p, { viaInternet: S.graph.via }), lk = g.links.find((x) => x.id === l.dataset.gedge);
+        if (lk) { S.view = 'map'; renderAll(); startTrace('port', lk.paths[0].aPortId); goTo('port', lk.paths[0].aPortId); }
+      }
+    });
     $('btnMenu').onclick = openLeft; $('btnCloseLeft').onclick = closeLeft; $('btnCloseRight').onclick = closeRight;
     $('mapSelect').onchange = (e) => switchMap(e.target.value);
     $('searchBox').oninput = (e) => { S.query = e.target.value; renderLeft(); if (S.query) openLeft(); };

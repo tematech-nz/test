@@ -219,6 +219,31 @@ const ok = (m) => console.log('  ok   ' + m);
     assert.ok(!(await page.evaluate(() => NetMap.app.S.p.objects.some(x => x.name === 'Edge GW'))));
   });
 
+
+  await step('topology graph: INTERNET object, tree, paths, navigation back to the map', async () => {
+    await page.evaluate(() => NetMap.app.api.commit('internet', (p) => {
+      const M = NetMap.model, B = NetMap.builder;
+      const inet = B.addObjectPlaced(p, p.maps[0].id, { type: 'internet', name: 'INTERNET', ipAddress: '203.0.113.1' }, 900, 40);
+      const r = B.addObjectPlaced(p, p.maps[0].id, { type: 'router', name: 'Edge', wanPorts: 1, lanPorts: 2, ipAddress: '192.168.1.1/24' }, 900, 140);
+      const sw = p.objects.find(o => o.name === 'Switch A');
+      M.addPatchCable(p, { aPortId: inet.ports[0].id, bPortId: r.ports[0].id });
+      M.addPatchCable(p, { aPortId: r.ports[1].id, bPortId: sw.ports.find(x => x.label === '5').id });
+    }));
+    await page.click('#btnGraph');
+    await page.waitForSelector('#graphView svg [data-gnode]');
+    let txt = await page.innerText('#graphView');
+    assert.ok(/reachable from internet/i.test(txt) && /Edge/.test(txt) && /WS-02/.test(txt), txt.slice(0, 400));
+    await shot('graph-tree');
+    await page.selectOption('#graphView select[data-g="to"]', { label: 'WS-02 (Wall socket)' });
+    txt = await page.innerText('#graphView');
+    assert.ok(/paths from internet to ws-02/i.test(txt) && /shortest/.test(txt) && /FL-001/.test(txt), txt.slice(0, 600));
+    await shot('graph-paths');
+    await page.locator('#graphView [data-gnode]').first().click({ force: true });
+    await page.waitForTimeout(150);
+    assert.strictEqual(await page.evaluate(() => NetMap.app.S.view), 'map');
+    assert.strictEqual(await page.evaluate(() => NetMap.app.S.sel.kind), 'object');
+  });
+
   await step('autosave survives a refresh', async () => {
     await page.click('#btnMode'); // back to view mode flushes the save
     const name = await page.evaluate(() => NetMap.app.S.p.name);

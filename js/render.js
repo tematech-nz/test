@@ -11,6 +11,7 @@
     patchpanel: { fill: '#fdf6e3', stroke: '#b58900', dash: '' },
     'switch': { fill: '#e6f4ea', stroke: '#2e7d32', dash: '' },
     router: { fill: '#e3f2fd', stroke: '#1565c0', dash: '' },
+    internet: { fill: '#fff3cd', stroke: '#e65100', dash: '' },
     socket: { fill: '#f3e5f5', stroke: '#7b1fa2', dash: '' },
     generic: { fill: '#ffffff', stroke: '#777', dash: '' }
   };
@@ -83,12 +84,12 @@
       var dim = hl && !container && !hl.objects[ref.id];
       var x = [];
       x.push('<g data-kind="' + (it.isGroup ? 'group' : 'object') + '" data-id="' + esc(ref.id) + '"' + (dim ? ' opacity="0.25"' : '') + '>');
-      x.push('<rect data-kind="' + (it.isGroup ? 'group' : 'object') + '" data-id="' + esc(ref.id) + '" x="' + num(pl.x) + '" y="' + num(pl.y) + '" width="' + num(pl.w) + '" height="' + num(pl.h) + '" rx="' + (container ? 6 : 3) + '" fill="' + st.fill + '"' +
+      x.push('<rect data-kind="' + (it.isGroup ? 'group' : 'object') + '" data-id="' + esc(ref.id) + '" x="' + num(pl.x) + '" y="' + num(pl.y) + '" width="' + num(pl.w) + '" height="' + num(pl.h) + '" rx="' + (container ? 6 : (ref.type === 'internet' ? 14 : 3)) + '" fill="' + st.fill + '"' +
         (hl && container ? ' fill-opacity="0.6"' : '') + ' stroke="' + (isSel ? SEL : st.stroke) + '" stroke-width="' + (isSel ? 3 : 1.5) + '"' + (st.dash ? ' stroke-dasharray="' + st.dash + '"' : '') + '/>');
       var tx = pl.x + (editing ? 22 : 6);
       var label = ref.name + (!it.isGroup && ref.type === 'rack' && ref.rackHeight ? ' (' + ref.rackHeight + 'U)' : '');
       x.push('<text x="' + num(tx) + '" y="' + num(pl.y + 14) + '" font-size="12" font-weight="bold" fill="#222" font-family="sans-serif" pointer-events="none">' + esc(trunc(label, Math.floor((pl.w - (tx - pl.x) - 4) / 6.5))) + '</text>');
-      if (!it.isGroup && ref.type === 'router' && ref.ipAddress) {
+      if (!it.isGroup && (ref.type === 'router' || ref.type === 'internet') && ref.ipAddress) {
         x.push('<text x="' + num(pl.x + pl.w - 5) + '" y="' + num(pl.y + 14) + '" font-size="9" text-anchor="end" fill="#0d47a1" font-family="sans-serif" pointer-events="none">' + esc(ref.ipAddress) + '</text>');
       }
       if (it.lay) {

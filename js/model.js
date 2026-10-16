@@ -4,8 +4,8 @@
   var NM = g.NetMap = g.NetMap || {};
 
   var SCHEMA_VERSION = 1;
-  var OBJECT_TYPES = ['rack', 'patchpanel', 'switch', 'router', 'socket', 'generic'];
-  var TYPE_LABELS = { rack: 'Rack', patchpanel: 'Patch panel', switch: 'Switch', router: 'Router', socket: 'Wall socket', generic: 'Generic' };
+  var OBJECT_TYPES = ['rack', 'patchpanel', 'switch', 'router', 'internet', 'socket', 'generic'];
+  var TYPE_LABELS = { rack: 'Rack', patchpanel: 'Patch panel', switch: 'Switch', router: 'Router', internet: 'Internet / ISP', socket: 'Wall socket', generic: 'Generic' };
   var CABLE_STATUS = ['planned', 'active', 'faulty', 'spare'];
   var WIRE_STATUS = ['connected', 'spare', 'unused', 'faulty'];
   var LINK_STATUS = ['planned', 'installed', 'faulty', 'decommissioned'];
@@ -231,7 +231,7 @@
     }
     return ports;
   }
-  function defaultPortCount(type) { return { patchpanel: 24, 'switch': 24, socket: 2, generic: 0, rack: 0 }[type] || 0; }
+  function defaultPortCount(type) { return { patchpanel: 24, 'switch': 24, socket: 2, generic: 0, rack: 0, internet: 1 }[type] || 0; }
 
   function addObject(p, o) {
     if (OBJECT_TYPES.indexOf(o.type) < 0) throw new Error('Unknown object type');
@@ -244,12 +244,13 @@
     }
     if (n < 0 || n > 96 || n !== Math.floor(n)) throw new Error('Port count must be 0-96');
     var same = p.objects.filter(function (x) { return x.type === o.type; }).length;
+    var defName = o.type === 'internet' ? (same ? 'INTERNET ' + (same + 1) : 'INTERNET') : TYPE_LABELS[o.type] + ' ' + (same + 1);
     var obj = {
-      id: uid('obj'), type: o.type, name: o.name || (TYPE_LABELS[o.type] + ' ' + (same + 1)),
+      id: uid('obj'), type: o.type, name: o.name || defName,
       location: o.location || '', description: o.description || '',
       containerId: o.containerId || null, ports: o.type === 'router' ? routerPorts(wan, lan) : makePorts(o.type, n)
     };
-    if (o.type === 'router') obj.ipAddress = o.ipAddress || '';
+    if (o.type === 'router' || o.type === 'internet') obj.ipAddress = o.ipAddress || '';
     if (o.type === 'rack') obj.rackHeight = o.rackHeight || 42;
     p.objects.push(obj);
     if (o.type === 'patchpanel' && o.straight) autoMapPanel(p, obj.id);
@@ -617,7 +618,7 @@
         if (!c) add('error', 'BAD_CONTAINER', 'Object "' + o.name + '" refers to a missing container', 'object', o.id);
         else if (c.kind === 'object' && c.item.type !== 'rack') add('error', 'BAD_CONTAINER', 'Object "' + o.name + '" is inside a non-container object', 'object', o.id);
       }
-      if (!isValidIp(o.ipAddress)) add('warning', 'BAD_IP', 'Router "' + o.name + '" has an invalid IP address: ' + o.ipAddress, 'object', o.id);
+      if (!isValidIp(o.ipAddress)) add('warning', 'BAD_IP', '"' + o.name + '" has an invalid IP address: ' + o.ipAddress, 'object', o.id);
       o.ports.forEach(function (pt) { if (!isValidIp(pt.ip)) add('warning', 'BAD_IP', o.name + ' / ' + pt.label + ' has an invalid IP address: ' + pt.ip, 'port', pt.id); });
       var unused = o.ports.filter(function (pt) { return !idx.portUse[pt.id] && !idx.mapByPort[pt.id]; }).length;
       if (o.ports.length && unused) add('info', 'UNUSED_PORTS', unused + ' of ' + o.ports.length + ' terminations on "' + o.name + '" are unused', 'object', o.id);

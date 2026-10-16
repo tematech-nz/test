@@ -32,6 +32,7 @@
     var cols = Math.max(front.cols, rear.cols, 4);
     var w = cols * CELL + PADX * 2 + (SECTIONED[obj.type] ? 6 : 0);
     if (obj.type === 'router') w = Math.max(w, 150);
+    if (obj.type === 'internet') w = Math.max(w, 130);
     if (SECTIONED[obj.type]) return { w: w, h: panelHeight(obj, {}) };
     return { w: w, h: HEADER + (front.rows + rear.rows) * (CELL + 2) + 8 };
   }

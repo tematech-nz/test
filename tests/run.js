@@ -2,7 +2,7 @@
 /* Dependency-free test runner: node tests/run.js */
 const assert = require('assert');
 require('../js/model.js'); require('../js/layout.js'); require('../js/trace.js');
-require('../js/render.js'); require('../js/exporters.js'); require('../js/builder.js');
+require('../js/render.js'); require('../js/exporters.js'); require('../js/builder.js'); require('../js/topology.js'); require('../js/graphview.js');
 const NM = globalThis.NetMap;
 const M = NM.model, T = NM.trace, B = NM.builder, R = NM.render, X = NM.exporters;
 
@@ -333,6 +333,83 @@ test('router layout has WAN and LAN strips; export shows them', () => {
   assert.strictEqual(Object.keys(lay.ports).length, 17);
   const svg = R.svgDocument(p, p.maps[0].id);
   assert.ok(svg.indexOf('WAN (2)') > 0 && svg.indexOf('LAN (15)') > 0 && svg.indexOf('10.0.0.1') > 0);
+});
+
+console.log('Topology');
+function buildNet() {
+  const p = M.createProject('net');
+  const o = (type, name, extra) => M.addObject(p, Object.assign({ type: type, name: name }, extra || {}));
+  const inet = o('internet', 'INTERNET', { portCount: 2, ipAddress: '203.0.113.1' });
+  const r1 = o('router', 'R1', { wanPorts: 1, lanPorts: 2, ipAddress: '192.168.1.1/24' });
+  const r2 = o('router', 'R2', { wanPorts: 1, lanPorts: 2, ipAddress: '10.9.0.1/16' });
+  const s1 = o('switch', 'S1', { portCount: 8 }), s2 = o('switch', 'S2', { portCount: 8 });
+  const ppA = o('patchpanel', 'PPA', { portCount: 4, straight: true }), ppB = o('patchpanel', 'PPB', { portCount: 4, straight: true });
+  const ws = o('socket', 'WS', { portCount: 1 }), gen = o('generic', 'Lonely', { portCount: 1 });
+  const P = (obj, l, side) => port(obj, l, side).id;
+  const L = (obj, l) => obj.ports.find(x => x.label === l).id;
+  const cab = (a, b) => M.addPatchCable(p, { aPortId: a, bPortId: b });
+  cab(P(inet, 1), L(r1, 'W1')); cab(P(inet, 2), L(r2, 'W1'));
+  cab(L(r1, 'L1'), P(s1, 1)); cab(L(r2, 'L1'), P(s1, 2));
+  // S1 -> PPA -> fixed link -> PPB -> S2 (passive chain collapsed to one S1-S2 link)
+  cab(P(s1, 3), P(ppA, 1));
+  M.addFixedLink(p, { aObjectId: ppA.id, bObjectId: ppB.id, wireCount: 1, mapping: 'sequential' });
+  cab(P(ppB, 1), P(s2, 1));
+  cab(P(s2, 2), P(ws, 1));
+  return { p, inet, r1, r2, s1, s2, ws, gen };
+}
+test('subnetOf', () => {
+  const TP = NM.topology;
+  assert.strictEqual(TP.subnetOf('192.168.1.77/24'), '192.168.1.0/24');
+  assert.strictEqual(TP.subnetOf('10.9.200.1/16'), '10.9.0.0/16');
+  assert.strictEqual(TP.subnetOf('10.0.0.1'), null);
+  assert.strictEqual(TP.subnetOf('1.2.3.4/40'), null);
+});
+test('passive panels and fixed links collapse into device-to-device links', () => {
+  const n = buildNet(), g = NM.topology.buildGraph(n.p);
+  assert.ok(!g.order.some(id => n.p.objects.find(o => o.id === id).type === 'patchpanel'));
+  const names = g.links.map(l => [g.nodes[l.a].name, g.nodes[l.b].name].sort().join('-')).sort();
+  assert.ok(names.indexOf('S1-S2') >= 0, names.join(','));
+  const s1s2 = g.links.find(l => [g.nodes[l.a].name, g.nodes[l.b].name].sort().join('-') === 'S1-S2');
+  assert.ok(s1s2.paths[0].via.join(' > ').indexOf('FL-001 w1') > 0 && /PPA/.test(s1s2.paths[0].via.join(' ')));
+  assert.strictEqual(g.nodes[n.r1.id].nets[0], '192.168.1.0/24');
+});
+test('reachability tree from INTERNET; endpoints do not transit; unreachable listed', () => {
+  const n = buildNet(), TP = NM.topology, g = TP.buildGraph(n.p), t = TP.reachTree(g, n.inet.id);
+  assert.strictEqual(t.depth[n.r1.id], 1);
+  assert.strictEqual(t.depth[n.s1.id], 2);
+  assert.strictEqual(t.depth[n.s2.id], 3);
+  assert.strictEqual(t.depth[n.ws.id], 4);
+  assert.deepStrictEqual(t.unreachable, [n.gen.id]);
+  const t2 = TP.reachTree(g, n.r1.id);
+  assert.strictEqual(t2.depth[n.r2.id], 2, 'R1 -> S1 -> R2 (not via INTERNET)');
+});
+test('all paths: redundant routes found, Internet transit is opt-in', () => {
+  const n = buildNet(), TP = NM.topology;
+  const g = TP.buildGraph(n.p);
+  const toS2 = TP.allPaths(g, n.inet.id, n.s2.id);
+  assert.strictEqual(toS2.length, 2, 'via R1 and via R2');
+  assert.ok(toS2.every(p => p.nodes.length === 4));
+  const r1r2 = TP.allPaths(g, n.r1.id, n.r2.id);
+  assert.strictEqual(r1r2.length, 1);
+  const gv = TP.buildGraph(n.p, { viaInternet: true });
+  assert.strictEqual(TP.allPaths(gv, n.r1.id, n.r2.id).length, 2);
+  assert.strictEqual(TP.allPaths(g, n.inet.id, n.gen.id).length, 0);
+});
+test('internet object: defaults, IP, cabling and trace end', () => {
+  const n = buildNet();
+  assert.strictEqual(M.addObject(n.p, { type: 'internet' }).name, 'INTERNET 2');
+  const t = T.tracePort(n.p, n.inet.ports[0].id);
+  assert.ok(t.ends.some(e => /Terminates at R1/.test(e.text)));
+  assert.ok(M.validateProject(n.p).every(i => i.severity !== 'error'));
+});
+test('graph view renders tree, paths and highlights', () => {
+  const n = buildNet(), GV = NM.graphview;
+  const st = { from: n.inet.id, to: '', via: false };
+  let h = GV.render(n.p, st);
+  assert.ok(/Reachable from INTERNET/.test(h) && /WS/.test(h) && /Not reachable/.test(h) && /Lonely/.test(h));
+  st.to = n.s2.id; h = GV.render(n.p, st);
+  assert.ok(/Paths from INTERNET to S2 \(2\)/.test(h) && /shortest/.test(h) && /FL-001 w1/.test(h));
+  assert.ok(/No active devices/.test(GV.render(M.createProject('e'), { from: '', to: '', via: false })));
 });
 
 console.log('\n' + passed + ' passed, ' + failed + ' failed');
