@@ -5,10 +5,15 @@
   if (typeof require === 'function') { ['model', 'layout'].forEach(function (n) { if (!NM[n]) require('./' + n + '.js'); }); }
   var M = NM.model, L = NM.layout;
 
+  /* grid step of the project (1 when snapping is off); new items get grid-sized boxes and sliding keeps them on the grid */
+  function gridStep(p) { return p.settings && p.settings.snapToGrid && p.settings.gridSize > 1 ? p.settings.gridSize : 1; }
+  function gridUp(p, v) { var g = gridStep(p); return Math.ceil(v / g - 1e-9) * g; }
+  function gridDown(p, v) { var g = gridStep(p); return Math.floor(v / g + 1e-9) * g; }
+  function gridSize(p, s) { return { w: gridUp(p, s.w), h: gridUp(p, s.h) }; }
   function sizeOf(p, kind, id) {
-    if (kind === 'group') return L.defaultGroupSize();
+    if (kind === 'group') return gridSize(p, L.defaultGroupSize());
     var o = M.buildIndex(p).objects[id];
-    return L.defaultSize(o);
+    return gridSize(p, L.defaultSize(o));
   }
 
   /* ---------- no-overlap rules ----------
@@ -16,7 +21,7 @@
    * resolveDrop(): the item that was just placed/moved slides to the nearest free spot (inside its container's
    * left/top limits; right/bottom grow the container). settle(): after anything grew or resized, parents grow
    * to fit and whatever they now overlap is pushed away (as whole units, contents included), cascading up. */
-  var GAP = 6;
+  var GAP = 0; // boxes may touch (e.g. one grid cell under another); they just must not overlap
   function parentMap(p) {
     var m = {};
     p.groups.forEach(function (g) { m[g.id] = g.parentGroupId || null; });
@@ -40,8 +45,8 @@
       return x >= b.minX && y >= b.minY && !sibs.some(function (s) { return overlaps(r, s); });
     }
     sibs.forEach(function (o) {
-      [pl.x, o.x + o.w + GAP, o.x - pl.w - GAP].forEach(function (x) {
-        [pl.y, o.y + o.h + GAP, o.y - pl.h - GAP].forEach(function (y) {
+      [pl.x, gridUp(p, o.x + o.w + GAP), gridDown(p, o.x - pl.w - GAP)].forEach(function (x) {
+        [pl.y, gridUp(p, o.y + o.h + GAP), gridDown(p, o.y - pl.h - GAP)].forEach(function (y) {
           if (x === pl.x && y === pl.y) return;
           if (!free(x, y)) return;
           var d = Math.abs(x - pl.x) + Math.abs(y - pl.y);
@@ -51,7 +56,7 @@
     });
     if (!best) { // boxed in: go below the lowest sibling
       var low = sibs.reduce(function (m, s) { return Math.max(m, s.y + s.h); }, 0);
-      best = { dx: Math.max(b.minX, pl.x) - pl.x, dy: low + GAP - pl.y };
+      best = { dx: Math.max(b.minX, pl.x) - pl.x, dy: gridUp(p, low + GAP) - pl.y };
     }
     return best;
   }
@@ -104,8 +109,8 @@
       var bd = boundsFor(p, pm, pl);
       siblingsOf(p, pm, pl).forEach(function (s) {
         if (!overlaps(pl, s)) return;
-        var ox = Math.min(pl.x + pl.w, s.x + s.w) - Math.max(pl.x, s.x) + GAP;
-        var oy = Math.min(pl.y + pl.h, s.y + s.h) - Math.max(pl.y, s.y) + GAP;
+        var ox = gridUp(p, Math.min(pl.x + pl.w, s.x + s.w) - Math.max(pl.x, s.x) + GAP);
+        var oy = gridUp(p, Math.min(pl.y + pl.h, s.y + s.h) - Math.max(pl.y, s.y) + GAP);
         var dx = 0, dy = 0;
         if (ox <= oy) { dx = (s.x + s.w / 2 >= pl.x + pl.w / 2) ? ox : -ox; if (s.x + dx < bd.minX) dx = ox; }
         else { dy = (s.y + s.h / 2 >= pl.y + pl.h / 2) ? oy : -oy; if (s.y + dy < bd.minY) dy = oy; }
@@ -376,10 +381,10 @@
    */
   function placeNewAt(p, mapId, kind, spec, x, y) {
     var item, size, pl;
-    if (kind === 'group') { item = M.addGroup(p, { name: spec.name }); size = L.defaultGroupSize(); }
-    else { item = M.addObject(p, spec); size = L.defaultSize(item); }
+    if (kind === 'group') { item = M.addGroup(p, { name: spec.name }); size = gridSize(p, L.defaultGroupSize()); }
+    else { item = M.addObject(p, spec); size = gridSize(p, L.defaultSize(item)); }
     pl = M.addPlacement(p, mapId, kind, item.id, x, y, size.w, size.h);
-    var host = containerAt(p, mapId, x + size.w / 2, y + size.h / 2, kind, item.type);
+    var host = containerAt(p, mapId, x + 2, y + 2, kind, item.type); // the container under the top-left corner (the cursor)
     if (host) {
       try { M.setContainer(p, kind, item.id, host.refId); } catch (e) { host = null; }
     }

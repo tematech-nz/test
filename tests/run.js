@@ -1268,6 +1268,19 @@ console.log('Placing new items');
 test('nextName counts up: trailing numbers keep their width, plain names get a 2', () => {
   assert.deepStrictEqual(['PC 1', 'AP-07', 'Switch', 'Rack 9', 'x99'].map(B.nextName), ['PC 2', 'AP-08', 'Switch 2', 'Rack 10', 'x100']);
 });
+test('new items get grid-sized boxes and can sit right under or beside another without being pushed away', () => {
+  const p = M.createProject('g'), mid = p.maps[0].id, g = p.settings.gridSize;
+  const a = B.placeNewAt(p, mid, 'object', { type: 'switch', name: 'A', portCount: 8 }, 100, 100);
+  assert.ok(a.placement.w % g === 0 && a.placement.h % g === 0, 'size is a multiple of the grid');
+  const under = B.placeNewAt(p, mid, 'object', { type: 'switch', name: 'B', portCount: 8 }, 100, a.placement.y + a.placement.h);
+  assert.strictEqual(under.placement.y, a.placement.y + a.placement.h, 'placed right under, not moved');
+  const beside = B.placeNewAt(p, mid, 'object', { type: 'switch', name: 'C', portCount: 8 }, a.placement.x + a.placement.w, 100);
+  assert.strictEqual(beside.placement.x, a.placement.x + a.placement.w, 'placed right beside, not moved');
+  const hit = B.placeNewAt(p, mid, 'object', { type: 'switch', name: 'D', portCount: 8 }, 120, 120);
+  assert.ok(hit.placement.x % g === 0 && hit.placement.y % g === 0, 'a pushed item stays on the grid');
+  assert.ok(Math.abs(hit.placement.x - 120) + Math.abs(hit.placement.y - 120) <= a.placement.w + a.placement.h, 'moved only as far as needed');
+  assert.deepStrictEqual(overlapPairs(p), []);
+});
 test('placeNewAt puts the item at the cursor and files it into the container under it', () => {
   const p = M.createProject('pl'), mid = p.maps[0].id;
   const g = B.addGroupPlaced(p, mid, { name: 'G' }, 0, 0), gp = M.placementOf(p, mid, g.id);

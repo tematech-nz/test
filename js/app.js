@@ -507,7 +507,7 @@
   /* ---------------------------------------------------------------- rendering */
   function renderAll() {
     renderTop(); renderCanvas(); renderLeft(); renderRight(); renderToolbar();
-    document.body.className = 'mode-' + S.mode + (S.view === 'graph' ? ' view-graph' : '');
+    document.body.className = 'mode-' + S.mode + (S.view === 'graph' ? ' view-graph' : '') + (document.body.classList.contains('nav-hidden') ? ' nav-hidden' : '');
     renderGraph();
   }
   function renderGraph() {
@@ -1096,17 +1096,17 @@
   function moveGhost(e) {
     const pl = S.place; if (!pl) return;
     const pt = toMap(e.clientX, e.clientY);
-    pl.pos = { x: snap(pt.x - pl.w / 2), y: snap(pt.y - pl.h / 2) };
+    pl.pos = { x: snap(pt.x), y: snap(pt.y) }; // top-left corner sticks to the pointer
     $('ghostInner').setAttribute('transform', 'translate(' + pl.pos.x + ' ' + pl.pos.y + ')');
     $('ghost').style.display = '';
-    const host = B.containerAt(S.p, curMap().id, pl.pos.x + pl.w / 2, pl.pos.y + pl.h / 2, pl.kind, pl.type);
+    const host = B.containerAt(S.p, curMap().id, pl.pos.x + 2, pl.pos.y + 2, pl.kind, pl.type);
     const hid = host ? host.refId : null;
     if (hid !== pl.host) { pl.host = hid; renderCanvas(); }
   }
   function placeHere(e) {
     const pl = S.place; if (!pl) return;
     const pt = toMap(e.clientX, e.clientY);
-    const x = snap(pt.x - pl.w / 2), y = snap(pt.y - pl.h / 2), keep = e.ctrlKey || e.metaKey;
+    const x = snap(pt.x), y = snap(pt.y), keep = e.ctrlKey || e.metaKey;
     const spec = Object.assign({}, pl.spec); if (pl.name) spec.name = pl.name; else delete spec.name;
     const r = commit('Create ' + pl.type, (p) => B.placeNewAt(p, curMap().id, pl.kind, spec, x, y).id);
     if (!r || r === true) { cancelPlace(); return; }

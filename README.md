@@ -119,7 +119,8 @@ Try it: File -> Load demo project (two rooms, a fixed link between racks, a wall
   aligns the item to the left edge when the rack really is a left-aligned stack.
 - **No overlaps**: items inside the same container (or at the top level of a map) never overlap. A dropped, newly placed or
   resized item slides to the nearest free spot; containers grow to hold what is inside and push neighbouring
-  containers away (with their contents), cascading outward.
+  containers away (with their contents), cascading outward. Boxes may touch, so an item can sit right under or beside another;
+  new items get grid-sized boxes and sliding away keeps them on the grid. A new item's top-left corner sticks to the pointer.
 - **Fixed link layering**: a fixed link is drawn behind every group, rack and device it does not start or end in, so it no
   longer cuts across unrelated equipment; it shows over its own endpoint groups, racks and panels and over empty canvas.
   Select the link (or trace it) to see its full length on top.

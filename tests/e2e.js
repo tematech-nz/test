@@ -121,6 +121,15 @@ const ok = (m) => console.log('  ok   ' + m);
     await shot('edit-mode');
   });
 
+  await step('hidden navigation stays hidden when clicking the map or changing mode', async () => {
+    await page.click('#btnMenu');
+    assert.ok(!(await page.isVisible('#left')));
+    await page.mouse.click(700, 400); await page.waitForTimeout(150);
+    assert.ok(!(await page.isVisible('#left')), 'a click on the map keeps the navigation hidden');
+    await page.click('#btnMenu');
+    assert.ok(await page.isVisible('#left'));
+  });
+
   await step('edit history lists actions and jumps back and forward', async () => {
     await page.evaluate(() => { const A = NetMap.app; A.commit('History test one', (p) => { p.name = 'H1'; }); A.commit('History test two', (p) => { p.name = 'H2'; }); });
     const n0 = await page.evaluate(() => NetMap.app.S.undo.length);
@@ -1024,7 +1033,7 @@ const ok = (m) => console.log('  ok   ' + m);
     assert.deepStrictEqual(made.map(m => m.name), ['Cam 1', 'Cam 2', 'Cam 3', 'Cam 4']);
     assert.ok(made.every(m => m.kind === 'camera'));
     const c0 = await mapPt(440, 580);
-    assert.ok(Math.abs(made[0].x + made[0].w / 2 - c0.x) <= 40 && Math.abs(made[0].y + made[0].h / 2 - c0.y) <= 40, 'dropped under the cursor: ' + JSON.stringify([made[0], c0]));
+    assert.ok(Math.abs(made[0].x - c0.x) <= 30 && Math.abs(made[0].y - c0.y) <= 30, 'top-left corner dropped at the cursor: ' + JSON.stringify([made[0], c0]));
     assert.ok(made[1].x > made[0].x + 20 && made[2].x > made[1].x + 20, 'copies went where each click was');
     assert.strictEqual(await page.evaluate(() => NetMap.app.S.sel.kind), 'object', 'the last one is selected');
     // Escape cancels
