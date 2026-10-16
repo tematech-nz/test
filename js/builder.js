@@ -332,6 +332,10 @@
       return { containerId: rackPl.refId, index: best.i, line: { x: rackPl.x + M.PAD / 2, y: best.y, w: rackPl.w - M.PAD } };
     }
     sibs.forEach(function (s) { if (s.y + s.h / 2 < cy) index++; });
+    // dropped (or newly placed) into free space between items: nothing to insert between, so it stays exactly where it was put
+    // (only a drop touching or close to a neighbour is inserted into the stack; below the last item it still joins the stack)
+    var near = 24;
+    if (index < sibs.length && !sibs.some(function (s) { return dragPl.x < s.x + s.w + near && s.x < dragPl.x + dragPl.w + near && dragPl.y < s.y + effH(s) + near && s.y < dragPl.y + dragPl.h + near; })) return null;
     var above = sibs.slice(0, index), below = sibs.slice(index);
     var prevBottom = above.reduce(function (m, s) { return Math.max(m, s.y + s.h); }, rackPl.y + M.HEADER);
     var y = below.length ? (prevBottom + Math.min.apply(null, below.map(function (s) { return s.y; }))) / 2 : prevBottom + 4;

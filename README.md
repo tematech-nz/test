@@ -117,6 +117,7 @@ Try it: File -> Load demo project (two rooms, a fixed link between racks, a wall
   devices up freely) and, for items already in the rack, it only appears at a seam between two items that are stuck together.
   A magnet drop inserts at the line and pushes what is below it down - it never re-flows the rest of the rack, and it only
   aligns the item to the left edge when the rack really is a left-aligned stack.
+- **Free gaps stay free**: an item dropped or created in open space between two items of a rack stays exactly there; the rack magnet only inserts it into the stack when it is dropped touching or close (about one grid step) to a neighbour.
 - **Folded sections and stacking**: the layout uses an item's drawn height, so you can drop an item right under one whose Front/Rear
   section is folded. In edit mode, items stacked directly under an item (touching it, or one grid step away) follow it down or up
   when it is unfolded or folded, together with what is stacked under them in turn (one undo step).

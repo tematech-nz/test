@@ -1268,6 +1268,18 @@ console.log('Placing new items');
 test('nextName counts up: trailing numbers keep their width, plain names get a 2', () => {
   assert.deepStrictEqual(['PC 1', 'AP-07', 'Switch', 'Rack 9', 'x99'].map(B.nextName), ['PC 2', 'AP-08', 'Switch 2', 'Rack 10', 'x100']);
 });
+test('a new item dropped into a free gap between two rack items stays there; a drop touching a neighbour still inserts', () => {
+  const p = M.createProject('gap'), mid = p.maps[0].id;
+  const rack = B.addObjectPlaced(p, mid, { type: 'rack', name: 'R' }, 0, 0);
+  const rp = M.placementOf(p, mid, rack.id); rp.w = 600; rp.h = 900;
+  const mk = (n, y) => { const o = B.addObjectPlaced(p, mid, { type: 'switch', name: n, portCount: 8, containerId: rack.id }, 0, 0); const q = M.placementOf(p, mid, o.id); q.x = rp.x + M.PAD; q.y = rp.y + y; return q; };
+  const top = mk('HP1', 40), low = mk('HP2', 400);
+  const lowY = low.y, gapY = top.y + top.h + 80;
+  const n = B.placeNewAt(p, mid, 'object', { type: 'switch', name: 'New', portCount: 8 }, rp.x + M.PAD, gapY);
+  assert.strictEqual(n.placement.y, gapY, 'stays where it was dropped');
+  assert.strictEqual(low.y, lowY, 'the item below is not pushed');
+  assert.deepStrictEqual(overlapPairs(p), []);
+});
 test('folded sections: stacked items follow when the one above folds or unfolds; dropping under a folded item is not pushed away', () => {
   const p = M.createProject('f'), mid = p.maps[0].id, L = NM.layout;
   const a = B.addObjectPlaced(p, mid, { type: 'patchpanel', name: 'A', portCount: 16, straight: true }, 100, 100);
