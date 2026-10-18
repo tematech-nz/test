@@ -194,7 +194,7 @@ const ok = (m) => console.log('  ok   ' + m);
     assert.ok(/Ghost copy/.test(await page.innerText('#dlg select[data-s="mode"]')) && /Relocate/.test(await page.innerText('#dlg select[data-s="mode"]')));
     await page.click('#dlg button[data-btn="ok"]');
     await page.waitForTimeout(200);
-    const g = await page.evaluate((i) => NetMap.app.S.p.placements.filter((q) => q.refId === i.sw).map((q) => ({ map: q.mapId, ghost: !!q.ghost })), ids);
+    const g = await page.evaluate((i) => NetMap.app.S.p.placements.filter((q) => q.refId === i.sw && !(NetMap.app.S.p.maps.find((m) => m.id === q.mapId) || {}).auto).map((q) => ({ map: q.mapId, ghost: !!q.ghost })), ids);
     assert.deepStrictEqual(g.sort((x, y) => (x.ghost ? 1 : 0) - (y.ghost ? 1 : 0)), [{ map: ids.m2, ghost: false }, { map: ids.m1, ghost: true }]);
     assert.ok(await page.locator('#vp [data-ghost="1"]').count() >= 1, 'faded copy drawn');
     assert.strictEqual(await page.locator('#vp [data-ghost="1"] [data-handle="move"]').count(), 0);
@@ -207,6 +207,39 @@ const ok = (m) => console.log('  ok   ' + m);
     assert.strictEqual(await page.evaluate(() => NetMap.app.S.mapId), ids.m2, 'tapping a ghost opens the original');
     await page.selectOption('#mapSelect', ids.m1);
     await page.click('#btnUndo'); await page.click('#btnUndo');
+  });
+
+  await step('All items overview: shown only with 2+ maps, ghosts can be moved but not edited', async () => {
+    const before = await page.evaluate(() => ({ maps: NetMap.app.S.p.maps.length, real: NetMap.model.realMaps(NetMap.app.S.p).length }));
+    const opts0 = await page.$$eval('#mapSelect option', (os) => os.map((o) => o.textContent));
+    assert.ok(before.real >= 2 ? opts0.includes('All items') : !opts0.includes('All items'));
+    // a project with a single map has no overview: simulate by deleting ordinary maps from a copy is risky, so just check the rule
+    const am = await page.evaluate(() => { const A = NetMap.app; A.commit('touch', (p) => { p.name = p.name; }); const m = NetMap.model.allMap(A.S.p); return m && m.id; });
+    assert.ok(am, 'overview exists with 2+ maps');
+    assert.ok((await page.$$eval('#mapSelect option', (os) => os.map((o) => o.textContent))).includes('All items'));
+    const mapBefore = await page.evaluate(() => NetMap.app.S.mapId);
+    await page.selectOption('#mapSelect', am); await page.waitForTimeout(200);
+    assert.ok(await page.evaluate(() => document.body.classList.contains('on-all')));
+    assert.ok(!(await page.isVisible('#toolbar')), 'no toolbar in the overview');
+    assert.ok(await page.locator('#vp [data-ghost="1"]').count() > 3, 'ghosts of the items');
+    assert.ok(await page.locator('#vp [data-ghost="1"] [data-handle="move"]').count() > 0, 'move handles on the ghosts in edit mode');
+    assert.strictEqual(await page.locator('#vp [data-handle="resize"]').count(), 0);
+    // drag one ghost: only its overview position changes
+    const snapNow = await page.evaluate(() => JSON.stringify({ o: NetMap.app.S.p.objects, g: NetMap.app.S.p.groups, c: NetMap.app.S.p.patchCables }));
+    const h = await page.locator('#vp [data-ghost="1"] [data-handle="move"]').first().boundingBox();
+    await page.mouse.move(h.x + 5, h.y + 5); await page.mouse.down(); await page.mouse.move(h.x + 60, h.y + 50, { steps: 4 }); await page.mouse.up();
+    await page.waitForTimeout(150);
+    assert.strictEqual(await page.evaluate(() => JSON.stringify({ o: NetMap.app.S.p.objects, g: NetMap.app.S.p.groups, c: NetMap.app.S.p.patchCables })), snapNow, 'equipment and cabling untouched');
+    // selecting an item shows it read-only
+    await page.evaluate(() => { // tap an item in the overview (synthetic pointer events)
+      const r = document.querySelector('#vp [data-ghost="1"] rect[data-kind="object"]'), o = { bubbles: true, pointerId: 79, pointerType: 'mouse', button: 0, clientX: 5, clientY: 5 };
+      r.dispatchEvent(new PointerEvent('pointerdown', o)); r.dispatchEvent(new PointerEvent('pointerup', o));
+    });
+    await page.waitForTimeout(150);
+    assert.strictEqual(await page.evaluate(() => NetMap.model.allMap(NetMap.app.S.p).id === NetMap.app.S.mapId), true, 'tapping in the overview stays in the overview');
+    assert.ok(/Overview copy/.test(await page.innerText('#detailsPane')) && (await page.locator('#detailsPane input[data-f="name"]').count()) === 0, 'details are read-only in the overview');
+    await page.selectOption('#mapSelect', mapBefore); await page.waitForTimeout(100);
+    await page.click('#btnUndo');
   });
 
   await step('hidden navigation stays hidden when clicking the map or changing mode', async () => {

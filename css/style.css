@@ -193,3 +193,6 @@ body.view-graph #canvas, body.view-graph #toolbar, body.view-graph #zoomctl, bod
 .pk-group:disabled { opacity: .45; cursor: not-allowed; text-decoration: line-through; }
 .pk-place.on { background: #2e7d32; color: #fff; border-color: #1b5e20; }
 .pk-banner { margin: 6px 0; padding: 6px 8px; background: #e8f5e9; border: 1px solid #43a047; border-radius: 6px; font-size: 12px; }
+
+body.on-all #toolbar { display: none !important; }
+body.on-all #editBanner { background: #546e7a; }

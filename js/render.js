@@ -99,7 +99,7 @@
       x.push('<g data-kind="' + (it.isGroup ? 'group' : 'object') + '" data-id="' + esc(ref.id) + '"' + (ghost ? ' data-ghost="1" opacity="0.42"' : (dim ? ' opacity="0.25"' : '')) + '>');
       x.push('<rect data-kind="' + (it.isGroup ? 'group' : 'object') + '" data-id="' + esc(ref.id) + '" x="' + num(pl.x) + '" y="' + num(pl.y) + '" width="' + num(pl.w) + '" height="' + num(pl.h) + '" rx="' + (container ? 6 : (ref.type === 'internet' ? 14 : 3)) + '" fill="' + st.fill + '"' +
         (hl && container ? ' fill-opacity="0.6"' : '') + ' stroke="' + (isDrop ? '#00c853' : (isSel ? SEL : st.stroke)) + '" stroke-width="' + (isDrop ? 4 : (isSel ? 3 : 1.5)) + '"' + (st.dash ? ' stroke-dasharray="' + st.dash + '"' : '') + '/>');
-      var tx = pl.x + (editing ? 22 : 6);
+      var tx = pl.x + (editing || opts.moveGhosts ? 22 : 6);
       var label = ref.name + (!it.isGroup && ref.type === 'rack' && ref.rackHeight ? ' (' + ref.rackHeight + 'U)' : '');
       x.push('<text x="' + num(tx) + '" y="' + num(pl.y + 14) + '" font-size="12" font-weight="bold" fill="#222" font-family="sans-serif" pointer-events="none">' + esc(trunc(label, Math.floor((pl.w - (tx - pl.x) - 4) / 6.5))) + '</text>');
       if (!it.isGroup && ref.type === 'generic' && ref.deviceKind && NM.icons) {
@@ -177,7 +177,8 @@
       }
       if (ghost) {
         x.push('<text x="' + num(pl.x + pl.w - 6) + '" y="' + num(pl.y + pl.h - 5) + '" font-size="9" font-style="italic" text-anchor="end" fill="#555" font-family="sans-serif" pointer-events="none">ghost copy - edit it on its own map</text>');
-        if (editing) x.push('<g data-handle="unghost" data-pl="' + esc(plId) + '" style="cursor:pointer"><title>Remove this ghost copy from the map</title><rect data-handle="unghost" data-pl="' + esc(plId) + '" x="' + num(pl.x + 3) + '" y="' + num(pl.y + 3) + '" width="16" height="14" rx="2" fill="#b71c1c"/><path data-handle="unghost" data-pl="' + esc(plId) + '" d="M' + num(pl.x + 7) + ' ' + num(pl.y + 6) + 'l8 8M' + num(pl.x + 15) + ' ' + num(pl.y + 6) + 'l-8 8" stroke="#fff" stroke-width="1.6"/></g>');
+        if (opts.moveGhosts) x.push('<rect data-handle="move" data-pl="' + esc(plId) + '" x="' + num(pl.x + 3) + '" y="' + num(pl.y + 3) + '" width="16" height="14" rx="2" fill="#37474f" style="cursor:move"/><path d="M' + num(pl.x + 6) + ' ' + num(pl.y + 8) + 'h10M' + num(pl.x + 6) + ' ' + num(pl.y + 12) + 'h10" stroke="#fff" stroke-width="1.5" pointer-events="none"/>');
+        else if (editing) x.push('<g data-handle="unghost" data-pl="' + esc(plId) + '" style="cursor:pointer"><title>Remove this ghost copy from the map</title><rect data-handle="unghost" data-pl="' + esc(plId) + '" x="' + num(pl.x + 3) + '" y="' + num(pl.y + 3) + '" width="16" height="14" rx="2" fill="#b71c1c"/><path data-handle="unghost" data-pl="' + esc(plId) + '" d="M' + num(pl.x + 7) + ' ' + num(pl.y + 6) + 'l8 8M' + num(pl.x + 15) + ' ' + num(pl.y + 6) + 'l-8 8" stroke="#fff" stroke-width="1.6"/></g>');
       } else if (editing) {
         x.push('<rect data-handle="move" data-pl="' + esc(plId) + '" x="' + num(pl.x + 3) + '" y="' + num(pl.y + 3) + '" width="16" height="14" rx="2" fill="#37474f" style="cursor:move"/>' +
           '<path d="M' + num(pl.x + 6) + ' ' + num(pl.y + 8) + 'h10M' + num(pl.x + 6) + ' ' + num(pl.y + 12) + 'h10" stroke="#fff" stroke-width="1.5" pointer-events="none"/>');

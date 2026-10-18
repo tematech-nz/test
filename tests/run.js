@@ -1353,6 +1353,43 @@ test('ghost copies mirror the real item on another map; relocate moves it with i
   assert.ok(!ns.ghost && ns.x - rr.x === sp.x - rp.x && ns.y - rr.y === sp.y - rp.y, 'contents keep their offsets');
   assert.deepStrictEqual(overlapPairs(p), []);
 });
+test('All items overview map: appears with 2+ maps, ghosts of everything, positions kept, never "lives" anywhere', () => {
+  const p = M.createProject('ov'), m1 = p.maps[0].id;
+  const sw = B.addObjectPlaced(p, m1, { type: 'switch', name: 'Sw', portCount: 8 }, 40, 40);
+  assert.strictEqual(M.syncAllMap(p), false); assert.strictEqual(M.allMap(p), null, 'one map: no overview');
+  const m2 = M.uid('map'); p.maps.push({ id: m2, name: 'Second', location: '', viewport: { x: 0, y: 0, zoom: 1 } });
+  const pc = B.addObjectPlaced(p, m2, { type: 'generic', name: 'PC', portCount: 1 }, 100, 60);
+  assert.ok(M.syncAllMap(p)); const am = M.allMap(p);
+  assert.ok(am && am.auto === 'all' && M.realMaps(p).length === 2 && p.maps.length === 3);
+  const onAm = p.placements.filter(q => q.mapId === am.id);
+  assert.deepStrictEqual(onAm.map(q => q.refId).sort(), [sw.id, pc.id].sort());
+  assert.ok(onAm.every(q => q.ghost), 'only ghosts');
+  const gs = M.placementOf(p, am.id, sw.id), gp = M.placementOf(p, am.id, pc.id), rs = M.placementOf(p, m1, sw.id);
+  assert.ok(gp.x >= gs.x + gs.w + 100, 'second map is laid out to the right of the first block');
+  assert.deepStrictEqual([gs.w, gs.h], [rs.w, rs.h]);
+  assert.deepStrictEqual(M.mapsFor(p, 'object', sw.id), [m1], 'the overview is not where an item lives');
+  // moving a ghost sticks; a new item on a map joins that map's block; a removed item loses its ghost
+  gs.x += 500; gs.y += 70; const moved = [gs.x, gs.y];
+  const extra = B.addObjectPlaced(p, m1, { type: 'switch', name: 'Sw2', portCount: 4 }, 40, 300);
+  M.syncAllMap(p);
+  assert.deepStrictEqual([M.placementOf(p, am.id, sw.id).x, M.placementOf(p, am.id, sw.id).y], moved);
+  const ge = M.placementOf(p, am.id, extra.id), re = M.placementOf(p, m1, extra.id), rsw = M.placementOf(p, m1, sw.id);
+  assert.strictEqual(ge.y - (moved[1] - 70), re.y - rsw.y, 'new item keeps its place relative to its map block (the block was not moved with the ghost)');
+  assert.strictEqual(ge.x - (moved[0] - 500), re.x - rsw.x);
+  M.deleteContainerOrObject(p, 'object', extra.id, 'delete'); M.syncAllMap(p);
+  assert.ok(!M.placementOf(p, am.id, extra.id), 'ghost of a deleted item is removed');
+  // an item shown on both maps appears once; ghost copies on real maps do not count as sources
+  B.addGhost(p, m2, 'object', sw.id, 400, 400, false); M.syncAllMap(p);
+  assert.strictEqual(p.placements.filter(q => q.mapId === am.id && q.refId === sw.id).length, 1);
+  // cables between items of different maps are drawn in the overview
+  M.addPatchCable(p, { aPortId: sw.ports[0].id, bPortId: pc.ports[0].id });
+  assert.ok(/data-kind="cable"/.test(R.renderMap(p, am.id, {}).content), 'cable between maps visible in the overview');
+  assert.ok(/data-handle="move"/.test(R.renderMap(p, am.id, { mode: 'view', moveGhosts: true }).content) && !/data-handle="move"/.test(R.renderMap(p, am.id, { mode: 'view' }).content));
+  assert.ok(M.importProject(JSON.stringify(p)).project.maps.some(m => m.auto === 'all'), 'survives export / import');
+  // back to one map: nothing more to combine
+  p.maps = p.maps.filter(m => m.id !== m2); p.placements = p.placements.filter(q => q.mapId !== m2);
+  assert.strictEqual(M.syncAllMap(p), false); assert.strictEqual(M.realMaps(p).length, 1);
+});
 test('linked port groups: two ends, own names, peer info in the tooltip, unlink on delete, not copied', () => {
   const p = M.createProject('lg'), m1 = p.maps[0].id;
   const m2 = M.uid('map'); p.maps.push({ id: m2, name: 'Floor 2', location: '', viewport: { x: 0, y: 0, zoom: 1 } });

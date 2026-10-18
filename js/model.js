@@ -179,6 +179,45 @@
     for (var i = 0; i < p.placements.length; i++) if (p.placements[i].refId === refId && !p.placements[i].ghost) return p.placements[i];
     return null;
   }
+  /*
+   * The automatic "All items" map (map.auto === 'all'): once a project has two or more ordinary maps it shows a ghost copy of every
+   * item that lives on them, so rooms kept on separate maps can be seen together (with the cables between them). The ghosts can be
+   * moved around (positions are the overview's own) but nothing about the items can be edited there. Each ordinary map gets a block
+   * of the overview (map.allAt / map.allFrom remember where its items were laid out) so items added later land in the same block.
+   */
+  function realMaps(p) { return p.maps.filter(function (m) { return !m.auto; }); }
+  function allMap(p) { for (var i = 0; i < p.maps.length; i++) if (p.maps[i].auto === 'all') return p.maps[i]; return null; }
+  function syncAllMap(p) {
+    var reals = realMaps(p), am = allMap(p);
+    if (reals.length < 2) return false; // not shown (and not kept up to date) until there is something to combine
+    var changed = false;
+    if (!am) { am = { id: uid('map'), name: 'All items', location: 'Every map together (overview)', auto: 'all', viewport: { x: 0, y: 0, zoom: 1 } }; p.maps.push(am); changed = true; }
+    var want = {}, srcMap = {}; // refId -> real placement of the first ordinary map that holds it
+    reals.forEach(function (m) {
+      p.placements.forEach(function (pl) { if (pl.mapId === m.id && !pl.ghost && !want[pl.refId]) { want[pl.refId] = pl; srcMap[pl.refId] = m; } });
+    });
+    var before = p.placements.length;
+    p.placements = p.placements.filter(function (pl) { return pl.mapId !== am.id || (pl.ghost && want[pl.refId]); });
+    if (p.placements.length !== before) changed = true;
+    var have = {}; p.placements.forEach(function (pl) { if (pl.mapId === am.id) have[pl.refId] = pl; });
+    reals.forEach(function (m) {
+      var mine = Object.keys(want).filter(function (r) { return srcMap[r] === m && !have[r]; });
+      if (!mine.length) return;
+      if (!m.allAt) { // first time this map appears in the overview: a block to the right of what is there
+        var right = 0, any = false;
+        p.placements.forEach(function (pl) { if (pl.mapId === am.id) { any = true; right = Math.max(right, pl.x + pl.w); } });
+        var minX = Infinity, minY = Infinity;
+        Object.keys(want).forEach(function (r) { if (srcMap[r] === m) { minX = Math.min(minX, want[r].x); minY = Math.min(minY, want[r].y); } });
+        m.allFrom = { x: minX, y: minY }; m.allAt = { x: any ? right + 120 : 40, y: 40 };
+      }
+      mine.forEach(function (r) {
+        var src = want[r], pl = addPlacement(p, am.id, src.refType, r, src.x - m.allFrom.x + m.allAt.x, src.y - m.allFrom.y + m.allAt.y, src.w, src.h);
+        pl.ghost = true; have[r] = pl; changed = true;
+      });
+    });
+    syncGhosts(p);
+    return changed;
+  }
   function syncGhosts(p) {
     p.placements.forEach(function (pl) {
       if (!pl.ghost) return;
@@ -364,6 +403,8 @@
     else if (kind === 'cable') { var c = idx.cables[id]; if (c) [c.aPortId, c.bPortId].forEach(function (pid) { if (idx.portObj[pid]) add(idx.portObj[pid].id); }); }
     else if (kind === 'link') { var l = idx.links[id]; if (l) { add(l.aObjectId); add(l.bObjectId); } }
     else if (kind === 'wire') { var lk = idx.wireLink[id]; if (lk) { add(lk.aObjectId); add(lk.bObjectId); } }
+    var autoMaps = {}; p.maps.forEach(function (m) { if (m.auto) autoMaps[m.id] = true; });
+    out = out.filter(function (m) { return !autoMaps[m]; }); // the overview is not where an item "lives"
     return out;
   }
 
@@ -1075,7 +1116,7 @@
     findContainer: findContainer, groupOf: groupOf, parentOf: parentOf, containerChildren: containerChildren, descendants: descendants,
     addPlacement: addPlacement, placementOf: placementOf, placementGroup: placementGroup, movePlacement: movePlacement,
     growToFit: growToFit, mapsFor: mapsFor, addGroup: addGroup, addObject: addObject, setContainer: setContainer,
-    setPortCount: setPortCount, findPortGroup: findPortGroup, parsePortRange: parsePortRange, addPortGroup: addPortGroup, updatePortGroup: updatePortGroup, deletePortGroup: deletePortGroup, portGroupOf: portGroupOf, prunePortGroups: prunePortGroups, hasDeviceIp: hasDeviceIp, peerGroup: peerGroup, linkPortGroups: linkPortGroups, unlinkPortGroup: unlinkPortGroup, realPlacement: realPlacement, syncGhosts: syncGhosts, pseudoOf: pseudoOf, pseudoDevices: pseudoDevices, hasPortIp: hasPortIp, setDeviceIp: setDeviceIp, effectivePortIp: effectivePortIp, ipList: ipList, setPortIp: setPortIp, IP_ERROR: IP_ERROR, setDeviceKind: setDeviceKind, isTermination: isTermination, DEVICE_KINDS: DEVICE_KINDS, deviceKindInfo: deviceKindInfo, typeLabel: typeLabel, accessPorts: accessPorts, validSectionRows: validSectionRows, setUplinkPorts: setUplinkPorts, setSwitchLayout: setSwitchLayout, setFullWidth: setFullWidth, setSectionSize: setSectionSize, validSectionSizes: validSectionSizes, defaultSectionSize: defaultSectionSize, effectiveSectionSize: effectiveSectionSize, setRouterPorts: setRouterPorts, isValidIp: isValidIp, canConnectPatch: canConnectPatch, addPatchCable: addPatchCable,
+    setPortCount: setPortCount, findPortGroup: findPortGroup, parsePortRange: parsePortRange, addPortGroup: addPortGroup, updatePortGroup: updatePortGroup, deletePortGroup: deletePortGroup, portGroupOf: portGroupOf, prunePortGroups: prunePortGroups, hasDeviceIp: hasDeviceIp, realMaps: realMaps, allMap: allMap, syncAllMap: syncAllMap, peerGroup: peerGroup, linkPortGroups: linkPortGroups, unlinkPortGroup: unlinkPortGroup, realPlacement: realPlacement, syncGhosts: syncGhosts, pseudoOf: pseudoOf, pseudoDevices: pseudoDevices, hasPortIp: hasPortIp, setDeviceIp: setDeviceIp, effectivePortIp: effectivePortIp, ipList: ipList, setPortIp: setPortIp, IP_ERROR: IP_ERROR, setDeviceKind: setDeviceKind, isTermination: isTermination, DEVICE_KINDS: DEVICE_KINDS, deviceKindInfo: deviceKindInfo, typeLabel: typeLabel, accessPorts: accessPorts, validSectionRows: validSectionRows, setUplinkPorts: setUplinkPorts, setSwitchLayout: setSwitchLayout, setFullWidth: setFullWidth, setSectionSize: setSectionSize, validSectionSizes: validSectionSizes, defaultSectionSize: defaultSectionSize, effectiveSectionSize: effectiveSectionSize, setRouterPorts: setRouterPorts, isValidIp: isValidIp, canConnectPatch: canConnectPatch, addPatchCable: addPatchCable,
     updatePatchCable: updatePatchCable, deletePatchCable: deletePatchCable, addInternalMapping: addInternalMapping,
     removeInternalMapping: removeInternalMapping, autoMapPanel: autoMapPanel, rearPorts: rearPorts,
     sequentialPorts: sequentialPorts, addFixedLink: addFixedLink, updateLinkMeta: updateLinkMeta,

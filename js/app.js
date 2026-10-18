@@ -23,7 +23,10 @@
     clearTimeout(toastT); toastT = setTimeout(() => { t.className = ''; }, bad ? 5000 : 2500);
   }
   const curMap = () => S.p.maps.find((m) => m.id === S.mapId) || S.p.maps[0];
-  const isEdit = () => S.mode === 'edit';
+  /* the automatic "All items" overview map: ghost copies only - items can be rearranged there but never edited */
+  const onAll = () => !!curMap().auto;
+  const isEdit = () => S.mode === 'edit' && !onAll(); // content editing
+  const shownMaps = () => S.p.maps.filter((m) => !m.auto || M.realMaps(S.p).length > 1);
   const opts = (list, sel) => list.map((o) => '<option value="' + esc(o[0]) + '"' + (String(o[0]) === String(sel) ? ' selected' : '') + '>' + esc(o[1]) + '</option>').join('');
   const time = (d) => d.toTimeString().slice(0, 5);
   const slug = (s) => String(s || 'project').replace(/[^A-Za-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '') || 'project';
@@ -93,7 +96,7 @@
   function commit(label, fn) {
     const snap = JSON.stringify(S.p);
     let r;
-    try { r = fn(S.p); M.syncGhosts(S.p); }
+    try { r = fn(S.p); M.syncAllMap(S.p); M.syncGhosts(S.p); }
     catch (e) { S.p = JSON.parse(snap); toast(e.message, true); renderAll(); return false; }
     S.undo.push({ label: label, snap: snap }); if (S.undo.length > 100) S.undo.shift();
     S.redo = [];
@@ -143,8 +146,8 @@
     return !!(t && t[id]);
   }
   function afterChange() {
-    M.syncGhosts(S.p);
-    if (!S.p.maps.some((m) => m.id === S.mapId)) S.mapId = S.p.maps[0].id;
+    M.syncAllMap(S.p); M.syncGhosts(S.p);
+    if (!shownMaps().some((m) => m.id === S.mapId)) S.mapId = shownMaps()[0].id;
     if (!selExists()) S.sel = null;
     if (S.pgroup && !M.buildIndex(S.p).objects[S.pgroup.objId]) clearPgroup();
     if (S.trace) {
@@ -208,7 +211,8 @@
   function goTo(kind, id, mapId, keepTab) {
     let maps = M.mapsFor(S.p, kind, id);
     if (kind === 'map') { switchMap(id); return; }
-    if (mapId && maps.indexOf(mapId) >= 0) maps = [mapId];
+    if ((kind === 'object' || kind === 'group') && onAll() && M.placementOf(S.p, S.mapId, id)) maps = [S.mapId]; // already in the overview
+    else if (mapId && maps.indexOf(mapId) >= 0) maps = [mapId];
     else if (maps.indexOf(S.mapId) >= 0) maps = [S.mapId];
     if (!maps.length) toast('This item is not placed on any map yet', true);
     else if (maps[0] !== S.mapId) switchMap(maps[0], true);
@@ -365,7 +369,7 @@
     const tg = target.closest ? target.closest('[data-toggle]') : null;
     if (tg) { toggleCollapse(tg.dataset.pl, tg.dataset.toggle); return; }
     const el = target.closest ? target.closest('[data-kind]') : null;
-    if (el && target.closest('[data-ghost]')) { // a ghost copy is not editable here: take me to the real thing
+    if (el && target.closest('[data-ghost]') && !onAll()) { // a ghost copy is not editable here: take me to the real thing
       if (S.tool || S.pgroup) { toast('That is a ghost copy: edit it on its own map', true); return; }
       const gid = el.dataset.id, gk = el.dataset.kind, oid = gk === 'port' ? (M.buildIndex(S.p).portObj[gid] || {}).id : gid, real = oid && M.realPlacement(S.p, oid);
       if (real) { goTo(M.findContainer(S.p, oid).kind, oid, real.mapId); toast('Ghost copy: showing the original on ' + (S.p.maps.find((m) => m.id === real.mapId) || {}).name); return; }
@@ -440,7 +444,7 @@
         pinch = { d: Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y) };
         gesture = null; S.drag = null; return;
       }
-      const h = isEdit() && !S.place && e.target.closest ? e.target.closest('[data-handle]') : null;
+      const h = (isEdit() || (S.mode === 'edit' && onAll())) && !S.place && e.target.closest ? e.target.closest('[data-handle]') : null;
       if (h && h.dataset.handle === 'unghost') {
         const gq = S.p.placements.find((x) => x.id === h.dataset.pl);
         if (gq) { const ids = M.placementGroup(S.p, gq.id).map((x) => x.id); commit('Remove ghost copy', (p) => { p.placements = p.placements.filter((x) => ids.indexOf(x.id) < 0); }); }
@@ -451,7 +455,7 @@
         if (!q) return;
         const kind = h.dataset.handle, start = toMap(e.clientX, e.clientY);
         const items = kind === 'move' ? M.placementGroup(S.p, q.id).map((x) => ({ q: x, ox: x.x, oy: x.y })) : [{ q: q, ow: q.w, oh: q.h }];
-        S.drag = { kind: kind, plId: q.id, start: start, snap: JSON.stringify(S.p), items: items, moved: false, chain: kind === 'move' ? B.captureChain(S.p, q.mapId, q.refId) : [], from: (() => { const c = M.findContainer(S.p, q.refId); return c ? (c.kind === 'group' ? c.item.parentGroupId : c.item.containerId) : null; })() };
+        S.drag = { kind: kind, plId: q.id, start: start, snap: JSON.stringify(S.p), items: items, moved: false, chain: kind === 'move' && !q.ghost ? B.captureChain(S.p, q.mapId, q.refId) : [], from: q.ghost ? null : (() => { const c = M.findContainer(S.p, q.refId); return c ? (c.kind === 'group' ? c.item.parentGroupId : c.item.containerId) : null; })() };
         return;
       }
       gesture = { x: e.clientX, y: e.clientY, vx: vpState().x, vy: vpState().y, target: e.target, moved: false };
@@ -481,10 +485,10 @@
         if (d.kind === 'move') {
           const p0 = d.items[0], fc = M.findContainer(S.p, p0.q.refId);
           dx = snap(p0.ox + dx) - p0.ox; dy = snap(p0.oy + dy) - p0.oy;
-          if (fc && fc.kind === 'object' && fc.item.fullWidth && fc.item.containerId) dx = 0; // full-width equipment only moves up and down its container
+          if (fc && fc.kind === 'object' && fc.item.fullWidth && fc.item.containerId && !p0.q.ghost) dx = 0; // full-width equipment only moves up and down its container
           d.items.forEach((it) => { it.q.x = it.ox + dx; it.q.y = it.oy + dy; });
           B.applyExtension(S.p, d.items[0].q.mapId, d.chain, d.items[0].q, EXTEND_ZONE);
-          S.drop = B.dropSlot(S.p, d.items[0].q, d.from);
+          S.drop = d.items[0].q.ghost ? null : B.dropSlot(S.p, d.items[0].q, d.from);
         } else {
           const it = d.items[0];
           const mn = B.minPlacementSize(S.p, it.q);
@@ -517,7 +521,9 @@
     const slot = S.drop; S.drop = null;
     if (!d.moved) return;
     S.undo.push({ label: d.kind === 'move' ? 'Move' : 'Resize', snap: d.snap }); if (S.undo.length > 100) S.undo.shift(); S.redo = [];
-    if (d.kind === 'move') {
+    const gq = S.p.placements.find((x) => x.id === d.plId);
+    if (gq && gq.ghost) { /* a ghost only has a position: no containers, racks or overlaps to sort out */ }
+    else if (d.kind === 'move') {
       reassignContainer(d.plId, d);
       const q = S.p.placements.find((x) => x.id === d.plId), c = q && M.findContainer(S.p, q.refId);
       if (slot && q && c && c.item.containerId === slot.containerId) B.restack(S.p, q.mapId, slot.containerId, q.refId, slot.index);
@@ -549,7 +555,7 @@
   /* ---------------------------------------------------------------- rendering */
   function renderAll() {
     renderTop(); renderCanvas(); renderLeft(); renderRight(); renderToolbar();
-    document.body.className = 'mode-' + S.mode + (S.view === 'graph' ? ' view-graph' : '') + (document.body.classList.contains('nav-hidden') ? ' nav-hidden' : '');
+    document.body.className = 'mode-' + S.mode + (onAll() ? ' on-all' : '') + (S.view === 'graph' ? ' view-graph' : '') + (document.body.classList.contains('nav-hidden') ? ' nav-hidden' : '');
     renderGraph();
   }
   function renderGraph() {
@@ -565,8 +571,9 @@
   function setView(v) { S.view = v; clearPgroup(); renderAll(); if (v === 'map' && S.p.placements.some((q) => q.mapId === S.mapId)) applyVp(); }
   function renderTop() {
     $('projTitle').textContent = S.p.name;
-    $('mapSelect').innerHTML = opts(S.p.maps.map((m) => [m.id, m.name]), S.mapId);
-    $('btnMode').textContent = isEdit() ? 'Done editing' : 'Edit';
+    $('mapSelect').innerHTML = opts(shownMaps().map((m) => [m.id, m.name]), S.mapId);
+    $('btnMode').textContent = S.mode === 'edit' ? 'Done editing' : 'Edit';
+    $('editBanner').textContent = onAll() ? 'OVERVIEW - ghost copies of every map. Drag them to arrange the overview; nothing here changes the equipment or cabling (edit things on their own maps).' : 'EDIT MODE - changes modify the infrastructure model. Moving things never changes connections.';
     const na = netIssues(), ab = $('btnAlerts');
     ab.hidden = !na.length; ab.textContent = 'Network warnings (' + na.length + ')'; ab.title = na.slice(0, 5).map((i) => i.message).join('\n');
     $('btnUndo').disabled = !S.undo.length; $('btnRedo').disabled = !S.redo.length;
@@ -576,7 +583,7 @@
   function renderCanvas() {
     const map = curMap();
     const r = R.renderMap(S.p, map.id, {
-      mode: S.mode, selection: S.sel, highlight: S.trace && S.trace.highlight,
+      mode: onAll() ? 'view' : S.mode, moveGhosts: S.mode === 'edit' && onAll(), selection: S.sel, highlight: S.trace && S.trace.highlight,
       pendingPortId: S.tool && S.tool.pending, collapsed: S.collapsed, drop: S.place && S.place.host ? { containerId: S.place.host } : S.drop, alerts: netAlertMap(), ringPorts: ringPorts(),
       groupPorts: S.pgroup ? S.pgroup.ids : null, preview: S.preview
     });
@@ -626,9 +633,9 @@
     } else res.style.display = 'none';
 
     $('mapList').innerHTML = '<h3>Maps' + (isEdit() ? ' <button data-act="newMap" style="float:right;padding:0 6px">+ Add</button>' : '') + '</h3>' +
-      S.p.maps.map((m) => '<div class="list-item ' + (m.id === S.mapId ? 'active' : '') + '" data-act="goto" data-kind="map" data-id="' + esc(m.id) + '"><div class="grow">' + esc(m.name) +
+      shownMaps().map((m) => '<div class="list-item ' + (m.id === S.mapId ? 'active' : '') + '" data-act="goto" data-kind="map" data-id="' + esc(m.id) + '"><div class="grow">' + esc(m.name) +
         (m.location ? '<div class="sub">' + esc(m.location) + '</div>' : '') + '</div>' +
-        (isEdit() ? '<button data-act="editMap" data-id="' + esc(m.id) + '" style="padding:0 6px">Edit</button>' : '') + '</div>').join('');
+        (isEdit() && !m.auto ? '<button data-act="editMap" data-id="' + esc(m.id) + '" style="padding:0 6px">Edit</button>' : '') + '</div>').join('');
 
     const idx = M.buildIndex(S.p), mid = curMap().id;
     const onMap = (id) => !!M.placementOf(S.p, mid, id);
@@ -729,7 +736,7 @@
         '<div class="btn-row">' + btn('help', 'Help') + '</div>';
     } else {
       const d = { group: detGroup, object: detObject, port: detPort, cable: detCable, link: detLink, wire: detWire, pgroup: detPGroup }[S.sel.kind];
-      pane.innerHTML = d(S.sel.id);
+      pane.innerHTML = (onAll() && (S.sel.kind === 'object' || S.sel.kind === 'group') ? '<div class="msg-box">Overview copy: shown read-only here. Edit it on its own map: ' + mapsLine(S.sel.kind, S.sel.id) + '</div>' : '') + d(S.sel.id);
     }
     renderTracePane();
     $('tabTrace').textContent = S.trace ? 'Trace *' : 'Trace';
@@ -1473,12 +1480,12 @@
   }
 
   async function mapForm(existing) {
-    const v = await formDlg(existing ? 'Edit map' : 'New map', [{ k: 'name', label: 'Name', v: existing ? existing.name : 'Map ' + (S.p.maps.length + 1) }, { k: 'location', label: 'Location', v: existing ? existing.location : '' }], 'Save');
+    const v = await formDlg(existing ? 'Edit map' : 'New map', [{ k: 'name', label: 'Name', v: existing ? existing.name : 'Map ' + (M.realMaps(S.p).length + 1) }, { k: 'location', label: 'Location', v: existing ? existing.location : '' }], 'Save');
     if (!v || !v.name) return;
     if (existing) {
       const kill = await openDialog({ title: 'Map: ' + existing.name, render: () => ({ body: '<p>Save the new name, or delete this map? Deleting a map removes only its layout; equipment and connections stay in the project.</p>', buttons: [{ key: 'cancel', label: 'Cancel' }, { key: 'del', label: 'Delete map', cls: 'danger' }, { key: 'save', label: 'Save', cls: 'primary' }] }), onButton: (k, c) => c.close(k) });
       if (kill === 'del') {
-        if (S.p.maps.length < 2) { toast('A project needs at least one map', true); return; }
+        if (M.realMaps(S.p).length < 2) { toast('A project needs at least one map', true); return; }
         commit('Delete map', (p) => { p.maps = p.maps.filter((m) => m.id !== existing.id); p.placements = p.placements.filter((q) => q.mapId !== existing.id); });
       } else if (kill === 'save') commit('Edit map', (p) => { const m = p.maps.find((x) => x.id === existing.id); m.name = v.name; m.location = v.location; });
     } else {
@@ -1614,10 +1621,10 @@
     setStatus();
   }
   async function exportImages(kind) {
-    const scopeOpts = [['__cur', 'Current map']].concat(S.p.maps.map((m) => [m.id, m.name])).concat(S.p.maps.length > 1 ? [['__all', 'All maps']] : []);
+    const scopeOpts = [['__cur', 'Current map']].concat(shownMaps().map((m) => [m.id, m.name])).concat(M.realMaps(S.p).length > 1 ? [['__all', 'All maps']] : []);
     const v = await formDlg('Export ' + kind.toUpperCase(), [{ k: 'scope', label: 'Maps', type: 'select', opts: scopeOpts, v: '__cur' }], 'Export');
     if (!v) return;
-    const ids = v.scope === '__all' ? S.p.maps.map((m) => m.id) : [v.scope === '__cur' ? S.mapId : v.scope];
+    const ids = v.scope === '__all' ? shownMaps().map((m) => m.id) : [v.scope === '__cur' ? S.mapId : v.scope];
     try {
       if (kind === 'pdf') {
         const bytes = await X.pdfForMaps(S.p, ids);
@@ -1656,6 +1663,7 @@
     toast('Imported ' + res.project.name);
   }
   function loadProject(p) {
+    M.syncAllMap(p);
     const fixed = B.normalizeSizes(p), aligned = B.alignToGrid(p);
     if (fixed) setTimeout(() => toast('Adjusted ' + fixed + ' item(s) (too small to read, or not lined up with their rack)', false), 100);
     else if (aligned) setTimeout(() => toast('Aligned ' + aligned + ' item(s) to the grid (older project)', false), 100);
@@ -1894,6 +1902,7 @@
   function init() {
     try { S.lastExport = localStorage.getItem(KEY_EXPORT); S.fileDirty = localStorage.getItem(KEY_DIRTY) === '1'; } catch (_) { S.lastExport = null; }
     S.p = loadSaved() || M.createProject('Untitled project');
+    M.syncAllMap(S.p);
     if (B.normalizeSizes(S.p) | B.alignToGrid(S.p)) saveNow();
     S.mapId = S.p.maps[0].id;
     loadCollapsed();
