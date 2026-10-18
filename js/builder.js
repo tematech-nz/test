@@ -485,6 +485,38 @@
     resolveDrop(p, rootPl.id);
     return rootPl;
   }
+  /*
+   * Equipment patched to an item (directly, by patch cable) that sits on the same map: what has to travel with it so that moving the
+   * item does not leave cables hanging between two maps. Fixed links are not followed - they stay and are drawn as labelled stubs.
+   * Returns [{ kind, id, name, via: [cable names] }].
+   */
+  function patchedNeighbours(p, kind, id, mapId) {
+    var inSet = {}; inSet[id] = true;
+    M.descendants(p, id).forEach(function (d) { inSet[d.id] = true; });
+    var idx = M.buildIndex(p), out = {}, order = [];
+    p.patchCables.forEach(function (c) {
+      var a = idx.portObj[c.aPortId], b = idx.portObj[c.bPortId];
+      if (!a || !b || !!inSet[a.id] === !!inSet[b.id]) return;
+      var o = inSet[a.id] ? b : a, q = M.placementOf(p, mapId, o.id);
+      if (!q || q.ghost) return;
+      if (!out[o.id]) { out[o.id] = { kind: 'object', id: o.id, name: o.name, via: [] }; order.push(o.id); }
+      out[o.id].via.push(c.name);
+    });
+    return order.map(function (k) { return out[k]; });
+  }
+  /* relocate several items as one cluster: they keep their positions relative to each other */
+  function relocateMany(p, mapId, items, x, y, fromMapId) {
+    var boxes = items.map(function (it) { var s = sourceBox(p, it.kind, it.id, fromMapId); return s && { it: it, root: s.root }; }).filter(Boolean);
+    if (!boxes.length) throw new Error('Nothing to move: the items are not on that map');
+    var minX = Math.min.apply(null, boxes.map(function (b) { return b.root.x; })), minY = Math.min.apply(null, boxes.map(function (b) { return b.root.y; }));
+    return boxes.map(function (b) { return relocate(p, mapId, b.it.kind, b.it.id, x + b.root.x - minX, y + b.root.y - minY, fromMapId); });
+  }
+  /* free spot for a cluster arriving on a map: right of what is there */
+  function arrivalSpot(p, mapId) {
+    var right = 0, any = false;
+    p.placements.forEach(function (q) { if (q.mapId === mapId) { any = true; right = Math.max(right, q.x + q.w); } });
+    return { x: any ? Math.ceil((right + 80) / 20) * 20 : 40, y: 40 };
+  }
   /* after a label/port change: grow (never shrink) the object's placements to the new minimum */
   function fitMinimum(p, objectId) {
     var o = M.buildIndex(p).objects[objectId];
@@ -608,6 +640,6 @@
     return m[1] + n;
   }
 
-  NM.builder = { containerAt: containerAt, placeNewAt: placeNewAt, copyClip: copyClip, pasteClipAt: pasteClipAt, copyName: copyName, nextName: nextName, applyFullWidth: applyFullWidth, applyFullWidthFor: applyFullWidthFor, minPlacementSize: minPlacementSize, normalizeSizes: normalizeSizes, addGhost: addGhost, relocate: relocate, setHeightFn: setHeightFn, stackedBelow: stackedBelow, followFold: followFold, alignToGrid: alignToGrid, fitMinimum: fitMinimum, resolveDrop: resolveDrop, settle: settle, findDropContainer: findDropContainer, dropSlot: dropSlot, restack: restack, captureChain: captureChain, restoreChain: restoreChain, applyExtension: applyExtension, refitObject: refitObject, placeItem: placeItem, addGroupPlaced: addGroupPlaced, addObjectPlaced: addObjectPlaced, buildDemoProject: buildDemoProject };
+  NM.builder = { containerAt: containerAt, placeNewAt: placeNewAt, copyClip: copyClip, pasteClipAt: pasteClipAt, copyName: copyName, nextName: nextName, applyFullWidth: applyFullWidth, applyFullWidthFor: applyFullWidthFor, minPlacementSize: minPlacementSize, normalizeSizes: normalizeSizes, addGhost: addGhost, relocate: relocate, relocateMany: relocateMany, patchedNeighbours: patchedNeighbours, arrivalSpot: arrivalSpot, setHeightFn: setHeightFn, stackedBelow: stackedBelow, followFold: followFold, alignToGrid: alignToGrid, fitMinimum: fitMinimum, resolveDrop: resolveDrop, settle: settle, findDropContainer: findDropContainer, dropSlot: dropSlot, restack: restack, captureChain: captureChain, restoreChain: restoreChain, applyExtension: applyExtension, refitObject: refitObject, placeItem: placeItem, addGroupPlaced: addGroupPlaced, addObjectPlaced: addObjectPlaced, buildDemoProject: buildDemoProject };
   if (typeof module !== 'undefined' && module.exports) module.exports = NM.builder;
 })(typeof window !== 'undefined' ? window : globalThis);

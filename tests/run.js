@@ -1311,6 +1311,42 @@ test('graph view: an edge spanning several columns is routed around the devices 
   const near = GV.edgePath(A, nodes.find(n => n.col === 1 && n.row === 2), 'lk8');
   assert.ok(!near.pts, 'neighbouring columns keep the smooth curve');
 });
+test('move to another map: the item, its contents and the equipment patched to it travel together; fixed links stay as labelled stubs', () => {
+  const p = M.createProject('mv'), m1 = p.maps[0].id;
+  const m2 = M.uid('map'); p.maps.push({ id: m2, name: 'Room 2', location: '', viewport: { x: 0, y: 0, zoom: 1 } });
+  const rack = B.addObjectPlaced(p, m1, { type: 'rack', name: 'Rack A' }, 40, 40);
+  const sw = B.addObjectPlaced(p, m1, { type: 'switch', name: 'SW', portCount: 8, containerId: rack.id });
+  const pc = B.addObjectPlaced(p, m1, { type: 'generic', name: 'PC', portCount: 1 }, 700, 40);
+  const nvr = B.addObjectPlaced(p, m1, { type: 'generic', name: 'NVR', portCount: 1 }, 700, 200);
+  const stay = B.addObjectPlaced(p, m1, { type: 'patchpanel', name: 'Hall panel', portCount: 8, straight: true }, 700, 400);
+  const pp = B.addObjectPlaced(p, m1, { type: 'patchpanel', name: 'Rack panel', portCount: 8, straight: true, containerId: rack.id });
+  M.addPatchCable(p, { aPortId: sw.ports[0].id, bPortId: pc.ports[0].id });
+  M.addPatchCable(p, { aPortId: sw.ports[1].id, bPortId: nvr.ports[0].id });
+  const rear = (o, n) => o.ports.find(x => x.side === 'rear' && x.label === String(n)).id;
+  M.addFixedLink(p, { aObjectId: pp.id, bObjectId: stay.id, wireCount: 1, pairs: [[rear(pp, 1), rear(stay, 1)]] });
+  const nb = B.patchedNeighbours(p, 'object', rack.id, m1);
+  assert.deepStrictEqual(nb.map(n => n.name).sort(), ['NVR', 'PC'], 'equipment patched to what is inside the rack; the fixed link is not followed');
+  const spot = B.arrivalSpot(p, m2);
+  B.relocateMany(p, m2, [{ kind: 'object', id: rack.id }, { kind: 'object', id: pc.id }], spot.x, spot.y, m1); // NVR stays behind
+  [rack, sw, pp, pc].forEach(o => { assert.ok(M.placementOf(p, m2, o.id) && !M.placementOf(p, m2, o.id).ghost && !M.placementOf(p, m1, o.id), o.name + ' moved'); });
+  assert.ok(M.placementOf(p, m1, nvr.id) && M.placementOf(p, m1, stay.id), 'the rest stays');
+  const a = M.placementOf(p, m2, rack.id), b = M.placementOf(p, m2, pc.id);
+  assert.ok(Math.abs((b.x - a.x) - 660) < 1 && Math.abs(b.y - a.y) < 1, 'cluster keeps its relative layout');
+  const old = R.renderMap(p, m1, {}).content;
+  assert.ok(/FL-001 x1 -(&gt;|>) Rack panel \[Room 2\]/.test(old), 'old map keeps a fixed link label to the moved panel');
+  assert.ok(/-(&gt;|>)/.test(old) && old.indexOf('PC') > 0, 'and a label for the cable that now leaves the map');
+  assert.deepStrictEqual(M.mapsFor(p, 'object', pc.id), [m2]);
+  assert.deepStrictEqual(overlapPairs(p), []);
+});
+test('live copies are marked: dashed blue outline and a LIVE COPY badge naming the map', () => {
+  const p = M.createProject('lc'), m1 = p.maps[0].id;
+  const m2 = M.uid('map'); p.maps.push({ id: m2, name: 'Second', location: '', viewport: { x: 0, y: 0, zoom: 1 } });
+  const sw = B.addObjectPlaced(p, m1, { type: 'switch', name: 'Sw', portCount: 8 }, 40, 40);
+  B.addGhost(p, m2, 'object', sw.id, 40, 40, false);
+  const svg = R.renderMap(p, m2, {}).content;
+  assert.ok(svg.indexOf('LIVE COPY of ' + p.maps[0].name) > 0 && svg.indexOf('stroke="#1565c0"') > 0 && svg.indexOf('stroke-dasharray="7 4"') > 0);
+  assert.ok(R.renderMap(p, m1, {}).content.indexOf('LIVE COPY') < 0, 'the real item is not marked');
+});
 test('ghost copies mirror the real item on another map; relocate moves it with its layout', () => {
   const p = M.createProject('gh'), m1 = p.maps[0].id;
   const m2 = M.uid('map'); p.maps.push({ id: m2, name: 'Second', location: '', viewport: { x: 0, y: 0, zoom: 1 } });

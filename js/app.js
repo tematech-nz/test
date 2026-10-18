@@ -707,6 +707,7 @@
     'reconnect:a': 'Move end A of this patch cable to a different port: click this, then click the new port on the map. The circled port is the end that moves.',
     'reconnect:b': 'Move end B of this patch cable to a different port: click this, then click the new port on the map. The circled port is the end that moves.',
     duplicate: 'Copy this item (with everything inside it) and place the copy where you click. Settings are copied, connections and IP addresses are not. Ctrl+C / Ctrl+V does the same.',
+    moveToMap: 'Cut this item (with its contents) and the equipment patched to it from this map and paste it, editable, on another map or a new one. Fixed links stay and keep a label here.',
     deleteSel: 'Delete the selected item (you will be asked to confirm and shown what else is removed)',
     deleteCable: 'Remove this patch cable; both ports become free',
     editWiring: 'Change installed wiring: endpoints, wire mappings, add or delete wires. Changes are reviewed before they are applied.',
@@ -770,7 +771,7 @@
       fld('Inside', g.parentGroupId ? esc(idx.groups[g.parentGroupId].name) : '-');
     h += fld('On maps', mapsLine('group', id));
     h += '<h3>Contents (' + kids.length + ')</h3>' + (kids.map((k) => '<div class="list-item" data-act="goto" data-kind="' + k.kind + '" data-id="' + esc(k.id) + '">' + esc((k.kind === 'group' ? idx.groups[k.id] : idx.objects[k.id]).name) + '</div>').join('') || '<div class="sub">Empty. Groups only organise equipment; they never connect ports.</div>');
-    if (isEdit()) h += '<div class="btn-row">' + placeButtons(id, 'group') + btn('duplicate', 'Copy / duplicate', 'data-kind="group" data-id="' + esc(id) + '"') + btn('deleteSel', 'Delete group...', '', 'danger') + '</div>';
+    if (isEdit()) h += '<div class="btn-row">' + placeButtons(id, 'group') + btn('duplicate', 'Copy / duplicate', 'data-kind="group" data-id="' + esc(id) + '"') + btn('moveToMap', 'Move to another map...', 'data-kind="group" data-id="' + esc(id) + '"') + btn('deleteSel', 'Delete group...', '', 'danger') + '</div>';
     return h;
   }
   function placeButtons(id, kind) {
@@ -857,7 +858,7 @@
     }
     h += pgroupSection(o);
     if (isEdit()) {
-      h += '<div class="btn-row">' + placeButtons(id, 'object') + btn('duplicate', 'Copy / duplicate', 'data-kind="object" data-id="' + esc(id) + '"') + (M.isTermination(o) ? btn('automap', 'Map front N <-> rear N') + btn('newLinkFrom', 'Fixed link from here...') : '') +
+      h += '<div class="btn-row">' + placeButtons(id, 'object') + btn('duplicate', 'Copy / duplicate', 'data-kind="object" data-id="' + esc(id) + '"') + btn('moveToMap', 'Move to another map...', 'data-kind="object" data-id="' + esc(id) + '"') + (M.isTermination(o) ? btn('automap', 'Map front N <-> rear N') + btn('newLinkFrom', 'Fixed link from here...') : '') +
         btn('deleteSel', 'Delete...', '', 'danger') + '</div>';
       if (M.isTermination(o)) h += '<div class="sub">Internal mappings: ' + S.p.internalMappings.filter((m) => m.objectId === id).length + ' documented. Tracing only follows documented mappings.</div>';
     }
@@ -1499,6 +1500,45 @@
    * Add an item from another map to this one: as a ghost copy (semi-transparent, non-editable, mirrors every change made on its
    * own map) or by relocating it (it leaves its old map). Items that are on no map yet are simply placed.
    */
+  /*
+   * "Move to another map...": cut an item (with everything inside it) and the equipment patched to it from this map and paste it,
+   * editable, on another map (or a new one). Fixed links stay where they are and keep a label on this map.
+   */
+  async function moveToMap(kind, id) {
+    const from = curMap().id, c = M.findContainer(S.p, id);
+    if (!c || !M.placementOf(S.p, from, id) || M.placementOf(S.p, from, id).ghost) { toast('Open the map where this item lives first', true); return; }
+    const others = M.realMaps(S.p).filter((m) => m.id !== from), nb = B.patchedNeighbours(S.p, kind, id, from);
+    const st = { dest: others.length ? others[0].id : '__new', name: '', take: {} };
+    nb.forEach((n) => { st.take[n.id] = true; });
+    const v = await openDialog({
+      title: 'Move ' + c.item.name + ' to another map',
+      render: () => ({
+        body: '<div class="sub">The item moves with everything inside it, as an editable item, and is removed from this map. Its fixed links stay and keep a label here.</div>' +
+          fld('To map', '<select data-s="dest">' + opts(others.map((m) => [m.id, m.name]).concat([['__new', '+ New map...']]), st.dest) + '</select>') +
+          (st.dest === '__new' ? fld('New map name', '<input type="text" data-s="name" value="' + esc(st.name) + '" placeholder="e.g. ' + esc(c.item.name) + '">') : '') +
+          (nb.length ? fld('Take along', '<div class="sub">Patched to it by cable, so the cabling stays on one map:</div>' + nb.map((n) => '<label style="display:block"><input type="checkbox" data-take="' + esc(n.id) + '"' + (st.take[n.id] ? ' checked' : '') + '> ' + esc(n.name) + ' <span class="sub">(' + esc(n.via.join(', ')) + ')</span></label>').join('')) : ''),
+        buttons: [{ key: 'no', label: 'Cancel' }, { key: 'ok', label: 'Move', cls: 'primary' }]
+      }),
+      onChange: (e, cx) => {
+        const t = e.target;
+        if (t.dataset.take) { st.take[t.dataset.take] = t.checked; return; }
+        if (t.dataset.s === 'name') { st.name = t.value; return; }
+        if (t.dataset.s === 'dest') { st.dest = t.value; cx.draw(); }
+      },
+      onButton: (k, cx) => cx.close(k === 'ok' ? 'ok' : null)
+    });
+    if (v !== 'ok') return;
+    const taken = Object.keys(st.take).filter((k) => st.take[k]);
+    const destId = st.dest === '__new' ? M.uid('map') : st.dest;
+    commit('Move to another map', (p) => {
+      if (st.dest === '__new') p.maps.push({ id: destId, name: st.name.trim() || c.item.name, location: '', viewport: { x: 0, y: 0, zoom: 1 } });
+      const spot = B.arrivalSpot(p, destId);
+      B.relocateMany(p, destId, [{ kind: kind, id: id }].concat(taken.map((k) => ({ kind: 'object', id: k }))), spot.x, spot.y, from);
+    });
+    S.sel = null;
+    toast('Moved ' + c.item.name + (taken.length ? ' and ' + taken.length + ' patched item(s)' : '') + ' to ' + (S.p.maps.find((m) => m.id === destId) || {}).name);
+    renderAll();
+  }
   async function addExisting() {
     const mid = curMap().id, idx = M.buildIndex(S.p);
     const items = [];
@@ -1506,7 +1546,7 @@
     S.p.objects.forEach((o) => { if (!M.placementOf(S.p, mid, o.id)) items.push({ key: 'object:' + o.id, kind: 'object', id: o.id, label: M.typeLabel(o) + ': ' + o.name }); });
     if (!items.length) { toast('Everything is already on this map'); return; }
     const realMaps = (it) => S.p.placements.filter((q) => q.refId === it.id && !q.ghost).map((q) => q.mapId).filter((m, i, a) => a.indexOf(m) === i && m !== mid);
-    const st = { item: items[0].key, mode: 'ghost', from: '', contents: true };
+    const st = { item: items[0].key, mode: 'ghost', from: '', contents: true, take: {}, takeKey: '' };
     const cur = () => items.find((x) => x.key === st.item);
     const isCont = (it) => it.kind === 'group' || (idx.objects[it.id] && idx.objects[it.id].type === 'rack');
     const v = await openDialog({
@@ -1516,17 +1556,23 @@
         if (!hasSrc) st.mode = 'place';
         else if (st.mode === 'place') st.mode = 'ghost';
         if (!maps.some((m) => m === st.from)) st.from = maps[0] || '';
-        const modeOpts = hasSrc ? [['ghost', 'Ghost copy - semi-transparent, not editable, mirrors the other map'], ['move', 'Relocate - move it here and remove it from the other map']] : [['place', 'Place it on this map (it is not on any map yet)']];
+        // equipment patched to the item travels with it (checked by default); fixed links stay behind as labels
+        const nb = st.mode === 'move' && st.from ? B.patchedNeighbours(S.p, it.kind, it.id, st.from) : [];
+        if (st.takeKey !== it.key + '|' + st.from) { st.takeKey = it.key + '|' + st.from; st.take = {}; nb.forEach((n) => { st.take[n.id] = true; }); }
+        const modeOpts = hasSrc ? [['ghost', 'Live copy (ghost) - faded and not editable, mirrors the other map; not a separate item'], ['move', 'Relocate - move it here and remove it from the other map']] : [['place', 'Place it on this map (it is not on any map yet)']];
         return {
           body: fld('Item', '<select data-s="item">' + opts(items.map((x) => [x.key, x.label]), st.item) + '</select>') +
-            fld('How', '<select data-s="mode">' + opts(modeOpts, st.mode) + '</select>' + (hasSrc ? '<div class="sub">' + (st.mode === 'ghost' ? 'The same record is drawn here faintly. Edit it on the map where it lives; its size follows that map. A ghost never changes layout here and can be removed with the red x.' : 'Layout of the item (and what is inside it) is kept. It is removed from the other map and is editable here.') + '</div>' : '')) +
+            fld('How', '<select data-s="mode">' + opts(modeOpts, st.mode) + '</select>' + (hasSrc ? '<div class="sub">' + (st.mode === 'ghost' ? 'The same record is drawn here faintly with a blue dashed outline and a LIVE COPY badge. Edit it on the map where it lives; its size follows that map. A ghost never changes layout here and can be removed with the red x.' : 'Layout of the item (and what is inside it) is kept. It is removed from the other map and is editable here.') + '</div>' : '')) +
             (hasSrc && st.mode === 'move' && maps.length > 1 ? fld('Move from', '<select data-s="from">' + opts(maps.map((m) => [m, S.p.maps.find((x) => x.id === m).name]), st.from) + '</select>') : '') +
+            (nb.length ? fld('Take along', '<div class="sub">Patched to it by cable (so they stay together; fixed links stay behind and keep a label on the old map):</div>' + nb.map((n) => '<label style="display:block"><input type="checkbox" data-take="' + esc(n.id) + '"' + (st.take[n.id] ? ' checked' : '') + '> ' + esc(n.name) + ' <span class="sub">(' + esc(n.via.join(', ')) + ')</span></label>').join('')) : '') +
             (isCont(it) && st.mode !== 'move' ? fld('With contents', '<label><input type="checkbox" data-s="contents"' + (st.contents ? ' checked' : '') + '> include what is inside</label>') : ''),
           buttons: [{ key: 'no', label: 'Cancel' }, { key: 'ok', label: st.mode === 'move' ? 'Relocate here' : (st.mode === 'ghost' ? 'Add ghost copy' : 'Add'), cls: 'primary' }]
         };
       },
       onChange: (e, c) => {
-        const t = e.target, k = t.dataset.s; if (!k) return;
+        const t = e.target;
+        if (t.dataset.take) { st.take[t.dataset.take] = t.checked; return; }
+        const k = t.dataset.s; if (!k) return;
         st[k] = k === 'contents' ? t.checked : t.value;
         c.draw();
       },
@@ -1536,7 +1582,7 @@
     const it = cur(), pos = viewCentre(), mode = st.mode;
     commit(mode === 'move' ? 'Relocate to this map' : (mode === 'ghost' ? 'Add ghost copy' : 'Add to map'), (p) => {
       if (mode === 'ghost') B.addGhost(p, mid, it.kind, it.id, pos.x, pos.y, isCont(it) ? st.contents : false);
-      else if (mode === 'move') B.relocate(p, mid, it.kind, it.id, pos.x, pos.y, st.from);
+      else if (mode === 'move') B.relocateMany(p, mid, [{ kind: it.kind, id: it.id }].concat(Object.keys(st.take).filter((k) => st.take[k]).map((k) => ({ kind: 'object', id: k }))), pos.x, pos.y, st.from);
       else B.placeItem(p, mid, it.kind, it.id, pos.x, pos.y, true);
     });
   }
@@ -1832,6 +1878,7 @@
           if (g && g !== true) { S.sel = { kind: 'pgroup', id: g.id }; renderAll(); }
           break;
         }
+        case 'moveToMap': moveToMap(d.kind, d.id); break;
         case 'unlinkPGroup': commit('Unlink port groups', (p) => M.unlinkPortGroup(p, d.id)); break;
         case 'deletePGroup': { const f = M.findPortGroup(S.p, d.id), oid = f && f.obj.id; commit('Delete port group', (p) => M.deletePortGroup(p, d.id)); if (oid) { S.sel = { kind: 'object', id: oid }; renderAll(); } break; }
         case 'linkFromGroup': {

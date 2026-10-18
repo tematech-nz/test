@@ -191,7 +191,7 @@ const ok = (m) => console.log('  ok   ' + m);
     });
     await page.click('#toolbar button[data-act="addMapItems"]');
     await page.selectOption('#dlg select[data-s="item"]', { label: 'Switch: GhostSrc' });
-    assert.ok(/Ghost copy/.test(await page.innerText('#dlg select[data-s="mode"]')) && /Relocate/.test(await page.innerText('#dlg select[data-s="mode"]')));
+    assert.ok(/Live copy/.test(await page.innerText('#dlg select[data-s="mode"]')) && /Relocate/.test(await page.innerText('#dlg select[data-s="mode"]')));
     await page.click('#dlg button[data-btn="ok"]');
     await page.waitForTimeout(200);
     const g = await page.evaluate((i) => NetMap.app.S.p.placements.filter((q) => q.refId === i.sw && !(NetMap.app.S.p.maps.find((m) => m.id === q.mapId) || {}).auto).map((q) => ({ map: q.mapId, ghost: !!q.ghost })), ids);

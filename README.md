@@ -162,6 +162,11 @@ Try it: File -> Load demo project (two rooms, a fixed link between racks, a wall
   not editable, mirrors every change made on its own map - name, ports, size; it takes no part in layout; tap it to jump to the
   original, remove it with its red x in edit mode) or **Relocate** (the item with its contents and layout moves here and leaves the
   other map). Items that are on no map yet are simply placed.
+  A ghost is drawn with a blue dashed outline and a **LIVE COPY of <map>** badge so it is never mistaken for a separate item.
+  **Move to another map...** (details panel of an item or group) cuts it with everything inside it and pastes it, editable, on another map or a
+  new one: equipment patched to it by cable is listed (checked by default) and travels along so the patch cabling stays on one map, keeping
+  its relative layout; fixed links are not followed - the old map keeps them as labelled stubs ("FL-007 x3 -> Panel [Other map]"). The same
+  "take along" list appears when you relocate through "Add existing here...".
 - **Maps**: the same object can be shown on several maps ("Add existing here"); connections reference the shared
   object and port records. Trace results offer "open <map>" links to continue across maps.
 

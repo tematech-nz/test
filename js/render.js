@@ -176,7 +176,7 @@
         });
       }
       if (ghost) {
-        x.push('<text x="' + num(pl.x + pl.w - 6) + '" y="' + num(pl.y + pl.h - 5) + '" font-size="9" font-style="italic" text-anchor="end" fill="#555" font-family="sans-serif" pointer-events="none">ghost copy - edit it on its own map</text>');
+        x.push('<rect x="' + num(pl.x) + '" y="' + num(pl.y) + '" width="' + num(pl.w) + '" height="' + num(pl.h) + '" rx="4" fill="#bbdefb" fill-opacity="0.35" stroke="#1565c0" stroke-width="2.5" stroke-dasharray="7 4" pointer-events="none"/>'); // live copy: tinted, dashed blue outline
         if (opts.moveGhosts) x.push('<rect data-handle="move" data-pl="' + esc(plId) + '" x="' + num(pl.x + 3) + '" y="' + num(pl.y + 3) + '" width="16" height="14" rx="2" fill="#37474f" style="cursor:move"/><path d="M' + num(pl.x + 6) + ' ' + num(pl.y + 8) + 'h10M' + num(pl.x + 6) + ' ' + num(pl.y + 12) + 'h10" stroke="#fff" stroke-width="1.5" pointer-events="none"/>');
         else if (editing) x.push('<g data-handle="unghost" data-pl="' + esc(plId) + '" style="cursor:pointer"><title>Remove this ghost copy from the map</title><rect data-handle="unghost" data-pl="' + esc(plId) + '" x="' + num(pl.x + 3) + '" y="' + num(pl.y + 3) + '" width="16" height="14" rx="2" fill="#b71c1c"/><path data-handle="unghost" data-pl="' + esc(plId) + '" d="M' + num(pl.x + 7) + ' ' + num(pl.y + 6) + 'l8 8M' + num(pl.x + 15) + ' ' + num(pl.y + 6) + 'l-8 8" stroke="#fff" stroke-width="1.6"/></g>');
       } else if (editing) {
@@ -186,6 +186,13 @@
       }
       x.push('</g>');
       parts.push(x.join(''));
+      if (ghost) { // badge (drawn at full strength): this is a live copy, not a separate item
+        var rp = M.realPlacement(p, ref.id), gm = rp && idx.maps[rp.mapId], ov = idx.maps[it.pl.mapId] && idx.maps[it.pl.mapId].auto;
+        if (!ov) {
+          var bt = 'LIVE COPY' + (gm ? ' of ' + gm.name : ''), bw = bt.length * 5.6 + 10;
+          parts.push('<g pointer-events="none"><title>Live (ghost) copy: the same equipment as on ' + esc(gm ? gm.name : 'its own map') + ', not a separate item. Edit it there.</title><rect x="' + num(pl.x + pl.w - bw - 4) + '" y="' + num(pl.y + 3) + '" width="' + num(bw) + '" height="13" rx="6" fill="#1565c0"/><text x="' + num(pl.x + pl.w - bw / 2 - 4) + '" y="' + num(pl.y + 12.5) + '" font-size="9" font-weight="bold" text-anchor="middle" fill="#fff" font-family="sans-serif">' + esc(bt) + '</text></g>');
+        }
+      }
     });
 
     function portCenter(pid) {
