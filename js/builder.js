@@ -469,6 +469,8 @@
     return out;
   }
   function relocate(p, mapId, kind, id, x, y, fromMapId) {
+    var blockers = patchBlockers(p, kind, id);
+    if (blockers.length) throw new Error(blockMessage(blockers));
     var src = sourceBox(p, kind, id, fromMapId);
     if (!src) throw new Error('This item is not on the other map');
     var gone = {}; src.list.forEach(function (e) { gone[e.q.id] = true; });
@@ -486,30 +488,25 @@
     return rootPl;
   }
   /*
-   * Equipment patched to an item (directly, by patch cable) that sits on the same map: what has to travel with it so that moving the
-   * item does not leave cables hanging between two maps. Fixed links are not followed - they stay and are drawn as labelled stubs.
-   * Returns [{ kind, id, name, via: [cable names] }].
+   * Moving an item (or group / rack with everything inside it) to another map is only allowed while it is not patch-corded to anything
+   * outside it: patch cables are local, only fixed links may run between maps. Returns the offending cables:
+   * [{ cable, inside, outside }] (port names); an empty list means the item is free to move.
    */
-  function patchedNeighbours(p, kind, id, mapId) {
+  function patchBlockers(p, kind, id) {
     var inSet = {}; inSet[id] = true;
     M.descendants(p, id).forEach(function (d) { inSet[d.id] = true; });
-    var idx = M.buildIndex(p), out = {}, order = [];
+    var idx = M.buildIndex(p), out = [];
     p.patchCables.forEach(function (c) {
       var a = idx.portObj[c.aPortId], b = idx.portObj[c.bPortId];
       if (!a || !b || !!inSet[a.id] === !!inSet[b.id]) return;
-      var o = inSet[a.id] ? b : a, q = M.placementOf(p, mapId, o.id);
-      if (!q || q.ghost) return;
-      if (!out[o.id]) { out[o.id] = { kind: 'object', id: o.id, name: o.name, via: [] }; order.push(o.id); }
-      out[o.id].via.push(c.name);
+      var inP = inSet[a.id] ? c.aPortId : c.bPortId, outP = inSet[a.id] ? c.bPortId : c.aPortId;
+      out.push({ cable: c.name, inside: M.portName(p, inP, idx), outside: M.portName(p, outP, idx) });
     });
-    return order.map(function (k) { return out[k]; });
+    return out;
   }
-  /* relocate several items as one cluster: they keep their positions relative to each other */
-  function relocateMany(p, mapId, items, x, y, fromMapId) {
-    var boxes = items.map(function (it) { var s = sourceBox(p, it.kind, it.id, fromMapId); return s && { it: it, root: s.root }; }).filter(Boolean);
-    if (!boxes.length) throw new Error('Nothing to move: the items are not on that map');
-    var minX = Math.min.apply(null, boxes.map(function (b) { return b.root.x; })), minY = Math.min.apply(null, boxes.map(function (b) { return b.root.y; }));
-    return boxes.map(function (b) { return relocate(p, mapId, b.it.kind, b.it.id, x + b.root.x - minX, y + b.root.y - minY, fromMapId); });
+  function blockMessage(blockers) {
+    var f = blockers[0];
+    return "Can't move while patch corded (" + f.cable + ': ' + f.inside + ' -> ' + f.outside + (blockers.length > 1 ? ' and ' + (blockers.length - 1) + ' more' : '') + '): only fixed links may run between maps. Remove the patch cables first.';
   }
   /* free spot for a cluster arriving on a map: right of what is there */
   function arrivalSpot(p, mapId) {
@@ -640,6 +637,6 @@
     return m[1] + n;
   }
 
-  NM.builder = { containerAt: containerAt, placeNewAt: placeNewAt, copyClip: copyClip, pasteClipAt: pasteClipAt, copyName: copyName, nextName: nextName, applyFullWidth: applyFullWidth, applyFullWidthFor: applyFullWidthFor, minPlacementSize: minPlacementSize, normalizeSizes: normalizeSizes, addGhost: addGhost, relocate: relocate, relocateMany: relocateMany, patchedNeighbours: patchedNeighbours, arrivalSpot: arrivalSpot, setHeightFn: setHeightFn, stackedBelow: stackedBelow, followFold: followFold, alignToGrid: alignToGrid, fitMinimum: fitMinimum, resolveDrop: resolveDrop, settle: settle, findDropContainer: findDropContainer, dropSlot: dropSlot, restack: restack, captureChain: captureChain, restoreChain: restoreChain, applyExtension: applyExtension, refitObject: refitObject, placeItem: placeItem, addGroupPlaced: addGroupPlaced, addObjectPlaced: addObjectPlaced, buildDemoProject: buildDemoProject };
+  NM.builder = { containerAt: containerAt, placeNewAt: placeNewAt, copyClip: copyClip, pasteClipAt: pasteClipAt, copyName: copyName, nextName: nextName, applyFullWidth: applyFullWidth, applyFullWidthFor: applyFullWidthFor, minPlacementSize: minPlacementSize, normalizeSizes: normalizeSizes, addGhost: addGhost, relocate: relocate, patchBlockers: patchBlockers, blockMessage: blockMessage, arrivalSpot: arrivalSpot, setHeightFn: setHeightFn, stackedBelow: stackedBelow, followFold: followFold, alignToGrid: alignToGrid, fitMinimum: fitMinimum, resolveDrop: resolveDrop, settle: settle, findDropContainer: findDropContainer, dropSlot: dropSlot, restack: restack, captureChain: captureChain, restoreChain: restoreChain, applyExtension: applyExtension, refitObject: refitObject, placeItem: placeItem, addGroupPlaced: addGroupPlaced, addObjectPlaced: addObjectPlaced, buildDemoProject: buildDemoProject };
   if (typeof module !== 'undefined' && module.exports) module.exports = NM.builder;
 })(typeof window !== 'undefined' ? window : globalThis);

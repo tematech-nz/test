@@ -1311,31 +1311,40 @@ test('graph view: an edge spanning several columns is routed around the devices 
   const near = GV.edgePath(A, nodes.find(n => n.col === 1 && n.row === 2), 'lk8');
   assert.ok(!near.pts, 'neighbouring columns keep the smooth curve');
 });
-test('move to another map: the item, its contents and the equipment patched to it travel together; fixed links stay as labelled stubs', () => {
+test('move to another map: only without patch cables to anything outside it; fixed links stay as labelled stubs', () => {
   const p = M.createProject('mv'), m1 = p.maps[0].id;
   const m2 = M.uid('map'); p.maps.push({ id: m2, name: 'Room 2', location: '', viewport: { x: 0, y: 0, zoom: 1 } });
-  const rack = B.addObjectPlaced(p, m1, { type: 'rack', name: 'Rack A' }, 40, 40);
+  const grp = B.addGroupPlaced(p, m1, { name: 'Room 1' }, 20, 20);
+  const rack = B.addObjectPlaced(p, m1, { type: 'rack', name: 'Rack A', containerId: grp.id }, 60, 60);
   const sw = B.addObjectPlaced(p, m1, { type: 'switch', name: 'SW', portCount: 8, containerId: rack.id });
-  const pc = B.addObjectPlaced(p, m1, { type: 'generic', name: 'PC', portCount: 1 }, 700, 40);
-  const nvr = B.addObjectPlaced(p, m1, { type: 'generic', name: 'NVR', portCount: 1 }, 700, 200);
-  const stay = B.addObjectPlaced(p, m1, { type: 'patchpanel', name: 'Hall panel', portCount: 8, straight: true }, 700, 400);
   const pp = B.addObjectPlaced(p, m1, { type: 'patchpanel', name: 'Rack panel', portCount: 8, straight: true, containerId: rack.id });
-  M.addPatchCable(p, { aPortId: sw.ports[0].id, bPortId: pc.ports[0].id });
-  M.addPatchCable(p, { aPortId: sw.ports[1].id, bPortId: nvr.ports[0].id });
-  const rear = (o, n) => o.ports.find(x => x.side === 'rear' && x.label === String(n)).id;
-  M.addFixedLink(p, { aObjectId: pp.id, bObjectId: stay.id, wireCount: 1, pairs: [[rear(pp, 1), rear(stay, 1)]] });
-  const nb = B.patchedNeighbours(p, 'object', rack.id, m1);
-  assert.deepStrictEqual(nb.map(n => n.name).sort(), ['NVR', 'PC'], 'equipment patched to what is inside the rack; the fixed link is not followed');
+  const pc = B.addObjectPlaced(p, m1, { type: 'generic', name: 'PC', portCount: 1, containerId: grp.id }, 700, 60);
+  const hall = B.addObjectPlaced(p, m1, { type: 'patchpanel', name: 'Hall panel', portCount: 8, straight: true }, 900, 600);
+  const front = (o, n) => o.ports.find(x => x.side === 'front' && x.label === String(n)).id, rear = (o, n) => o.ports.find(x => x.side === 'rear' && x.label === String(n)).id;
+  const c1 = M.addPatchCable(p, { aPortId: sw.ports[0].id, bPortId: front(pp, 1) });   // inside the rack
+  const c2 = M.addPatchCable(p, { aPortId: sw.ports[1].id, bPortId: pc.ports[0].id }); // rack -> pc (both in the group)
+  M.addFixedLink(p, { aObjectId: pp.id, bObjectId: hall.id, wireCount: 1, pairs: [[rear(pp, 1), rear(hall, 1)]] }); // static link out of the group
+  // an element, or a rack, patch-corded to something outside it cannot move
+  assert.strictEqual(B.patchBlockers(p, 'object', pc.id).length, 1);
+  assert.strictEqual(B.patchBlockers(p, 'object', rack.id).length, 1, 'rack -> pc crosses its boundary');
+  assert.strictEqual(B.patchBlockers(p, 'object', sw.id).length, 2, 'a single element cabled to its neighbours cannot move');
+  assert.throws(() => B.relocate(p, m2, 'object', pc.id, 40, 40, m1), /Can't move while patch corded.*only fixed links/);
+  assert.ok(M.placementOf(p, m1, pc.id) && !M.placementOf(p, m2, pc.id), 'nothing moved');
+  // the whole group holds both ends of the cables (and the fixed link is allowed): it moves, with everything inside
+  assert.deepStrictEqual(B.patchBlockers(p, 'group', grp.id), []);
   const spot = B.arrivalSpot(p, m2);
-  B.relocateMany(p, m2, [{ kind: 'object', id: rack.id }, { kind: 'object', id: pc.id }], spot.x, spot.y, m1); // NVR stays behind
-  [rack, sw, pp, pc].forEach(o => { assert.ok(M.placementOf(p, m2, o.id) && !M.placementOf(p, m2, o.id).ghost && !M.placementOf(p, m1, o.id), o.name + ' moved'); });
-  assert.ok(M.placementOf(p, m1, nvr.id) && M.placementOf(p, m1, stay.id), 'the rest stays');
-  const a = M.placementOf(p, m2, rack.id), b = M.placementOf(p, m2, pc.id);
-  assert.ok(Math.abs((b.x - a.x) - 660) < 1 && Math.abs(b.y - a.y) < 1, 'cluster keeps its relative layout');
+  B.relocate(p, m2, 'group', grp.id, spot.x, spot.y, m1);
+  [grp, rack, sw, pp, pc].forEach(o => { const q = M.placementOf(p, m2, o.id); assert.ok(q && !q.ghost && !M.placementOf(p, m1, o.id), o.name + ' moved'); });
+  assert.ok(M.placementOf(p, m1, hall.id), 'the hall panel stays');
+  assert.strictEqual(p.patchCables.length, 2, 'cables are kept');
   const old = R.renderMap(p, m1, {}).content;
-  assert.ok(/FL-001 x1 -(&gt;|>) Rack panel \[Room 2\]/.test(old), 'old map keeps a fixed link label to the moved panel');
-  assert.ok(/-(&gt;|>)/.test(old) && old.indexOf('PC') > 0, 'and a label for the cable that now leaves the map');
-  assert.deepStrictEqual(M.mapsFor(p, 'object', pc.id), [m2]);
+  assert.ok(/FL-001 x1 -(&gt;|>) Rack panel \[Room 2\]/.test(old), 'the old map keeps a label for the fixed link');
+  // free it of its cable: now the single element can go
+  p.patchCables = p.patchCables.filter(c => c.id !== c1.id && c.id !== c2.id);
+  assert.deepStrictEqual(B.patchBlockers(p, 'object', pc.id), []);
+  const m3 = M.uid('map'); p.maps.push({ id: m3, name: 'Room 3', location: '', viewport: { x: 0, y: 0, zoom: 1 } });
+  B.relocate(p, m3, 'object', pc.id, 40, 40, m2);
+  assert.ok(M.placementOf(p, m3, pc.id) && !M.placementOf(p, m2, pc.id));
   assert.deepStrictEqual(overlapPairs(p), []);
 });
 test('live copies are marked: dashed blue outline and a LIVE COPY badge naming the map', () => {

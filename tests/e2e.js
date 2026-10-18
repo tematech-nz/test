@@ -242,6 +242,34 @@ const ok = (m) => console.log('  ok   ' + m);
     await page.click('#btnUndo');
   });
 
+  await step('move to another map: blocked while patch corded, allowed without cables (fixed links stay)', async () => {
+    const ids = await page.evaluate(() => {
+      const A = NetMap.app, B = NetMap.builder, M = NetMap.model, out = {};
+      A.commit('move setup', (p) => {
+        const mid = A.S.mapId;
+        const a = B.addObjectPlaced(p, mid, { type: 'switch', name: 'MV-SW', portCount: 4 }, 7000, 40), b = B.addObjectPlaced(p, mid, { type: 'generic', name: 'MV-PC', portCount: 1 }, 7000, 260);
+        out.cable = M.addPatchCable(p, { aPortId: a.ports[0].id, bPortId: b.ports[0].id }).id; out.a = a.id; out.b = b.id; out.from = mid;
+      });
+      return out;
+    });
+    await page.evaluate((i) => { NetMap.app.api.moveToMap('object', i.b); }, ids);
+    await page.waitForSelector('#dlg .dh');
+    const t1 = await page.innerText('#dlg');
+    assert.ok(/Can't move/.test(t1) && /patch corded/.test(t1) && /only static|only fixed/i.test(t1), t1.slice(0, 160));
+    await page.click('#dlg button[data-btn="x"]');
+    await page.evaluate((i) => NetMap.app.api.commit('remove cable', (p) => { p.patchCables = p.patchCables.filter((c) => c.id !== i.cable); }), ids);
+    await page.evaluate((i) => { NetMap.app.api.moveToMap('object', i.b); }, ids);
+    await page.waitForSelector('#dlg select[data-s="dest"]');
+    assert.ok(/Move MV-PC/.test(await page.innerText('#dlg .dh')));
+    await page.selectOption('#dlg select[data-s="dest"]', '__new');
+    await page.fill('#dlg input[data-s="name"]', 'MV room'); await page.dispatchEvent('#dlg input[data-s="name"]', 'change');
+    await page.click('#dlg button[data-btn="ok"]');
+    await page.waitForTimeout(200);
+    const r = await page.evaluate((i) => { const S = NetMap.app.S, q = S.p.placements.filter((x) => x.refId === i.b && !(S.p.maps.find((m) => m.id === x.mapId) || {}).auto).map((x) => S.p.maps.find((m) => m.id === x.mapId).name); return q; }, ids);
+    assert.deepStrictEqual(r, ['MV room']);
+    for (let i = 0; i < 3; i++) await page.click('#btnUndo');
+  });
+
   await step('hidden navigation stays hidden when clicking the map or changing mode', async () => {
     await page.click('#btnMenu');
     assert.ok(!(await page.isVisible('#left')));
