@@ -19,7 +19,7 @@
 
   function ensure(map) {
     var f = map.floor = map.floor || {};
-    f.points = f.points || []; f.lines = f.lines || []; f.links = f.links || [];
+    f.points = f.points || []; f.lines = f.lines || []; f.links = f.links || []; f.labels = f.labels || [];
     return f;
   }
   function pt(f, id) { for (var i = 0; i < f.points.length; i++) if (f.points[i].id === id) return f.points[i]; return null; }
@@ -229,7 +229,7 @@
 
   /* ---------- links: to-scale symbols of real items ---------- */
   function footprintFor(kind, type) {
-    if (kind === 'group') return { w: 300, d: 300 };
+    if (kind === 'group') return { w: 200, d: 200 };
     switch (type) {
       case 'rack': return { w: 60, d: 100 };
       case 'socket': return { w: 12, d: 12 };
@@ -239,6 +239,37 @@
       case 'internet': return { w: 40, d: 40 };
       default: return { w: 40, d: 40 };
     }
+  }
+  /* predefined sizes (cm) offered for a link, by what it stands for */
+  function sizePresets(kind, type) {
+    if (kind === 'group') return [[200, 200], [300, 200], [300, 300], [400, 300], [500, 400], [600, 400], [800, 500], [1000, 600]];
+    if (type === 'rack') return [[60, 100], [60, 120], [80, 100], [80, 120]];
+    if (type === 'socket') return [[10, 10], [12, 12], [20, 10]];
+    return [[30, 30], [40, 40], [60, 40], [80, 60], [120, 60]];
+  }
+  /* text labels: a scalable box with a name for a room. size is in pt; one pt is PT_CM of plan, so text scales with the plan like the walls do */
+  var PT_CM = 2.5, LABEL_SIZES = [8, 10, 12, 14, 18, 24, 36, 48, 72];
+  function addLabel(f, spec) {
+    var w = Math.round(spec.w || 200), d = Math.round(spec.d || 60);
+    if (!(w >= 10 && d >= 10)) throw new Error('A label box must be at least 10 x 10 cm');
+    var lb = { id: newId('flb'), x: Math.round(spec.x || 0), y: Math.round(spec.y || 0), w: w, d: d, rot: ((Math.round(spec.rot || 0) % 360) + 360) % 360,
+      text: String(spec.text == null ? 'Label' : spec.text), size: spec.size > 0 ? Math.round(spec.size) : 14, color: spec.color || '#1b2a38' };
+    if (spec.box) lb.box = true;
+    f.labels.push(lb);
+    return lb;
+  }
+  function removeLabel(f, id) { f.labels = f.labels.filter(function (l) { return l.id !== id; }); }
+  function labelById(f, id) { for (var i = 0; i < f.labels.length; i++) if (f.labels[i].id === id) return f.labels[i]; return null; }
+  /* corner i (0 top-left, 1 top-right, 2 bottom-right, 3 bottom-left of the unrotated box) dragged to the world point (wx, wy); the opposite corner stays */
+  function resizeBox(b, corner, wx, wy, minCm) {
+    var rad = b.rot * Math.PI / 180, c = Math.cos(rad), s = Math.sin(rad), sg = [[-1, -1], [1, -1], [1, 1], [-1, 1]][corner], op = [-sg[0], -sg[1]];
+    var ax = b.x + (op[0] * b.w / 2) * c - (op[1] * b.d / 2) * s, ay = b.y + (op[0] * b.w / 2) * s + (op[1] * b.d / 2) * c; // anchor (world)
+    var dx = wx - ax, dy = wy - ay, lx = dx * c + dy * s, ly = -dx * s + dy * c; // pointer relative to the anchor, in the box's own axes
+    var w = Math.max(minCm || 10, Math.abs(lx)), d = Math.max(minCm || 10, Math.abs(ly));
+    var sx = lx >= 0 ? 1 : -1, sy = ly >= 0 ? 1 : -1; // keep growing towards the pointer even past the anchor
+    var mx = sx * w / 2, my = sy * d / 2;
+    b.w = Math.round(w); b.d = Math.round(d);
+    b.x = Math.round(ax + mx * c - my * s); b.y = Math.round(ay + mx * s + my * c);
   }
   function linkOf(f, refId) { for (var i = 0; i < f.links.length; i++) if (f.links[i].refId === refId) return f.links[i]; return null; }
   function addLink(f, spec) {
@@ -276,6 +307,7 @@
       if (s.d <= tol && (!best || s.d < best.d)) best = { type: 'line', id: l.id, d: s.d };
     });
     if (best) return { type: 'line', id: best.id };
+    for (i = f.labels.length - 1; i >= 0; i--) if (inLink(f.labels[i], x, y)) return { type: 'label', id: f.labels[i].id };
     for (i = f.links.length - 1; i >= 0; i--) if (inLink(f.links[i], x, y)) return { type: 'link', id: f.links[i].id }; // a group's area sits under walls and equipment
     return null;
   }
@@ -294,7 +326,7 @@
   function bounds(f) {
     var x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
     f.points.forEach(function (p) { x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y); });
-    f.links.forEach(function (l) { linkCorners(l).forEach(function (c) { x0 = Math.min(x0, c[0]); y0 = Math.min(y0, c[1]); x1 = Math.max(x1, c[0]); y1 = Math.max(y1, c[1]); }); });
+    f.links.concat(f.labels || []).forEach(function (l) { linkCorners(l).forEach(function (c) { x0 = Math.min(x0, c[0]); y0 = Math.min(y0, c[1]); x1 = Math.max(x1, c[0]); y1 = Math.max(y1, c[1]); }); });
     return x0 === Infinity ? null : { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
   }
 
@@ -302,7 +334,7 @@
     KINDS: KINDS, EPS: EPS, LOCKED: LOCKED, ensure: ensure, pt: pt, lineById: lineById, linkById: linkById, linkOf: linkOf, degree: degree,
     addPoint: addPoint, addLine: addLine, addRect: addRect, deleteLine: deleteLine, setLineKind: setLineKind, lineLocked: lineLocked,
     setLineLength: setLineLength, setLineAngle: setLineAngle, setLineAxis: setLineAxis, movePoint: movePoint, settleAfterMove: settleAfterMove, mergePoints: mergePoints, lineLength: lineLength, lineAngle: lineAngle,
-    footprintFor: footprintFor, addLink: addLink, removeLink: removeLink, linkCorners: linkCorners, inLink: inLink,
+    footprintFor: footprintFor, sizePresets: sizePresets, PT_CM: PT_CM, LABEL_SIZES: LABEL_SIZES, addLabel: addLabel, removeLabel: removeLabel, labelById: labelById, resizeBox: resizeBox, addLink: addLink, removeLink: removeLink, linkCorners: linkCorners, inLink: inLink,
     hitTest: hitTest, fmtLen: fmtLen, niceScale: niceScale, bounds: bounds, validKind: validKind, toSegment: toSegment, prunePoints: prunePoints
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = NM.floor;

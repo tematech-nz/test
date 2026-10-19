@@ -1676,14 +1676,68 @@ const ok = (m) => console.log('  ok   ' + m);
     assert.strictEqual(await page.evaluate(() => NetMap.app.S.p.placements.filter((q) => q.mapId === NetMap.app.S.mapId && !q.ghost).length), total, 'one undo restores them');
     // floor plan: Ctrl+A then Delete, no dialog, one undo
     await page.selectOption('#mapSelect', ids.floor); await page.waitForTimeout(200);
-    const fc = () => page.evaluate(() => { const f = NetMap.floor.ensure(NetMap.app.S.p.maps.find((m) => m.id === NetMap.app.S.mapId)); return f.lines.length + f.links.length; });
+    const fc = () => page.evaluate(() => { const f = NetMap.floor.ensure(NetMap.app.S.p.maps.find((m) => m.id === NetMap.app.S.mapId)); return f.lines.length + f.links.length + f.labels.length; });
     const f0 = await fc(); assert.ok(f0 > 5);
     await page.keyboard.press('Control+a');
-    assert.strictEqual(await page.evaluate(() => NetMap.app.S.multi.length), f0, 'all lines and links selected');
+    assert.strictEqual(await page.evaluate(() => NetMap.app.S.multi.length), f0, 'all lines, links and labels selected');
     await page.keyboard.press('Delete'); await page.waitForTimeout(100);
     assert.strictEqual(await fc(), 0);
     await page.click('#btnUndo'); await page.waitForTimeout(100);
     assert.strictEqual(await fc(), f0, 'undo brings the plan back');
+    await page.evaluate(() => NetMap.app.api.loadProject(NetMap.builder.buildDemoProject()));
+    await page.waitForSelector('#vp [data-kind="object"]');
+  });
+
+  await step('floor labels and sizes: place a label, edit text/size/colour, resize and rotate by handles, size presets for a group link', async () => {
+    await page.evaluate(() => NetMap.app.api.loadProject(NetMap.builder.buildShowcaseProject()));
+    const ids = await page.evaluate(() => ({ floor: NetMap.model.floorMaps(NetMap.app.S.p)[1].id, grp: NetMap.app.S.p.groups.find((g) => g.name === 'Office').id }));
+    if (!(await page.evaluate(() => NetMap.app.S.mode === 'edit'))) await page.click('#btnMode');
+    await page.selectOption('#mapSelect', ids.floor); await page.waitForTimeout(200);
+    await page.evaluate(() => NetMap.app.api.fitMap()); await page.waitForTimeout(150);
+    const geo = () => page.evaluate(() => { const m = NetMap.app.S.p.maps.find((x) => x.id === NetMap.app.S.mapId), v = m.viewport, r = document.getElementById('canvas').getBoundingClientRect(); return { x: r.left + v.x, y: r.top + v.y, z: v.zoom }; });
+    const scr = (g, cm) => [g.x + cm[0] * g.z, g.y + cm[1] * g.z];
+    const labels = () => page.evaluate(() => NetMap.floor.ensure(NetMap.app.S.p.maps.find((m) => m.id === NetMap.app.S.mapId)).labels.map((l) => ({ id: l.id, x: l.x, y: l.y, w: l.w, d: l.d, rot: l.rot, text: l.text, size: l.size, color: l.color })));
+    const n0 = (await labels()).length;
+    // place with the Label tool (T)
+    await page.keyboard.press('t');
+    assert.strictEqual(await page.evaluate(() => NetMap.app.S.floor.tool), 'label');
+    let g = await geo(); let [x, y] = scr(g, [200, 540]); await page.mouse.click(x, y);
+    let ls = await labels(); assert.strictEqual(ls.length, n0 + 1, 'label added');
+    const lb = ls[ls.length - 1];
+    assert.strictEqual(await page.evaluate(() => NetMap.app.S.floor.tool), 'select', 'back to Select after placing');
+    // text, size, colour in the details panel
+    await page.fill('#detailsPane [data-ff="ltext"]', 'Hall'); await page.press('#detailsPane [data-ff="ltext"]', 'Tab');
+    await page.selectOption('#detailsPane [data-ff="lsize"]', '36');
+    await page.evaluate(() => { const c = document.querySelector('#detailsPane [data-ff="lcolor"]'); c.value = '#ff0000'; c.dispatchEvent(new Event('change', { bubbles: true })); });
+    let cur = (await labels()).find((l) => l.id === lb.id);
+    assert.deepStrictEqual([cur.text, cur.size, cur.color], ['Hall', 36, '#ff0000']);
+    assert.ok(await page.locator('#vp text', { hasText: 'Hall' }).count() === 1, 'drawn on the plan');
+    // resize: drag the bottom-right corner outwards (box is unrotated)
+    g = await geo();
+    const corner = [cur.x + cur.w / 2, cur.y + cur.d / 2];
+    [x, y] = scr(g, corner); await page.mouse.move(x, y); await page.mouse.down(); await page.mouse.move(x + 60 * g.z, y + 30 * g.z, { steps: 5 }); await page.mouse.up();
+    let after = (await labels()).find((l) => l.id === lb.id);
+    assert.ok(after.w > cur.w && after.d > cur.d, 'box grew: ' + JSON.stringify([cur.w, cur.d, after.w, after.d]));
+    // rotate: drag the round handle sideways -> about 90 degrees
+    g = await geo();
+    const hy = after.y - after.d / 2 - 28 / g.z; [x, y] = scr(g, [after.x, hy]);
+    const [cx, cy] = scr(g, [after.x, after.y]);
+    await page.mouse.move(x, y); await page.mouse.down(); await page.mouse.move(cx + 120, cy, { steps: 6 }); await page.mouse.up();
+    after = (await labels()).find((l) => l.id === lb.id);
+    assert.ok(Math.abs(after.rot - 90) <= 2, 'rotated to about 90: ' + after.rot);
+    // rotation field also works
+    await page.fill('#detailsPane [data-ff="lrot"]', '45'); await page.press('#detailsPane [data-ff="lrot"]', 'Tab');
+    assert.strictEqual((await labels()).find((l) => l.id === lb.id).rot, 45);
+    // undo steps each bring the previous state back
+    await page.click('#btnUndo'); assert.strictEqual((await labels()).find((l) => l.id === lb.id).rot, 90);
+    // Delete removes it
+    await page.keyboard.press('Delete'); assert.strictEqual((await labels()).length, n0);
+    // a group link: predefined size presets
+    await page.evaluate((gid) => { const f = NetMap.floor.ensure(NetMap.app.S.p.maps.find((m) => m.id === NetMap.app.S.mapId)); NetMap.app.api.select({ kind: 'flink', id: f.links.find((l) => l.refId === gid).id }); }, ids.grp);
+    await page.waitForSelector('#detailsPane select[data-ff="lpreset"]');
+    await page.selectOption('#detailsPane select[data-ff="lpreset"]', '300x200');
+    const gl = await page.evaluate((gid) => { const f = NetMap.floor.ensure(NetMap.app.S.p.maps.find((m) => m.id === NetMap.app.S.mapId)); const l = f.links.find((q) => q.refId === gid); return [l.w, l.d]; }, ids.grp);
+    assert.deepStrictEqual(gl, [300, 200]);
     await page.evaluate(() => NetMap.app.api.loadProject(NetMap.builder.buildDemoProject()));
     await page.waitForSelector('#vp [data-kind="object"]');
   });

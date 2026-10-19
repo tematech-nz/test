@@ -144,7 +144,7 @@
     if (!S.sel) return true;
     const idx = M.buildIndex(S.p), k = S.sel.kind, id = S.sel.id;
     if (k === 'pgroup') return !!M.findPortGroup(S.p, id);
-    if (k === 'fline' || k === 'fpoint' || k === 'flink') { const f = isFloor() ? floorOf() : null; return !!f && !!({ fline: FL.lineById(f, id), fpoint: FL.pt(f, id), flink: FL.linkById(f, id) }[k]); }
+    if (k === 'fline' || k === 'fpoint' || k === 'flink' || k === 'flabel') { const f = isFloor() ? floorOf() : null; return !!f && !!({ fline: FL.lineById(f, id), fpoint: FL.pt(f, id), flink: FL.linkById(f, id), flabel: FL.labelById(f, id) }[k]); }
     const t = { group: idx.groups, object: idx.objects, port: idx.ports, cable: idx.cables, link: idx.links, wire: idx.wires }[k];
     return !!(t && t[id]);
   }
@@ -239,11 +239,11 @@
 
   /* ---------------------------------------------------------------- selection and tools */
   /* ---- multiple selection (Ctrl+click toggles, Ctrl+A selects everything on this map): equipment maps and floor plans ---- */
-  const multiKinds = { object: 1, group: 1, fline: 1, flink: 1 };
+  const multiKinds = { object: 1, group: 1, fline: 1, flink: 1, flabel: 1 };
   function multiAlive(r) {
     if (r.kind === 'object' || r.kind === 'group') return !!M.findContainer(S.p, r.id) && !!M.placementOf(S.p, S.mapId, r.id);
     const f = isFloor() ? floorOf() : null;
-    return !!f && (r.kind === 'fline' ? !!FL.lineById(f, r.id) : !!FL.linkById(f, r.id));
+    return !!f && (r.kind === 'fline' ? !!FL.lineById(f, r.id) : (r.kind === 'flabel' ? !!FL.labelById(f, r.id) : !!FL.linkById(f, r.id)));
   }
   const validMulti = () => S.multi.filter(multiAlive);
   function multiMap() { const out = {}; if (S.multi.length > 1) validMulti().forEach((r) => { out[r.kind + ':' + r.id] = true; }); return out; }
@@ -258,7 +258,7 @@
   function selectAll() {
     if (!isEdit() || S.tool || onAll()) return;
     let list = [];
-    if (isFloor()) { const f = floorOf(); list = f.lines.map((l) => ({ kind: 'fline', id: l.id })).concat(f.links.map((l) => ({ kind: 'flink', id: l.id }))); }
+    if (isFloor()) { const f = floorOf(); list = f.lines.map((l) => ({ kind: 'fline', id: l.id })).concat(f.links.map((l) => ({ kind: 'flink', id: l.id })), f.labels.map((l) => ({ kind: 'flabel', id: l.id }))); }
     else S.p.placements.forEach((q) => { if (q.mapId === S.mapId && !q.ghost) { const c = M.findContainer(S.p, q.refId); if (c) list.push({ kind: c.kind, id: q.refId }); } });
     S.multi = list.length > 1 ? list : []; S.sel = list.length ? list[list.length - 1] : null; S.selGhost = false;
     renderAll(); if (list.length) { showTab('details'); openRight(); toast(list.length + ' selected - Delete removes them, Esc clears'); }
@@ -267,7 +267,7 @@
   function multiDetails() {
     const list = validMulti(), count = {};
     list.forEach((r) => { count[r.kind] = (count[r.kind] || 0) + 1; });
-    const names = { object: 'equipment', group: 'group(s)', fline: 'line(s)', flink: 'link(s)' };
+    const names = { object: 'equipment', group: 'group(s)', fline: 'line(s)', flink: 'link(s)', flabel: 'label(s)' };
     return '<h3>' + list.length + ' selected</h3><div class="sub">' + Object.keys(count).map((k) => count[k] + ' ' + names[k]).join(', ') + '</div>' +
       '<div class="sub">Ctrl+click adds or removes one, Ctrl+A selects everything on this map, Esc clears.</div>' +
       '<div class="btn-row">' + btn('deleteSel', 'Delete selected...', '', 'danger') + btn('clearMulti', 'Clear selection') + '</div>';
@@ -276,7 +276,7 @@
     const list = validMulti(); if (list.length < 2 || !isEdit()) return;
     if (isFloor()) {
       S.sel = null; S.multi = [];
-      floorEdit('Delete ' + list.length + ' floor plan items', (f) => { list.forEach((r) => { if (r.kind === 'fline') FL.deleteLine(f, r.id); else FL.removeLink(f, r.id); }); });
+      floorEdit('Delete ' + list.length + ' floor plan items', (f) => { list.forEach((r) => { if (r.kind === 'fline') FL.deleteLine(f, r.id); else if (r.kind === 'flabel') FL.removeLabel(f, r.id); else FL.removeLink(f, r.id); }); });
       renderAll(); return;
     }
     const here = list.filter((r) => M.mapsFor(S.p, r.kind, r.id).length > 1);
@@ -569,7 +569,7 @@
         let dx = pt.x - d.start.x, dy = pt.y - d.start.y;
         if (Math.abs(dx) + Math.abs(dy) < 2 && !d.moved) return;
         d.moved = true;
-        if (d.kind === 'fpoint' || d.kind === 'flink' || d.kind === 'fbg') { floorDragMove(d, pt); return; }
+        if (/^(fpoint|flink|flabel|fresize|frotate|fbg)$/.test(d.kind)) { floorDragMove(d, pt); return; }
         if (d.kind === 'label') { M.setLinkLabelOffset(S.p, d.linkId, d.mapId, d.ox + dx, d.oy + dy); scheduleRender(); return; }
         if (d.kind === 'move') {
           const p0 = d.items[0], fc = M.findContainer(S.p, p0.q.refId);
@@ -620,11 +620,11 @@
       if (c0) toggleMulti(c0.kind, q0.refId);
       return;
     }
-    if (!d.moved) { if (d.kind === 'label') select({ kind: 'link', id: d.linkId }); else if (d.kind === 'fpoint') select({ kind: 'fpoint', id: d.id }); else if (d.kind === 'flink') select({ kind: 'flink', id: d.id }); return; }
-    S.undo.push({ label: d.kind === 'label' ? 'Move label' : (d.kind === 'fpoint' || d.kind === 'flink' ? 'Move on floor plan' : (d.kind === 'move' ? 'Move' : 'Resize')), snap: d.snap }); if (S.undo.length > 100) S.undo.shift(); S.redo = [];
+    if (!d.moved) { if (d.kind === 'label') select({ kind: 'link', id: d.linkId }); else if (d.kind === 'fpoint') select({ kind: 'fpoint', id: d.id }); else if (d.kind === 'flink') select({ kind: 'flink', id: d.id }); else if (d.kind === 'flabel') select({ kind: 'flabel', id: d.id }); return; }
+    S.undo.push({ label: d.kind === 'label' ? 'Move label' : (/^(fpoint|flink|flabel|fresize|frotate)$/.test(d.kind) ? (d.kind === 'fresize' ? 'Resize on floor plan' : d.kind === 'frotate' ? 'Rotate on floor plan' : 'Move on floor plan') : (d.kind === 'move' ? 'Move' : 'Resize')), snap: d.snap }); if (S.undo.length > 100) S.undo.shift(); S.redo = [];
     const gq = S.p.placements.find((x) => x.id === d.plId);
     if (d.kind === 'label') { /* only the label moved */ }
-    else if (d.kind === 'fpoint' || d.kind === 'flink') floorDragEnd(d);
+    else if (/^(fpoint|flink|flabel|fresize|frotate)$/.test(d.kind)) floorDragEnd(d);
     else if (gq && gq.ghost) { /* a ghost only has a position: no containers, racks or overlaps to sort out */ }
     else if (d.kind === 'move') {
       reassignContainer(d.plId, d);
@@ -708,7 +708,7 @@
     const th = $('toolHint');
     if (floorEditing() && (FS.place || FS.draw || FS.rect || FS.tool !== 'select')) {
       th.hidden = false;
-      th.textContent = FS.tool === 'calib' ? (FS.calib ? 'Click the other end of the known length (Esc cancels)' : 'Scale to size line: click one end of something on the image with a known length (zoom in for accuracy)') : FS.tool === 'bgmove' ? 'Drag to move the tracing image' : FS.place ? 'Click to place ' + FS.place.name + ' - R rotates it - Esc cancels (Ctrl+click keeps placing)' :
+      th.textContent = FS.tool === 'label' ? 'Label: click where the text label goes (Esc cancels)' : FS.tool === 'calib' ? (FS.calib ? 'Click the other end of the known length (Esc cancels)' : 'Scale to size line: click one end of something on the image with a known length (zoom in for accuracy)') : FS.tool === 'bgmove' ? 'Drag to move the tracing image' : FS.place ? 'Click to place ' + FS.place.name + ' - R rotates it - Esc cancels (Ctrl+click keeps placing)' :
         FS.tool === 'line' ? (FS.draw ? 'Line: click the next point - or type its length in metres and press Enter - lines click into 30/45 degree angles (Shift forces, hold Ctrl to bypass) - Esc/Enter finishes' : 'Line: click the first point (it snaps to points and lines)') :
         FS.tool === 'rect' ? (FS.rect ? 'Rectangle: click the opposite corner (Esc cancels)' : 'Rectangle: click the first corner') : '';
       th.hidden = !th.textContent;
@@ -870,7 +870,7 @@
       pane.innerHTML = '<h3>Nothing selected</h3><div class="sub">Tap an object, port, cable or fixed link on the map to see details. Use the search box to find a port, cable or wire by label or ID.</div>' +
         '<div class="btn-row">' + btn('help', 'Help') + '</div>';
     } else {
-      const d = { group: detGroup, object: detObject, port: detPort, cable: detCable, link: detLink, wire: detWire, pgroup: detPGroup, fline: detFloorLine, fpoint: detFloorPoint, flink: detFloorLink }[S.sel.kind];
+      const d = { group: detGroup, object: detObject, port: detPort, cable: detCable, link: detLink, wire: detWire, pgroup: detPGroup, fline: detFloorLine, fpoint: detFloorPoint, flink: detFloorLink, flabel: detFloorLabel }[S.sel.kind];
       forceView = !!S.selGhost;
       pane.innerHTML = (S.selGhost && (S.sel.kind === 'object' || S.sel.kind === 'group') ? '<div class="msg-box">Live copy of an item on another map: shown read-only. <a class="lnk" data-act="openOriginal" data-kind="' + S.sel.kind + '" data-id="' + esc(S.sel.id) + '">Open the original to edit it</a> (or double-click the copy).</div>' : '') + (!S.selGhost && onAll() && (S.sel.kind === 'object' || S.sel.kind === 'group') ? '<div class="msg-box">Overview copy: shown read-only here. Edit it on its own map: ' + mapsLine(S.sel.kind, S.sel.id) + '</div>' : '') + d(S.sel.id);
     }
@@ -1400,7 +1400,7 @@
   const FL = NM.floor;
   const isFloor = () => M.isFloorMap(curMap());
   const floorOf = () => FL.ensure(curMap());
-  const FS = S.floor = { tool: 'select', kind: 'wall', snap: 10, labels: true, draw: null, rect: null, place: null, hover: null, typed: '', lastZoom: null, calib: null };
+  const FS = S.floor = { tool: 'select', kind: 'wall', snap: 10, labels: true, draw: null, rect: null, place: null, hover: null, typed: '', lastZoom: null, calib: null, labelSize: 14, labelColor: '#1b2a38' };
   /* tracing image per floor map: lives only in this page (never in the project, a backup or an export); gone on reload.
      x,y = top-left corner in cm, scale = cm per image pixel */
   const BG = {};
@@ -1540,15 +1540,42 @@
       return true;
     }
     if (!floorEditing() || FS.tool !== 'select' || FS.place) return false;
-    const f = floorOf(), pt = toMap(e.clientX, e.clientY), hit = FL.hitTest(f, pt.x, pt.y, floorTolerance());
-    if (!hit || (hit.type !== 'point' && hit.type !== 'link')) return false;
+    const f = floorOf(), pt = toMap(e.clientX, e.clientY);
+    // handles of the selected link / label: a corner resizes the box, the round handle above it rotates it
+    const sb = S.sel && (S.sel.kind === 'flink' || S.sel.kind === 'flabel') && !S.multi.length ? (S.sel.kind === 'flink' ? FL.linkById(f, S.sel.id) : FL.labelById(f, S.sel.id)) : null;
+    if (sb) {
+      const tol = floorTolerance() * 0.9, base0 = { start: pt, snap: JSON.stringify(S.p), moved: false, items: [], mapId: curMap().id, id: sb.id, sel: S.sel.kind };
+      const rh = floorRotHandle(sb);
+      if (Math.hypot(pt.x - rh.x, pt.y - rh.y) <= tol * 1.2) { S.drag = Object.assign(base0, { kind: 'frotate' }); return true; }
+      const ci = FL.linkCorners(sb).findIndex((c) => Math.hypot(pt.x - c[0], pt.y - c[1]) <= tol);
+      if (ci >= 0) { S.drag = Object.assign(base0, { kind: 'fresize', corner: ci }); return true; }
+    }
+    const hit = FL.hitTest(f, pt.x, pt.y, floorTolerance());
+    if (!hit || (hit.type !== 'point' && hit.type !== 'link' && hit.type !== 'label')) return false;
     const base = { start: pt, snap: JSON.stringify(S.p), moved: false, items: [], mapId: curMap().id };
     if (hit.type === 'point') { const q = FL.pt(f, hit.id); S.drag = Object.assign(base, { kind: 'fpoint', id: hit.id, ox: q.x, oy: q.y }); }
+    else if (hit.type === 'label') { const lb = FL.labelById(f, hit.id); S.drag = Object.assign(base, { kind: 'flabel', id: hit.id, ox: lb.x, oy: lb.y }); }
     else { const lk = FL.linkById(f, hit.id); S.drag = Object.assign(base, { kind: 'flink', id: hit.id, ox: lk.x, oy: lk.y }); }
     return true;
   }
+  /* where the round rotate handle sits: above the box's top edge, in the box's own direction */
+  function floorRotHandle(b) {
+    const rad = b.rot * Math.PI / 180, off = b.d / 2 + 28 / vpState().zoom;
+    return { x: b.x + Math.sin(rad) * off, y: b.y - Math.cos(rad) * off };
+  }
   function floorDragMove(d, pt) {
     const f = floorOf(), dx = pt.x - d.start.x, dy = pt.y - d.start.y;
+    if (d.kind === 'fresize' || d.kind === 'frotate') {
+      const b = d.sel === 'flink' ? FL.linkById(f, d.id) : FL.labelById(f, d.id); if (!b) return;
+      if (d.kind === 'fresize') { const g = FS.snap || 1; FL.resizeBox(b, d.corner, Math.round(pt.x / g) * g, Math.round(pt.y / g) * g, d.sel === 'flabel' ? 10 : 5); }
+      else {
+        let deg = Math.atan2(pt.y - b.y, pt.x - b.x) * 180 / Math.PI + 90; deg = ((deg % 360) + 360) % 360;
+        const near = Math.round(deg / 15) * 15; // soft snap to every 15 degrees
+        b.rot = Math.round(Math.abs(deg - near) <= 4 ? near : deg) % 360;
+      }
+      scheduleRender(); return;
+    }
+    if (d.kind === 'flabel') { const lb = FL.labelById(f, d.id), g = FS.snap || 1; if (lb) { lb.x = Math.round((d.ox + dx) / g) * g; lb.y = Math.round((d.oy + dy) / g) * g; } scheduleRender(); return; }
     if (d.kind === 'fbg') { const bg = BG[d.mapId]; if (bg) { bg.x = d.ox + dx; bg.y = d.oy + dy; scheduleRender(); } return; }
     if (d.kind === 'fpoint') {
       const sp = floorSnapPoint({ x: d.ox + dx, y: d.oy + dy }, { exclude: d.id });
@@ -1564,7 +1591,7 @@
   }
   function floorSelect(hit) {
     if (!hit) { S.sel = null; S.multi = []; closeRight(); renderAll(); return; }
-    select({ kind: hit.type === 'point' ? 'fpoint' : (hit.type === 'link' ? 'flink' : 'fline'), id: hit.id });
+    select({ kind: hit.type === 'point' ? 'fpoint' : (hit.type === 'link' ? 'flink' : (hit.type === 'label' ? 'flabel' : 'fline')), id: hit.id });
   }
   /* a click on the floor plan (also what a finger tap does) */
   function floorTap(ev) {
@@ -1573,7 +1600,8 @@
     if (!FS.place && (FS.tool === 'select' || !floorEditing())) {
       const h2 = FL.hitTest(f, pt.x, pt.y, floorTolerance()), now = Date.now(), lt = FS.lastTap;
       if (h2 && h2.type === 'link' && lt && lt.id === h2.id && now - lt.t < 450) { FS.lastTap = null; const lk = FL.linkById(f, h2.id); if (lk) { floorOpenItem(lk.refId); return; } }
-      FS.lastTap = h2 && h2.type === 'link' ? { id: h2.id, t: now } : null;
+      if (h2 && h2.type === 'label' && floorEditing() && lt && lt.id === h2.id && now - lt.t < 450) { FS.lastTap = null; floorEditLabelText(h2.id); return; }
+      FS.lastTap = h2 && (h2.type === 'link' || h2.type === 'label') ? { id: h2.id, t: now } : null;
     }
     if (!floorEditing()) { // view mode: links and lines can be looked at
       const hit = FL.hitTest(f, pt.x, pt.y, floorTolerance());
@@ -1583,6 +1611,11 @@
       const sp = floorSnapPoint(pt, {}), pl = FS.place;
       const lk = floorEdit('Add link', (ff) => FL.addLink(ff, { kind: pl.kind, refId: pl.refId, x: sp.x, y: sp.y, rot: pl.rot, w: pl.w, d: pl.d }));
       if (lk && lk !== true) { if (!(ev.ctrlKey || ev.metaKey)) { FS.place = null; FS.hover = null; } S.sel = { kind: 'flink', id: lk.id }; showTab('details'); renderAll(); }
+      return;
+    }
+    if (FS.tool === 'label') {
+      const sp = floorSnapPoint(pt, {}), lb = floorEdit('Add label', (ff) => FL.addLabel(ff, { x: sp.x, y: sp.y, w: 240, d: 80, text: 'Room', size: FS.labelSize, color: FS.labelColor }));
+      if (lb && lb !== true) { FS.tool = 'select'; S.sel = { kind: 'flabel', id: lb.id }; showTab('details'); openRight(); renderAll(); const ta = document.querySelector('#detailsPane [data-ff="ltext"]'); if (ta) { ta.focus(); ta.select(); } }
       return;
     }
     if (FS.tool === 'calib') {
@@ -1607,8 +1640,14 @@
       renderAll(); return;
     }
     const hit0 = FL.hitTest(f, pt.x, pt.y, floorTolerance());
-    if (hit0 && (hit0.type === 'line' || hit0.type === 'link') && (ev.ctrlKey || ev.metaKey)) { toggleMulti(hit0.type === 'line' ? 'fline' : 'flink', hit0.id); return; }
+    if (hit0 && (hit0.type === 'line' || hit0.type === 'link' || hit0.type === 'label') && (ev.ctrlKey || ev.metaKey)) { toggleMulti(hit0.type === 'line' ? 'fline' : (hit0.type === 'label' ? 'flabel' : 'flink'), hit0.id); return; }
     floorSelect(hit0);
+  }
+  /* double-click a label: edit its text in a dialog */
+  async function floorEditLabelText(id) {
+    const lb = FL.labelById(floorOf(), id); if (!lb) return;
+    const r = await formDlg('Label text', [{ k: 'text', label: 'Text (Enter in the box for a new line)', type: 'area', v: lb.text }], 'OK');
+    if (r) { floorEdit('Edit label', (f) => { FL.labelById(f, id).text = String(r.text); }); renderAll(); }
   }
   /* tracing image: pick or drop a picture of the room, size it by drawing a line of known length on it */
   function floorLoadImage(file) {
@@ -1667,6 +1706,7 @@
     if (k === 'Delete' || (k === 'Backspace' && !FS.draw && S.sel)) { floorDeleteSelection(); return true; }
     if (k === 'v' || k === 'V') { floorSetTool('select'); return true; }
     if (k === 'l' || k === 'L') { floorSetTool('line'); return true; }
+    if (k === 't' || k === 'T') { floorSetTool('label'); return true; }
     if (k === 'r' || k === 'R') { floorSetTool('rect'); return true; }
     if (k === 'w' || k === 'W') return true; // (W is the patch cable tool on equipment maps)
     return false;
@@ -1676,6 +1716,7 @@
     const sel = S.sel; if (!sel || !floorEditing()) return;
     if (sel.kind === 'fline') { S.sel = null; floorEdit('Delete line', (f) => FL.deleteLine(f, sel.id)); }
     else if (sel.kind === 'flink') { S.sel = null; floorEdit('Remove link', (f) => FL.removeLink(f, sel.id)); }
+    else if (sel.kind === 'flabel') { S.sel = null; floorEdit('Remove label', (f) => FL.removeLabel(f, sel.id)); }
     else if (sel.kind === 'fpoint') toast('Delete the lines that meet at a point to remove it', true);
     renderAll();
   }
@@ -1744,9 +1785,14 @@
       angle: (f) => FL.setLineAngle(f, id, parseFloat(String(v).replace(',', '.'))),
       px: (f) => { const q = FL.pt(f, id); FL.movePoint(f, id, parseFloat(v), q.y); },
       py: (f) => { const q = FL.pt(f, id); FL.movePoint(f, id, q.x, parseFloat(v)); },
-      lw: (f) => { const l = FL.linkById(f, id); if (!(parseFloat(v) >= 1)) throw new Error('The footprint must be at least 1 cm'); l.w = Math.round(parseFloat(v)); },
-      ld: (f) => { const l = FL.linkById(f, id); if (!(parseFloat(v) >= 1)) throw new Error('The footprint must be at least 1 cm'); l.d = Math.round(parseFloat(v)); },
-      lrot: (f) => { const l = FL.linkById(f, id); const r = parseFloat(String(v).replace(',', '.')); if (!isFinite(r)) throw new Error('Rotation must be a number'); l.rot = ((Math.round(r) % 360) + 360) % 360; }
+      lw: (f) => { const l = FL.linkById(f, id) || FL.labelById(f, id); if (!(parseFloat(v) >= (l.text !== undefined ? 10 : 1))) throw new Error('The size must be at least ' + (l.text !== undefined ? 10 : 1) + ' cm'); l.w = Math.round(parseFloat(v)); },
+      ld: (f) => { const l = FL.linkById(f, id) || FL.labelById(f, id); if (!(parseFloat(v) >= (l.text !== undefined ? 10 : 1))) throw new Error('The size must be at least ' + (l.text !== undefined ? 10 : 1) + ' cm'); l.d = Math.round(parseFloat(v)); },
+      lpreset: (f) => { const l = FL.linkById(f, id), p = String(v).split('x'); if (l && p.length === 2) { l.w = parseInt(p[0], 10); l.d = parseInt(p[1], 10); } },
+      ltext: (f) => { FL.labelById(f, id).text = String(v); },
+      lsize: (f) => { FL.labelById(f, id).size = parseInt(v, 10) || 14; FS.labelSize = parseInt(v, 10) || 14; },
+      lcolor: (f) => { FL.labelById(f, id).color = v; FS.labelColor = v; },
+      lbox: (f) => { const l = FL.labelById(f, id); if (el.checked) l.box = true; else delete l.box; },
+      lrot: (f) => { const l = FL.linkById(f, id) || FL.labelById(f, id); const r = parseFloat(String(v).replace(',', '.')); if (!isFinite(r)) throw new Error('Rotation must be a number'); l.rot = ((Math.round(r) % 360) + 360) % 360; }
     }[what];
     if (!fn) return;
     floorEdit('Edit floor plan', (f) => fn(f));
@@ -1781,9 +1827,27 @@
     const c = M.findContainer(S.p, lk.refId), edit = floorEditing();
     let h = '<h3>Link on the floor plan</h3>' + fld('Item', c ? lnk(c.kind, c.item.id, c.item.name) : '<span class="sev-warning">missing</span>') + fld('Type', c ? esc(c.kind === 'group' ? 'Group' : M.typeLabel(c.item)) : '-');
     h += fld('Width (cm)', edit ? '<input type="text" data-ff="lw" data-fid="' + esc(id) + '" value="' + lk.w + '" style="width:100%">' : lk.w) + fld('Depth (cm)', edit ? '<input type="text" data-ff="ld" data-fid="' + esc(id) + '" value="' + lk.d + '" style="width:100%">' : lk.d);
-    h += fld('Rotation (deg)', edit ? '<input type="text" data-ff="lrot" data-fid="' + esc(id) + '" value="' + lk.rot + '" style="width:100%">' : lk.rot);
+    if (edit) {
+      const type = c && c.kind === 'object' ? c.item.type : null, pr = FL.sizePresets(c ? c.kind : 'object', type), cur = lk.w + 'x' + lk.d;
+      h += fld('Size preset', '<select data-ff="lpreset" data-fid="' + esc(id) + '"><option value="">(custom)</option>' + pr.map((s) => '<option value="' + s[0] + 'x' + s[1] + '"' + (cur === s[0] + 'x' + s[1] ? ' selected' : '') + '>' + FL.fmtLen(s[0]) + ' x ' + FL.fmtLen(s[1]) + '</option>').join('') + '</select><div class="sub">Or drag a corner handle on the plan.</div>');
+    }
+    h += fld('Rotation (deg)', edit ? '<input type="text" data-ff="lrot" data-fid="' + esc(id) + '" value="' + lk.rot + '" style="width:100%">' : lk.rot) + (edit ? '<div class="sub">Or drag the round handle above it.</div>' : '');
     h += '<div class="sub">The thick edge is the front. The real item lives on the equipment maps - this is only where it stands.</div>';
     h += '<div class="btn-row">' + btn('floorOpen', 'Open the item', 'data-id="' + esc(lk.refId) + '"', 'primary') + (edit ? btn('floorDelete', 'Remove link', '', 'danger') : '') + '</div>';
+    return h;
+  }
+  function detFloorLabel(id) {
+    const lb = FL.labelById(floorOf(), id), edit = floorEditing();
+    if (!lb) return '<h3>Label</h3><div class="sub">This label no longer exists.</div>';
+    const fid = ' data-fid="' + esc(id) + '"';
+    let h = '<h3>Text label</h3>';
+    h += fld('Text', edit ? '<textarea data-ff="ltext"' + fid + ' rows="3" style="width:100%">' + esc(lb.text) + '</textarea>' : esc(lb.text));
+    h += fld('Size (pt)', edit ? '<select data-ff="lsize"' + fid + '>' + opts(FL.LABEL_SIZES.map((n) => [String(n), String(n) + ' pt']), String(lb.size)) + '</select>' : lb.size + ' pt');
+    h += fld('Colour', edit ? '<input type="color" data-ff="lcolor"' + fid + ' value="' + esc(lb.color) + '">' : '<span style="display:inline-block;width:14px;height:14px;background:' + esc(lb.color) + ';border:1px solid #888"></span>');
+    h += fld('Border', edit ? '<label><input type="checkbox" data-ff="lbox"' + fid + (lb.box ? ' checked' : '') + '> draw a box around the text</label>' : (lb.box ? 'yes' : 'no'));
+    h += fld('Width (cm)', edit ? '<input type="text" data-ff="lw"' + fid + ' value="' + lb.w + '" style="width:100%">' : lb.w) + fld('Height (cm)', edit ? '<input type="text" data-ff="ld"' + fid + ' value="' + lb.d + '" style="width:100%">' : lb.d);
+    h += fld('Rotation (deg)', edit ? '<input type="text" data-ff="lrot"' + fid + ' value="' + lb.rot + '" style="width:100%">' : lb.rot);
+    if (edit) h += '<div class="sub">Drag the box to move it, a corner to resize it, the round handle to rotate it; double-click to edit the text. Text scales with the plan (1 pt = ' + FL.PT_CM + ' cm).</div><div class="btn-row">' + btn('floorDelete', 'Remove label', '', 'danger') + '</div>';
     return h;
   }
   /* "On floor plans" line for an item's details */
@@ -1799,12 +1863,18 @@
       t('calib', 'Scale to size line', 'Click both ends of something with a known length on the image, then type its real length') + t('bgmove', 'Move image', 'Drag the image under your drawing') +
       '<button data-act="floorBgRemove" title="Remove the tracing image (the plan stays)">Remove image</button>';
   }
+  /* while placing a link: choose one of the predefined sizes */
+  function floorPlaceSize() {
+    const pl = FS.place, c = M.findContainer(S.p, pl.refId), pr = FL.sizePresets(pl.kind, c && pl.kind === 'object' ? c.item.type : null), cur = pl.w + 'x' + pl.d;
+    return '<label class="trace-net" title="Predefined sizes for what you are placing">Size <select data-floorplacesize>' + (pr.some((s) => s[0] + 'x' + s[1] === cur) ? '' : '<option value="' + cur + '">' + FL.fmtLen(pl.w) + ' x ' + FL.fmtLen(pl.d) + '</option>') +
+      pr.map((s) => '<option value="' + s[0] + 'x' + s[1] + '"' + (cur === s[0] + 'x' + s[1] ? ' selected' : '') + '>' + FL.fmtLen(s[0]) + ' x ' + FL.fmtLen(s[1]) + '</option>').join('') + '</select></label><span class="sep"></span>';
+  }
   function floorToolbar() {
     const t = (id, label, extra) => '<button data-floortool="' + id + '" class="' + (FS.tool === id && !FS.place ? 'active' : '') + '" title="' + esc(extra) + '">' + label + '</button>';
     return t('select', 'Select (V)', 'Select and drag points and links; click a line to edit it') + t('line', 'Line (L)', 'Click to start, click again for each next point; type a length in metres and press Enter; Esc/Enter finishes') +
-      t('rect', 'Rectangle (R)', 'Click two opposite corners: four lines that share their corner points') +
+      t('rect', 'Rectangle (R)', 'Click two opposite corners: four lines that share their corner points') + t('label', 'Label (T)', 'Click to put a text label (a scalable box with a name, for example a room)') +
       '<select data-floorkind title="What the lines you draw are">' + opts(FL.KINDS.map((k) => [k[0], k[1]]), FS.kind) + '</select><span class="sep"></span>' +
-      '<button data-act="floorAddLink" title="Place a to-scale symbol for a rack, wall socket, device or group from your equipment maps">+ Add link...</button><span class="sep"></span>' +
+      (FS.place ? floorPlaceSize() : '') + '<button data-act="floorAddLink" title="Place a to-scale symbol for a rack, wall socket, device or group from your equipment maps">+ Add link...</button><span class="sep"></span>' +
       '<label class="trace-net" title="Snap clicks to this grid (points and lines always snap first; lines click into 30 / 45 degree angles, Shift forces them, hold Ctrl / Cmd to bypass)">Snap <select data-floorsnap>' + opts([['0', 'off'], ['5', '5 cm'], ['10', '10 cm'], ['25', '25 cm'], ['50', '50 cm']], String(FS.snap)) + '</select></label>' +
       '<label class="trace-net"><input type="checkbox" data-floorlabels' + (FS.labels ? ' checked' : '') + '> Lengths</label><span class="sep"></span>' + floorBgToolbar();
   }
@@ -2475,6 +2545,7 @@
     $('toolbar').addEventListener('change', (e) => {
       const f = e.target.dataset.f;
       if (e.target.hasAttribute('data-floorkind')) { FS.kind = e.target.value; renderToolbar(); return; }
+      if (e.target.hasAttribute('data-floorplacesize')) { const p = e.target.value.split('x'); if (FS.place) { FS.place.w = parseInt(p[0], 10); FS.place.d = parseInt(p[1], 10); } renderCanvas(); return; }
       if (e.target.hasAttribute('data-floorsnap')) { FS.snap = parseInt(e.target.value, 10) || 0; return; }
       if (e.target.hasAttribute('data-floorlabels')) { FS.labels = e.target.checked; renderCanvas(); return; }
       if (f === 'toolPreset') { if (e.target.value === 'custom') S.customColorFor = '__tool'; else { S.customColorFor = null; S.cableColor = e.target.value; } renderToolbar(); }

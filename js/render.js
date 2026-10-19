@@ -112,6 +112,37 @@
       var fs = px(11), name = item ? item.name : '(missing)';
       out.push('<text x="' + num(lk.x) + '" y="' + num(lk.y + Math.max(lk.w, lk.d) / 2 + fs * 1.15) + '" font-size="' + num(fs) + '" text-anchor="middle" fill="#1b2a38" stroke="#fff" stroke-width="' + num(px(3)) + '" paint-order="stroke" font-family="sans-serif" pointer-events="none">' + esc(trunc(name, 30)) + '</text>');
     });
+    // text labels: a scalable box with a name for a room (size in pt, one pt = PT_CM of plan; drawn above walls and links)
+    (f.labels || []).forEach(function (lb) {
+      var isSel = (sel && sel.kind === 'flabel' && sel.id === lb.id) || !!multi['flabel:' + lb.id], fs = lb.size * F.PT_CM, cid = 'flc_' + String(lb.id).replace(/[^A-Za-z0-9_]/g, '');
+      var lh = fs * 1.2, maxChars = Math.max(1, Math.floor(lb.w * 0.94 / (fs * 0.56))), lines = [];
+      String(lb.text).split('\n').forEach(function (para) {
+        var cur = '';
+        para.split(' ').forEach(function (word) {
+          while (word.length > maxChars) { if (cur) { lines.push(cur); cur = ''; } lines.push(word.slice(0, maxChars)); word = word.slice(maxChars); }
+          if (!cur) cur = word; else if ((cur + ' ' + word).length <= maxChars) cur += ' ' + word; else { lines.push(cur); cur = word; }
+        });
+        lines.push(cur);
+      });
+      var y0 = lb.y - (lines.length * lh) / 2 + fs * 0.85;
+      var g1 = '<g data-flabel="' + esc(lb.id) + '" transform="rotate(' + num(lb.rot) + ' ' + num(lb.x) + ' ' + num(lb.y) + ')"><title>' + esc(trunc(lb.text, 60)) + '</title>';
+      g1 += '<clipPath id="' + cid + '"><rect x="' + num(lb.x - lb.w / 2) + '" y="' + num(lb.y - lb.d / 2) + '" width="' + num(lb.w) + '" height="' + num(lb.d) + '"/></clipPath>';
+      if (lb.box || (editing && !exporting)) g1 += '<rect x="' + num(lb.x - lb.w / 2) + '" y="' + num(lb.y - lb.d / 2) + '" width="' + num(lb.w) + '" height="' + num(lb.d) + '" fill="' + (lb.box ? '#ffffff' : 'none') + '" fill-opacity="0.85" stroke="' + (isSel ? '#e91e63' : (lb.box ? lb.color : '#90a4ae')) + '" stroke-width="' + num(isSel ? px(2.5) : px(lb.box ? 1.5 : 1)) + '"' + (lb.box ? '' : ' stroke-dasharray="' + num(px(5)) + ' ' + num(px(4)) + '"') + '/>';
+      g1 += '<g clip-path="url(#' + cid + ')" font-family="sans-serif" font-size="' + num(fs) + '" text-anchor="middle" fill="' + esc(lb.color) + '" pointer-events="none">';
+      lines.forEach(function (ln, i) { g1 += '<text x="' + num(lb.x) + '" y="' + num(y0 + i * lh) + '">' + esc(ln) + '</text>'; });
+      out.push(g1 + '</g></g>');
+    });
+    // resize handles on the selected link or label (edit mode)
+    if (editing && sel && (sel.kind === 'flink' || sel.kind === 'flabel') && !(opts.multi && Object.keys(opts.multi).length)) {
+      var hb = sel.kind === 'flink' ? F.linkById(f, sel.id) : F.labelById(f, sel.id);
+      if (hb) {
+        var hrad = hb.rot * Math.PI / 180, hoff = hb.d / 2 + px(28), hx = hb.x + Math.sin(hrad) * hoff, hy = hb.y - Math.cos(hrad) * hoff, ex = hb.x + Math.sin(hrad) * hb.d / 2, ey = hb.y - Math.cos(hrad) * hb.d / 2;
+        out.push('<path d="M' + num(ex) + ' ' + num(ey) + 'L' + num(hx) + ' ' + num(hy) + '" stroke="#e91e63" stroke-width="' + num(px(1.2)) + '" pointer-events="none"/><circle cx="' + num(hx) + '" cy="' + num(hy) + '" r="' + num(px(6)) + '" fill="#fff" stroke="#e91e63" stroke-width="' + num(px(1.6)) + '" pointer-events="none"><title>Drag to rotate</title></circle>');
+        F.linkCorners(hb).forEach(function (c) {
+          out.push('<rect x="' + num(c[0] - px(4.5)) + '" y="' + num(c[1] - px(4.5)) + '" width="' + num(px(9)) + '" height="' + num(px(9)) + '" fill="#fff" stroke="#e91e63" stroke-width="' + num(px(1.6)) + '" pointer-events="none"/>');
+        });
+      }
+    }
     // length labels
     if (opts.labels !== false) {
       f.lines.forEach(function (l) {

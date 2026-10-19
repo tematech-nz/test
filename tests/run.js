@@ -1997,5 +1997,34 @@ test('floor: make a line horizontal / vertical keeps its length, needs a free en
   assert.throws(() => F.setLineAxis(g, g.lines[0].id, 'h'), /both ends are connected/);
 });
 
+test('floor labels: scalable, rotatable boxes with pt size and colour; hit testing, resize keeps the opposite corner, round trip, render', () => {
+  const F = NM.floor, f = F.ensure({});
+  const lb = F.addLabel(f, { x: 500, y: 300, w: 200, d: 60, text: 'Server room', size: 18, color: '#ff0000', rot: 30 });
+  assert.ok(lb.id.startsWith('flb_') && lb.rot === 30 && lb.size === 18);
+  assert.strictEqual(F.hitTest(f, 500, 300, 5).type, 'label');
+  F.addLine(f, 0, 0, 100, 0, 'wall');
+  assert.strictEqual(F.hitTest(f, 50, 2, 5).type, 'line', 'lines win over a label box');
+  // resize: drag the bottom-right corner of an unrotated box; the top-left corner stays
+  const b = { x: 100, y: 100, w: 100, d: 60, rot: 0 };
+  F.resizeBox(b, 2, 250, 200, 10);
+  assert.deepStrictEqual([b.x, b.y, b.w, b.d], [150, 135, 200, 130]);
+  const r = { x: 100, y: 100, w: 100, d: 60, rot: 90 }; // rotated box: the opposite corner still stays put
+  const anchor = F.linkCorners(r)[0]; F.resizeBox(r, 2, 300, 300, 10);
+  assert.ok(F.linkCorners(r).some((c) => Math.abs(anchor[0] - c[0]) <= 1 && Math.abs(anchor[1] - c[1]) <= 1), 'the anchor stays a corner (even when dragged past it)');
+  assert.throws(() => F.addLabel(f, { x: 0, y: 0, w: 5, d: 5 }), /at least 10/);
+  F.removeLabel(f, lb.id); assert.strictEqual(f.labels.length, 0);
+  assert.ok(F.sizePresets('group').length > 4 && F.footprintFor('group').w === 200);
+  // saved, reloaded, drawn (also in exports, without handles)
+  const p = B.buildShowcaseProject(), fm = M.floorMaps(p)[1], n = fm.floor.labels.length;
+  assert.ok(n >= 2);
+  const q = M.migrate(JSON.parse(M.serializeProject(p))).project;
+  assert.strictEqual(M.floorMaps(q)[1].floor.labels.length, n);
+  const R = NM.render, exp = R.renderMap(p, fm.id, { mode: 'export' }).content;
+  assert.ok(exp.indexOf('Open plan') >= 0 && exp.indexOf('Meeting') >= 0 && exp.indexOf('fill="#6a1b9a"') >= 0, 'label text and colour are drawn in exports');
+  const sel = R.renderMap(p, fm.id, { mode: 'edit', zoom: 0.5, selection: { kind: 'flabel', id: fm.floor.labels[0].id } }).content;
+  assert.ok(sel.indexOf('Drag to rotate') >= 0, 'rotate handle on the selected label');
+  assert.ok(R.renderMap(p, fm.id, { mode: 'view', zoom: 0.5 }).content.indexOf('Drag to rotate') < 0);
+});
+
 console.log('\n' + passed + ' passed, ' + failed + ' failed');
 process.exit(failed ? 1 : 0);

@@ -276,6 +276,7 @@
     F.addLink(fa, { kind: 'group', refId: roomA.id, x: 300, y: 200, rot: 0, w: 600, d: 400 });
     F.addLink(fa, { kind: 'object', refId: rackA.id, x: 90, y: 130, rot: 0, w: 60, d: 100 });
     F.addLink(fa, { kind: 'object', refId: byName('PP-Standalone').id, x: 480, y: 330, rot: 0, w: 48, d: 12 });
+    F.addLabel(fa, { x: 300, y: 370, w: 400, d: 60, text: 'Server room', size: 18, color: '#0d47a1' });
     var fb = F.ensure(M.addMap(p, { name: 'Office plan', location: 'Building B, floor 2', kind: 'floor' }));
     wall(fb, 0, 0, 0, 500); wall(fb, 0, 0, 200, 0); wall(fb, 200, 0, 450, 0, 'window'); wall(fb, 450, 0, 800, 0); wall(fb, 800, 0, 800, 500);
     wall(fb, 800, 500, 360, 500); wall(fb, 360, 500, 270, 500, 'door'); wall(fb, 270, 500, 0, 500);
@@ -285,6 +286,8 @@
     F.addLink(fb, { kind: 'object', refId: ws.id, x: 790, y: 300, rot: 90, w: 12, d: 12 });
     F.addLink(fb, { kind: 'object', refId: pc.id, x: 330, y: 160, rot: 0, w: 40, d: 40 });
     F.addLink(fb, { kind: 'object', refId: ap.id, x: 600, y: 20, rot: 0, w: 25, d: 25 });
+    F.addLabel(fb, { x: 400, y: 440, w: 560, d: 60, text: 'Open plan office', size: 18, color: '#1b5e20' });
+    F.addLabel(fb, { x: 400, y: 330, w: 180, d: 70, text: 'Meeting\ntable', size: 12, color: '#6a1b9a', box: true, rot: 0 });
     M.syncAllMap(p);
     normalizeSizes(p); alignToGrid(p); // so the demo opens without the older-project notice
     return p;

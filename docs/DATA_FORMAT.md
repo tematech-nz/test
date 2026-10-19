@@ -94,12 +94,14 @@ A map with `"kind": "floor"` (equipment maps have no `kind`) carries a `floor` o
 "floor": {
   "points": [{ "id": "fpt_..", "x": 100, "y": 100 }],
   "lines":  [{ "id": "fln_..", "a": "fpt_..", "b": "fpt_..", "kind": "wall" }],
-  "links":  [{ "id": "flk_..", "kind": "object", "refId": "obj_..", "x": 300, "y": 200, "rot": 0, "w": 60, "d": 100 }]
+  "links":  [{ "id": "flk_..", "kind": "object", "refId": "obj_..", "x": 300, "y": 200, "rot": 0, "w": 60, "d": 100 }],
+  "labels": [{ "id": "flb_..", "x": 300, "y": 370, "w": 400, "d": 60, "rot": 0, "text": "Server room", "size": 18, "color": "#0d47a1", "box": true }]
 }
 ```
 
 - `lines[].kind` is `wall`, `door`, `window` or `furniture`. Lines join only at points; a point lying on a line splits it. Length is derived from the points and is locked in the UI when both ends are connected to other lines.
 - `links[]` reference a real item (`kind` `object` or `group`, `refId` its id). `x`,`y` is the centre, `w`x`d` the footprint, `rot` degrees. One link per item per plan. Deleting the item removes its links. Links never create connections or cable lengths.
+- `labels[]` are text boxes: `x`,`y` centre, `w`x`d` box in cm, `rot` degrees, `size` in pt (1 pt = 2.5 cm of plan), `color`, optional `box` (draw a border). They carry no references.
 - A tracing image used while drawing a plan is never part of the data.
 - Migration 4 -> 5 adds nothing to existing maps; floor plans are simply new.
 

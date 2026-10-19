@@ -186,7 +186,7 @@
   function floorMaps(p) { return p.maps.filter(isFloorMap); }
   function addMap(p, spec) {
     var m = { id: uid('map'), name: String(spec.name || '').trim() || 'Map ' + (realMaps(p).length + 1), location: spec.location || '', viewport: { x: 0, y: 0, zoom: 1 } };
-    if (spec.kind === 'floor') { m.kind = 'floor'; m.floor = { points: [], lines: [], links: [] }; }
+    if (spec.kind === 'floor') { m.kind = 'floor'; m.floor = { points: [], lines: [], links: [], labels: [] }; }
     p.maps.push(m);
     return m;
   }
@@ -1193,7 +1193,7 @@
   function expandProject(d) {
     (d.maps || []).forEach(function (m) {
       if (m.location === undefined) m.location = '';
-      if (m.kind === 'floor') { m.floor = m.floor || {}; m.floor.points = m.floor.points || []; m.floor.lines = m.floor.lines || []; m.floor.links = m.floor.links || []; }
+      if (m.kind === 'floor') { m.floor = m.floor || {}; m.floor.points = m.floor.points || []; m.floor.lines = m.floor.lines || []; m.floor.links = m.floor.links || []; m.floor.labels = m.floor.labels || []; }
     });
     (d.groups || []).forEach(function (g) { if (g.description === undefined) g.description = ''; if (g.location === undefined) g.location = ''; if (g.parentGroupId === undefined) g.parentGroupId = null; });
     (d.objects || []).forEach(function (o) {
