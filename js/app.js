@@ -535,6 +535,7 @@
       const g = e.target.closest ? e.target.closest('[data-ghost]') : null, el = e.target.closest ? e.target.closest('[data-kind]') : null;
       if (g && el && (el.dataset.kind === 'object' || el.dataset.kind === 'group' || el.dataset.kind === 'port')) { e.preventDefault(); openOriginal(el.dataset.kind, el.dataset.id); }
     });
+    cv.addEventListener('contextmenu', (e) => { if (isFloor()) { e.preventDefault(); floorContextMenu(e); } });
     cv.addEventListener('pointerup', up);
     cv.addEventListener('pointercancel', (e) => { pointers.delete(e.pointerId); gesture = null; pinch = null; S.drop = null; if (S.drag) { S.p = JSON.parse(S.drag.snap); S.drag = null; renderAll(); } });
     cv.addEventListener('wheel', (e) => { e.preventDefault(); zoomAt(e.deltaY < 0 ? 1.12 : 1 / 1.12, e.clientX, e.clientY); }, { passive: false });
@@ -633,7 +634,7 @@
     if (floorEditing() && (FS.place || FS.draw || FS.rect || FS.tool !== 'select')) {
       th.hidden = false;
       th.textContent = FS.tool === 'calib' ? (FS.calib ? 'Click the other end of the known length (Esc cancels)' : 'Scale to size line: click one end of something on the image with a known length (zoom in for accuracy)') : FS.tool === 'bgmove' ? 'Drag to move the tracing image' : FS.place ? 'Click to place ' + FS.place.name + ' - R rotates it - Esc cancels (Ctrl+click keeps placing)' :
-        FS.tool === 'line' ? (FS.draw ? 'Line: click the next point - or type its length in metres and press Enter - Shift = 15 degree angles - Esc/Enter finishes' : 'Line: click the first point (it snaps to points and lines)') :
+        FS.tool === 'line' ? (FS.draw ? 'Line: click the next point - or type its length in metres and press Enter - lines click into 30/45 degree angles (Shift forces, Alt = free) - Esc/Enter finishes' : 'Line: click the first point (it snaps to points and lines)') :
         FS.tool === 'rect' ? (FS.rect ? 'Rectangle: click the opposite corner (Esc cancels)' : 'Rectangle: click the first corner') : '';
       th.hidden = !th.textContent;
     } else if (S.tool && S.tool.type === 'patch') { th.hidden = false; th.textContent = S.tool.pending ? 'Tap the destination port (Esc to cancel)' : 'Patch cable: tap the first port (W or Esc to stop)'; }
@@ -1334,7 +1335,7 @@
     const z = vpState().zoom, h = FS.hover, active = floorEditing(), bg = floorBg();
     return {
       zoom: z, labels: active ? FS.labels : true, hoverLine: active ? null : FS.hoverLine,
-      floorDraw: active && FS.draw && h ? { a: FS.draw.a, to: h, kind: FS.kind, typed: FS.typed } : null,
+      floorDraw: active && FS.draw && h ? { a: FS.draw.a, to: h, kind: FS.kind, typed: FS.typed, deg: h.deg } : null,
       floorRect: active && FS.rect && h ? { x0: FS.rect.a.x, y0: FS.rect.a.y, x1: h.x, y1: h.y, kind: FS.kind } : null,
       floorPlace: active && FS.place && h ? { x: h.x, y: h.y, w: FS.place.w, d: FS.place.d, rot: FS.place.rot, name: FS.place.name } : null,
       floorSnap: active && h && (FS.draw || FS.rect || FS.place) ? h : null,
@@ -1354,15 +1355,22 @@
   }
   function floorReset() { FS.hoverLine = null; FS.draw = null; FS.rect = null; FS.place = null; FS.hover = null; FS.typed = ''; FS.calib = null; }
   function floorTolerance() { return 10 / vpState().zoom; }
-  /* where a click lands: on an existing point, on a line (which will be split there), or on the snap grid; Shift keeps 15-degree angles */
+  /* where a click lands: on an existing point, on a line (which will be split there), or on the snap grid; near 30 and 45 degree directions a line clicks into the angle (Shift forces it, Alt turns it off) */
   function floorSnapPoint(pt, o) {
     o = o || {};
     const f = floorOf(), tol = floorTolerance();
-    if (o.shift && o.from) {
-      const dx = pt.x - o.from.x, dy = pt.y - o.from.y, len = Math.hypot(dx, dy), ang = Math.round(Math.atan2(dy, dx) / (Math.PI / 12)) * (Math.PI / 12);
-      const l2 = FS.snap ? Math.round(len / FS.snap) * FS.snap : Math.round(len);
-      return { x: Math.round(o.from.x + Math.cos(ang) * l2), y: Math.round(o.from.y + Math.sin(ang) * l2), type: 'angle' };
-    }
+    const ANGLES = [0, 30, 45, 60, 90, 120, 135, 150, 180, 210, 225, 240, 270, 300, 315, 330];
+    /* snap the direction from o.from to a 30 or 45 degree angle; the length still follows the grid */
+    const toAngle = (force) => {
+      const dx = pt.x - o.from.x, dy = pt.y - o.from.y, len = Math.hypot(dx, dy); if (!len) return null;
+      const deg = ((Math.atan2(dy, dx) * 180 / Math.PI) + 360) % 360;
+      let bestA = null, bd = 1e9;
+      ANGLES.concat([360]).forEach((an) => { const d = Math.abs(deg - an); if (d < bd) { bd = d; bestA = an % 360; } });
+      if (!force && len * Math.sin(Math.min(bd, 90) * Math.PI / 180) > tol) return null; // soft snap: only when the pointer is close to the ray (in screen pixels)
+      const l2 = FS.snap ? Math.max(FS.snap, Math.round(len / FS.snap) * FS.snap) : Math.round(len), rad = bestA * Math.PI / 180;
+      return { x: Math.round(o.from.x + Math.cos(rad) * l2), y: Math.round(o.from.y + Math.sin(rad) * l2), type: 'angle', deg: bestA };
+    };
+    if (o.shift && o.from) { const s = toAngle(true); if (s) return s; } // Shift: always a 30 / 45 degree direction
     let best = null;
     f.points.forEach((q) => { if (o.exclude === q.id) return; const d = Math.hypot(q.x - pt.x, q.y - pt.y); if (d <= tol && (!best || d < best.d)) best = { x: q.x, y: q.y, type: 'point', d: d }; });
     if (best) return best;
@@ -1373,8 +1381,34 @@
       if (sg.d <= tol && sg.t > 0 && sg.t < 1 && (!best || sg.d < best.d)) best = { x: Math.round(sg.x), y: Math.round(sg.y), type: 'line', d: sg.d };
     });
     if (best) return best;
+    if (o.from && !o.free) { const s = toAngle(false); if (s) return s; } // automatic: lines click into 30 / 45 degree directions (Alt = free)
     const g = FS.snap;
     return { x: g ? Math.round(pt.x / g) * g : Math.round(pt.x), y: g ? Math.round(pt.y / g) * g : Math.round(pt.y), type: 'grid' };
+  }
+  /* right-click a line in edit mode: make it horizontal / vertical (needs a free end) or delete it */
+  function closeCtx() { const m = document.getElementById('ctxMenu'); if (m) m.remove(); }
+  function floorContextMenu(e) {
+    closeCtx();
+    if (!floorEditing()) return;
+    const f = floorOf(), pt = toMap(e.clientX, e.clientY), hit = FL.hitTest(f, pt.x, pt.y, floorTolerance());
+    if (!hit || hit.type !== 'line') return;
+    S.sel = { kind: 'fline', id: hit.id }; renderAll();
+    const locked = FL.lineLocked(f, hit.id), id = hit.id;
+    const m = document.createElement('div'); m.id = 'ctxMenu'; m.className = 'ctx-menu';
+    const item = (label, act, off, tip) => '<button data-cx="' + act + '"' + (off ? ' disabled' : '') + (tip ? ' title="' + esc(tip) + '"' : '') + '>' + esc(label) + '</button>';
+    const why = 'Both ends are connected to other lines, so the direction is fixed: move a point instead';
+    m.innerHTML = item('Make horizontal', 'h', locked, locked ? why : '') + item('Make vertical', 'v', locked, locked ? why : '') + '<div class="ctx-sep"></div>' + item('Delete line', 'del', false);
+    m.style.left = Math.min(e.clientX, window.innerWidth - 170) + 'px'; m.style.top = Math.min(e.clientY, window.innerHeight - 120) + 'px';
+    m.onclick = (ev) => {
+      const b = ev.target.closest('button[data-cx]'); if (!b || b.disabled) return;
+      closeCtx();
+      if (b.dataset.cx === 'del') { S.sel = null; floorEdit('Delete line', (ff) => FL.deleteLine(ff, id)); renderAll(); return; }
+      floorEdit(b.dataset.cx === 'h' ? 'Make horizontal' : 'Make vertical', (ff) => FL.setLineAxis(ff, id, b.dataset.cx));
+      renderAll();
+    };
+    document.body.appendChild(m);
+    const off = (ev) => { if (!m.contains(ev.target)) { closeCtx(); document.removeEventListener('pointerdown', off, true); } };
+    setTimeout(() => document.addEventListener('pointerdown', off, true), 0);
   }
   /* run an edit on this floor plan as one undo step */
   function floorEdit(label, fn) {
@@ -1394,7 +1428,7 @@
     }
     if (!(FS.draw || FS.rect || FS.place || FS.calib)) return;
     const pt = toMap(e.clientX, e.clientY), from = FS.draw ? FS.draw.a : (FS.rect ? FS.rect.a : (FS.calib ? FS.calib.a : null));
-    FS.hover = FS.calib ? { x: pt.x, y: pt.y, type: 'free' } : floorSnapPoint(pt, { from: from, shift: e.shiftKey });
+    FS.hover = FS.calib ? { x: pt.x, y: pt.y, type: 'free' } : floorSnapPoint(pt, { from: from, shift: e.shiftKey, free: e.altKey });
     scheduleRender();
   }
   /* pointer down in edit mode with the select tool on a point or a link: start dragging it (anything else pans) */
@@ -1456,7 +1490,7 @@
       FS.calib.b = { x: pt.x, y: pt.y }; renderCanvas(); floorScaleToLine(); return;
     }
     if (FS.tool === 'line') {
-      const sp = floorSnapPoint(pt, { from: FS.draw ? FS.draw.a : null, shift: ev.shiftKey });
+      const sp = floorSnapPoint(pt, { from: FS.draw ? FS.draw.a : null, shift: ev.shiftKey, free: ev.altKey });
       if (!FS.draw) { FS.draw = { a: sp }; FS.hover = sp; FS.typed = ''; renderAll(); return; }
       if (sp.x === FS.draw.a.x && sp.y === FS.draw.a.y) return;
       const a = FS.draw.a;
@@ -1506,6 +1540,7 @@
   function floorKey(e) {
     if (!isFloor() || e.ctrlKey || e.metaKey || e.altKey) return false;
     const k = e.key;
+    if (k === 'Escape' && document.getElementById('ctxMenu')) { closeCtx(); return true; }
     if (k === 'Escape') {
       if (FS.typed) { FS.typed = ''; renderCanvas(); return true; }
       if (FS.draw || FS.rect || FS.place || FS.calib) { floorReset(); renderAll(); return true; }
@@ -1665,7 +1700,7 @@
       t('rect', 'Rectangle (R)', 'Click two opposite corners: four lines that share their corner points') +
       '<select data-floorkind title="What the lines you draw are">' + opts(FL.KINDS.map((k) => [k[0], k[1]]), FS.kind) + '</select><span class="sep"></span>' +
       '<button data-act="floorAddLink" title="Place a to-scale symbol for a rack, wall socket, device or group from your equipment maps">+ Add link...</button><span class="sep"></span>' +
-      '<label class="trace-net" title="Snap clicks to this grid (points and lines always snap first; hold Shift for 15 degree angles)">Snap <select data-floorsnap>' + opts([['0', 'off'], ['5', '5 cm'], ['10', '10 cm'], ['25', '25 cm'], ['50', '50 cm']], String(FS.snap)) + '</select></label>' +
+      '<label class="trace-net" title="Snap clicks to this grid (points and lines always snap first; lines click into 30 / 45 degree angles, Shift forces them, Alt turns it off)">Snap <select data-floorsnap>' + opts([['0', 'off'], ['5', '5 cm'], ['10', '10 cm'], ['25', '25 cm'], ['50', '50 cm']], String(FS.snap)) + '</select></label>' +
       '<label class="trace-net"><input type="checkbox" data-floorlabels' + (FS.labels ? ' checked' : '') + '> Lengths</label><span class="sep"></span>' + floorBgToolbar();
   }
 

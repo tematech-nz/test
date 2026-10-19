@@ -170,6 +170,14 @@
     m.x = Math.round(a.x + Math.cos(rad) * len); m.y = Math.round(a.y + Math.sin(rad) * len);
     settleAfterMove(f, e.move);
   }
+  /* turn a line (one that still has a free end) to the nearest horizontal or vertical direction; the length stays */
+  function setLineAxis(f, id, axis) {
+    var l = lineById(f, id);
+    if (!l) throw new Error('Line not found');
+    var cur = lineAngle(f, l), opts = axis === 'v' ? [90, 270] : [0, 180], best = opts[0], bd = 1e9;
+    opts.forEach(function (o) { var d = Math.abs(cur - o); d = Math.min(d, 360 - d); if (d < bd) { bd = d; best = o; } });
+    setLineAngle(f, id, best);
+  }
   function mergePoints(f, keepId, dropId) {
     f.lines.forEach(function (l) { if (l.a === dropId) l.a = keepId; if (l.b === dropId) l.b = keepId; });
     f.points = f.points.filter(function (p) { return p.id !== dropId; });
@@ -293,7 +301,7 @@
   NM.floor = {
     KINDS: KINDS, EPS: EPS, LOCKED: LOCKED, ensure: ensure, pt: pt, lineById: lineById, linkById: linkById, linkOf: linkOf, degree: degree,
     addPoint: addPoint, addLine: addLine, addRect: addRect, deleteLine: deleteLine, setLineKind: setLineKind, lineLocked: lineLocked,
-    setLineLength: setLineLength, setLineAngle: setLineAngle, movePoint: movePoint, settleAfterMove: settleAfterMove, mergePoints: mergePoints, lineLength: lineLength, lineAngle: lineAngle,
+    setLineLength: setLineLength, setLineAngle: setLineAngle, setLineAxis: setLineAxis, movePoint: movePoint, settleAfterMove: settleAfterMove, mergePoints: mergePoints, lineLength: lineLength, lineAngle: lineAngle,
     footprintFor: footprintFor, addLink: addLink, removeLink: removeLink, linkCorners: linkCorners, inLink: inLink,
     hitTest: hitTest, fmtLen: fmtLen, niceScale: niceScale, bounds: bounds, validKind: validKind, toSegment: toSegment, prunePoints: prunePoints
   };

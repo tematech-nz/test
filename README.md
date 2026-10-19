@@ -195,6 +195,7 @@ A second kind of map (New map -> Type: Floor plan, listed under "Floor plans") f
 
 - Tools: Select (V), Line (L), Rectangle (R). Pick what the lines are first: wall, door, window or furniture (a plain box, for example a desk). Walls are built; doors, windows and furniture are stored the same way.
 - A rectangle is four lines sharing corner points. Lines may be diagonal. Where lines cross, or a line or rectangle starts or ends on another line, a point is created and the line splits there; nothing overlaps. Any line can be deleted.
+- While drawing a line, its direction clicks into 0/30/45/60/90... degrees when the pointer is near one (the angle is shown next to the length). Shift forces the nearest such angle, Alt turns the snapping off. Points and lines still snap first.
 - While drawing a line you can type a length in metres and press Enter. Select a line to edit its type, length and angle.
 - A line whose both ends are connected to other lines cannot change length ("defined by the connected elements"): move a point instead.
 - "+ Add link..." opens a search with type filters (group, rack, wall socket, generic equipment, other). Pick an item and click the plan to place it at its real size; R rotates, Esc cancels, Ctrl+click keeps placing. Double-click a link to open the real item on its equipment map. The link only references the item: the equipment keeps living on its equipment map, and its details list the floor plans it is on.

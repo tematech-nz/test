@@ -221,3 +221,9 @@ body.on-all #editBanner { background: #546e7a; }
 body.on-floor #toolbar button.active { background: var(--accent); color: #fff; border-color: var(--accent); }
 #emptyHint { pointer-events: none; }
 #emptyHint button { pointer-events: auto; }
+
+.ctx-menu { position: fixed; z-index: 60; background: #fff; border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,.2); padding: 4px; display: flex; flex-direction: column; min-width: 150px; }
+.ctx-menu button { text-align: left; border: 0; background: none; padding: 7px 10px; border-radius: 6px; font: inherit; cursor: pointer; }
+.ctx-menu button:hover:not([disabled]) { background: #ede7f6; }
+.ctx-menu button[disabled] { color: #9aa5b1; cursor: not-allowed; }
+.ctx-menu .ctx-sep { height: 1px; background: var(--line); margin: 3px 2px; }

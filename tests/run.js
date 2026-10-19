@@ -1981,5 +1981,21 @@ test('deleting equipment removes its floor plan links; a group or object link ca
   assert.deepStrictEqual(M.validateProject(p).filter((i) => i.severity === 'error'), []);
 });
 
+test('floor: make a line horizontal / vertical keeps its length, needs a free end', () => {
+  const F = NM.floor, f = F.ensure({});
+  F.addLine(f, 0, 0, 300, 0, 'wall');
+  const [d] = F.addLine(f, 300, 0, 400, 100, 'wall'); // one end joined, one free, diagonal
+  const len = F.lineLength(f, d);
+  F.setLineAxis(f, d.id, 'h');
+  const a = F.pt(f, d.a), b = F.pt(f, d.b);
+  assert.strictEqual(a.y, b.y); assert.ok(Math.abs(F.lineLength(f, d) - len) <= 1);
+  assert.ok(b.x > a.x, 'keeps its direction (right)');
+  F.setLineAxis(f, d.id, 'v');
+  const a2 = F.pt(f, d.a), b2 = F.pt(f, d.b);
+  assert.strictEqual(a2.x, b2.x); assert.ok(Math.abs(F.lineLength(f, d) - len) <= 1);
+  const g = F.ensure({}); F.addRect(g, 0, 0, 200, 100, 'wall');
+  assert.throws(() => F.setLineAxis(g, g.lines[0].id, 'h'), /both ends are connected/);
+});
+
 console.log('\n' + passed + ' passed, ' + failed + ' failed');
 process.exit(failed ? 1 : 0);

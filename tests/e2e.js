@@ -1574,6 +1574,54 @@ const ok = (m) => console.log('  ok   ' + m);
     await page.waitForSelector('#vp [data-kind="object"]');
   });
 
+  await step('floor plan: lines click into 30 / 45 degree directions, Alt is free, Shift forces', async () => {
+    const fid = await page.evaluate(() => { let id; NetMap.app.commit('Add floor', (p) => { const mm = NetMap.model.addMap(p, { name: 'E2E Angles', kind: 'floor' }); mm.viewport = { x: 60, y: 120, zoom: 0.4 }; id = mm.id; }); return id; });
+    await page.selectOption('#mapSelect', fid); await page.waitForTimeout(150);
+    const org = await page.evaluate(() => { const v = NetMap.app.S.p.maps.find((m) => m.id === NetMap.app.S.mapId).viewport; const r = document.getElementById('canvas').getBoundingClientRect(); return { x: r.left + v.x, y: r.top + v.y, z: v.zoom }; });
+    const at = (cm) => [org.x + cm[0] * org.z, org.y + cm[1] * org.z];
+    const hover = async (cm, mods) => { const [x, y] = at(cm); await page.mouse.move(x - 3, y - 3); for (const k of mods || []) await page.keyboard.down(k); await page.mouse.move(x, y); for (const k of mods || []) await page.keyboard.up(k); await page.waitForTimeout(60); return page.evaluate(() => { const h = NetMap.app.S.floor.hover; return h && { x: h.x, y: h.y, type: h.type, deg: h.deg }; }); };
+    await page.click('[data-floortool="line"]');
+    const [sx, sy] = at([200, 200]); await page.mouse.move(sx, sy); await page.mouse.click(sx, sy);
+    let h = await hover([600, 205]);
+    assert.ok(h.type === 'angle' && h.deg === 0 && h.y === 200, 'near horizontal -> horizontal ' + JSON.stringify(h));
+    h = await hover([505, 510]);
+    assert.ok(h.deg === 45 && h.x - 200 === h.y - 200, 'near 45 ' + JSON.stringify(h));
+    h = await hover([360, 480]);
+    assert.strictEqual(h.deg, 60);
+    h = await hover([600, 330], ['Alt']);
+    assert.strictEqual(h.type, 'grid', 'Alt is free');
+    h = await hover([600, 330], ['Shift']);
+    assert.strictEqual(h.type, 'angle', 'Shift forces an angle');
+    await page.keyboard.press('Escape'); await page.click('[data-floortool="select"]');
+    await page.evaluate((id) => { NetMap.app.commit('rm', (p) => { p.maps = p.maps.filter((m) => m.id !== id); }); }, fid);
+    await page.selectOption('#mapSelect', await page.evaluate(() => NetMap.app.S.p.maps[0].id)); await page.waitForTimeout(100);
+  });
+
+  await step('floor plan: right-click a line with a free end -> make horizontal / vertical; locked lines are disabled', async () => {
+    const fid = await page.evaluate(() => { let id; NetMap.app.commit('Add floor', (p) => { const mm = NetMap.model.addMap(p, { name: 'E2E Menu', kind: 'floor' }); mm.viewport = { x: 60, y: 120, zoom: 0.4 }; id = mm.id; }); return id; });
+    await page.selectOption('#mapSelect', fid); await page.waitForTimeout(150);
+    await page.evaluate(() => NetMap.app.commit('draw', (p) => { const f = NetMap.floor.ensure(p.maps.find((m) => m.id === NetMap.app.S.mapId)); NetMap.floor.addRect(f, 100, 100, 600, 400, 'wall'); NetMap.floor.addLine(f, 600, 250, 800, 450, 'wall'); }));
+    await page.waitForTimeout(100);
+    const org = await page.evaluate(() => { const v = NetMap.app.S.p.maps.find((m) => m.id === NetMap.app.S.mapId).viewport; const r = document.getElementById('canvas').getBoundingClientRect(); return { x: r.left + v.x, y: r.top + v.y, z: v.zoom }; });
+    const at = (cm) => [org.x + cm[0] * org.z, org.y + cm[1] * org.z];
+    const dia = async () => page.evaluate(() => { const f = NetMap.floor.ensure(NetMap.app.S.p.maps.find((m) => m.id === NetMap.app.S.mapId)); const l = f.lines.find((x) => { const a = NetMap.floor.pt(f, x.a), b = NetMap.floor.pt(f, x.b); return a.x !== b.x && a.y !== b.y; }); const a = NetMap.floor.pt(f, l.a), b = NetMap.floor.pt(f, l.b); return [a.x, a.y, b.x, b.y]; });
+    await page.click('[data-floortool="select"]');
+    let [x, y] = at([700, 350]); await page.mouse.click(x, y, { button: 'right' });
+    await page.waitForSelector('#ctxMenu');
+    assert.ok(!(await page.isDisabled('#ctxMenu [data-cx="h"]')), 'enabled for a line with a free end');
+    await page.click('#ctxMenu [data-cx="h"]');
+    let d = await page.evaluate(() => { const f = NetMap.floor.ensure(NetMap.app.S.p.maps.find((m) => m.id === NetMap.app.S.mapId)); const l = f.lines.find((q) => NetMap.floor.degree(f, q.a) === 1 || NetMap.floor.degree(f, q.b) === 1); return l && [NetMap.floor.pt(f, l.a).y, NetMap.floor.pt(f, l.b).y]; });
+    assert.ok(d && d[0] === d[1], 'now horizontal ' + JSON.stringify(d));
+    assert.strictEqual(await page.locator('#ctxMenu').count(), 0, 'menu closed');
+    [x, y] = at([350, 100]); await page.mouse.click(x, y, { button: 'right' });
+    await page.waitForSelector('#ctxMenu');
+    assert.ok(await page.isDisabled('#ctxMenu [data-cx="h"]') && await page.isDisabled('#ctxMenu [data-cx="v"]'), 'both ends connected: disabled');
+    await page.keyboard.press('Escape'); assert.strictEqual(await page.locator('#ctxMenu').count(), 0);
+    await page.evaluate((id) => { NetMap.app.commit('rm', (p) => { p.maps = p.maps.filter((m) => m.id !== id); }); }, fid);
+    await page.selectOption('#mapSelect', await page.evaluate(() => NetMap.app.S.p.maps[0].id)); await page.waitForTimeout(100);
+    void dia;
+  });
+
   await step('autosave survives a refresh', async () => {
     await page.click('#btnMode'); // back to view mode flushes the save
     const name = await page.evaluate(() => NetMap.app.S.p.name);
