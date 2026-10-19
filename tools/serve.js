@@ -6,7 +6,7 @@ const path = require('path');
 const root = path.resolve(process.env.NETMAP_ROOT || path.join(__dirname, '..'));
 const port = parseInt(process.argv[2] || process.env.PORT || '8080', 10);
 const versionTool = require('./version.js');
-const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.svg': 'image/svg+xml' };
+const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png' };
 
 http.createServer((req, res) => {
   let p = decodeURIComponent(req.url.split('?')[0]);

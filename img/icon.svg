@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <rect width="64" height="64" rx="14" fill="#0b3d91"/>
+  <!-- two stacked rack units -->
+  <rect x="9" y="10" width="34" height="14" rx="3" fill="#eaf1fb"/>
+  <rect x="9" y="27" width="34" height="14" rx="3" fill="#eaf1fb"/>
+  <circle cx="15" cy="17" r="2" fill="#2ca02c"/><circle cx="21" cy="17" r="2" fill="#f2c200"/>
+  <circle cx="15" cy="34" r="2" fill="#2ca02c"/><circle cx="21" cy="34" r="2" fill="#2ca02c"/>
+  <rect x="27" y="14.5" width="12" height="5" rx="1.2" fill="#0b3d91"/>
+  <rect x="27" y="31.5" width="12" height="5" rx="1.2" fill="#0b3d91"/>
+  <!-- patch cables: plugged into the ports, looping down to a jack -->
+  <path d="M33 34 V39" stroke="#ff9800" stroke-width="3" stroke-linecap="round" fill="none"/>
+  <path d="M33 39 C33 50 22 46 22 54" stroke="#ff9800" stroke-width="3" stroke-linecap="round" fill="none"/>
+  <path d="M38 36.5 V43 C38 52 50 46 50 54" stroke="#4fc3f7" stroke-width="3" stroke-linecap="round" fill="none"/>
+  <rect x="18.5" y="52" width="7" height="6" rx="1.2" fill="#ffcc80"/>
+  <rect x="46.5" y="52" width="7" height="6" rx="1.2" fill="#b3e5fc"/>
+</svg>

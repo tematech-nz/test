@@ -246,6 +246,7 @@ connectivity rules, and migration strategy.
 | `js/layout.js`, `js/render.js` | Geometry and SVG rendering (shared by screen and exports). |
 | `tools/version.js`, `tools/serve.js` | Version stamp (`version.json`, `js/version.js`) and the optional dev server. |
 | `js/exporters.js` | Connection table, PDF writer, download helpers. |
+| `img/` | Site icon (`icon.svg`, PNG sizes for older browsers and iOS). |
 | `js/builder.js` | Placement helpers and the demo project. |
 | `js/topology.js`, `js/graphview.js` | Device-level graph, reachability tree, path search and the Graph view. |
 | `js/app.js` | UI: state, undo/redo, canvas, panels, dialogs. |
