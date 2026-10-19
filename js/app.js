@@ -709,7 +709,7 @@
     if (floorEditing() && (FS.place || FS.draw || FS.rect || FS.tool !== 'select')) {
       th.hidden = false;
       th.textContent = FS.tool === 'calib' ? (FS.calib ? 'Click the other end of the known length (Esc cancels)' : 'Scale to size line: click one end of something on the image with a known length (zoom in for accuracy)') : FS.tool === 'bgmove' ? 'Drag to move the tracing image' : FS.place ? 'Click to place ' + FS.place.name + ' - R rotates it - Esc cancels (Ctrl+click keeps placing)' :
-        FS.tool === 'line' ? (FS.draw ? 'Line: click the next point - or type its length in metres and press Enter - lines click into 30/45 degree angles (Shift forces, Alt = free) - Esc/Enter finishes' : 'Line: click the first point (it snaps to points and lines)') :
+        FS.tool === 'line' ? (FS.draw ? 'Line: click the next point - or type its length in metres and press Enter - lines click into 30/45 degree angles (Shift forces, hold Ctrl to bypass) - Esc/Enter finishes' : 'Line: click the first point (it snaps to points and lines)') :
         FS.tool === 'rect' ? (FS.rect ? 'Rectangle: click the opposite corner (Esc cancels)' : 'Rectangle: click the first corner') : '';
       th.hidden = !th.textContent;
     } else if (S.tool && S.tool.type === 'patch') { th.hidden = false; th.textContent = S.tool.pending ? 'Tap the destination port (Esc to cancel)' : 'Patch cable: tap the first port (W or Esc to stop)'; }
@@ -1431,7 +1431,7 @@
   }
   function floorReset() { FS.hoverLine = null; FS.draw = null; FS.rect = null; FS.place = null; FS.hover = null; FS.typed = ''; FS.calib = null; }
   function floorTolerance() { return 10 / vpState().zoom; }
-  /* where a click lands: on an existing point, on a line (which will be split there), or on the snap grid; near 30 and 45 degree directions a line clicks into the angle (Shift forces it, Alt turns it off) */
+  /* where a click lands: on an existing point, on a line (which will be split there), or on the snap grid; near 30 and 45 degree directions a line clicks into the angle (Shift forces it, hold Ctrl / Cmd to bypass it) */
   function floorSnapPoint(pt, o) {
     o = o || {};
     const f = floorOf(), tol = floorTolerance();
@@ -1446,10 +1446,29 @@
       const l2 = FS.snap ? Math.max(FS.snap, Math.round(len / FS.snap) * FS.snap) : Math.round(len), rad = bestA * Math.PI / 180;
       return { x: Math.round(o.from.x + Math.cos(rad) * l2), y: Math.round(o.from.y + Math.sin(rad) * l2), type: 'angle', deg: bestA };
     };
-    if (o.shift && o.from) { const s = toAngle(true); if (s) return s; } // Shift: always a 30 / 45 degree direction
+    /* the 30 / 45 degree ray from o.from meets an existing line near the pointer: finish exactly there (the line gets split at that spot) */
+    const rayToLine = (force) => {
+      const dx = pt.x - o.from.x, dy = pt.y - o.from.y, len = Math.hypot(dx, dy); if (!len) return null;
+      const deg = ((Math.atan2(dy, dx) * 180 / Math.PI) + 360) % 360;
+      let bestA = 0, bd = 1e9;
+      ANGLES.concat([360]).forEach((an) => { const d = Math.abs(deg - an); if (d < bd) { bd = d; bestA = an % 360; } });
+      const rad = bestA * Math.PI / 180, ux = Math.cos(rad), uy = Math.sin(rad);
+      let hit = null;
+      f.lines.forEach((l) => {
+        const q = FL.pt(f, l.a), r = FL.pt(f, l.b); if (!q || !r) return;
+        const ex = r.x - q.x, ey = r.y - q.y, den = ux * ey - uy * ex; if (Math.abs(den) < 1e-9) return; // parallel
+        const wx = q.x - o.from.x, wy = q.y - o.from.y, s = (wx * ey - wy * ex) / den, u = (wx * uy - wy * ux) / den;
+        if (s < 1 || u <= 0 || u >= 1) return; // behind the start, or off the ends of the line (ends are handled as points)
+        const hx = o.from.x + ux * s, hy = o.from.y + uy * s, d = Math.hypot(hx - pt.x, hy - pt.y);
+        if (d <= tol * (force ? 4 : 1.5) && (!hit || d < hit.d)) hit = { x: Math.round(hx), y: Math.round(hy), type: 'line', deg: bestA, d: d };
+      });
+      return hit;
+    };
+    if (o.shift && o.from) { const s = rayToLine(true) || toAngle(true); if (s) return s; } // Shift: always a 30 / 45 degree direction
     let best = null;
     f.points.forEach((q) => { if (o.exclude === q.id) return; const d = Math.hypot(q.x - pt.x, q.y - pt.y); if (d <= tol && (!best || d < best.d)) best = { x: q.x, y: q.y, type: 'point', d: d }; });
     if (best) return best;
+    if (o.from && !o.free) { const s = rayToLine(false); if (s) return s; } // on a line: keep the angle, end where the ray meets it
     f.lines.forEach((l) => {
       if (o.exclude && (l.a === o.exclude || l.b === o.exclude)) return;
       const a = FL.pt(f, l.a), b = FL.pt(f, l.b); if (!a || !b) return;
@@ -1457,7 +1476,7 @@
       if (sg.d <= tol && sg.t > 0 && sg.t < 1 && (!best || sg.d < best.d)) best = { x: Math.round(sg.x), y: Math.round(sg.y), type: 'line', d: sg.d };
     });
     if (best) return best;
-    if (o.from && !o.free) { const s = toAngle(false); if (s) return s; } // automatic: lines click into 30 / 45 degree directions (Alt = free)
+    if (o.from && !o.free) { const s = toAngle(false); if (s) return s; } // automatic: lines click into 30 / 45 degree directions (hold Ctrl / Cmd = free)
     const g = FS.snap;
     return { x: g ? Math.round(pt.x / g) * g : Math.round(pt.x), y: g ? Math.round(pt.y / g) * g : Math.round(pt.y), type: 'grid' };
   }
@@ -1496,7 +1515,13 @@
     FS.tool = tool; if (kind) FS.kind = kind;
     renderAll();
   }
+  /* pressing or releasing Shift / Ctrl while a line is being placed re-evaluates the snap under the pointer without waiting for a move */
+  function floorModifierKey(e) {
+    if (!floorEditing() || !FS.lastPtr || !(FS.draw || FS.rect) || !/^(Control|Meta|Shift)$/.test(e.key)) return;
+    floorHover({ clientX: FS.lastPtr.x, clientY: FS.lastPtr.y, shiftKey: e.shiftKey, ctrlKey: e.ctrlKey, metaKey: e.metaKey });
+  }
   function floorHover(e) {
+    FS.lastPtr = { x: e.clientX, y: e.clientY };
     if (!floorEditing()) { // view mode: a wall shows its length only while the pointer is on it
       const pt = toMap(e.clientX, e.clientY), hit = FL.hitTest(floorOf(), pt.x, pt.y, floorTolerance()), id = hit && hit.type === 'line' ? hit.id : null;
       if (id !== FS.hoverLine) { FS.hoverLine = id; scheduleRender(); }
@@ -1504,7 +1529,7 @@
     }
     if (!(FS.draw || FS.rect || FS.place || FS.calib)) return;
     const pt = toMap(e.clientX, e.clientY), from = FS.draw ? FS.draw.a : (FS.rect ? FS.rect.a : (FS.calib ? FS.calib.a : null));
-    FS.hover = FS.calib ? { x: pt.x, y: pt.y, type: 'free' } : floorSnapPoint(pt, { from: from, shift: e.shiftKey, free: e.altKey });
+    FS.hover = FS.calib ? { x: pt.x, y: pt.y, type: 'free' } : floorSnapPoint(pt, { from: from, shift: e.shiftKey, free: e.ctrlKey || e.metaKey });
     scheduleRender();
   }
   /* pointer down in edit mode with the select tool on a point or a link: start dragging it (anything else pans) */
@@ -1566,7 +1591,7 @@
       FS.calib.b = { x: pt.x, y: pt.y }; renderCanvas(); floorScaleToLine(); return;
     }
     if (FS.tool === 'line') {
-      const sp = floorSnapPoint(pt, { from: FS.draw ? FS.draw.a : null, shift: ev.shiftKey, free: ev.altKey });
+      const sp = floorSnapPoint(pt, { from: FS.draw ? FS.draw.a : null, shift: ev.shiftKey, free: ev.ctrlKey || ev.metaKey });
       if (!FS.draw) { FS.draw = { a: sp }; FS.hover = sp; FS.typed = ''; renderAll(); return; }
       if (sp.x === FS.draw.a.x && sp.y === FS.draw.a.y) return;
       const a = FS.draw.a;
@@ -1780,7 +1805,7 @@
       t('rect', 'Rectangle (R)', 'Click two opposite corners: four lines that share their corner points') +
       '<select data-floorkind title="What the lines you draw are">' + opts(FL.KINDS.map((k) => [k[0], k[1]]), FS.kind) + '</select><span class="sep"></span>' +
       '<button data-act="floorAddLink" title="Place a to-scale symbol for a rack, wall socket, device or group from your equipment maps">+ Add link...</button><span class="sep"></span>' +
-      '<label class="trace-net" title="Snap clicks to this grid (points and lines always snap first; lines click into 30 / 45 degree angles, Shift forces them, Alt turns it off)">Snap <select data-floorsnap>' + opts([['0', 'off'], ['5', '5 cm'], ['10', '10 cm'], ['25', '25 cm'], ['50', '50 cm']], String(FS.snap)) + '</select></label>' +
+      '<label class="trace-net" title="Snap clicks to this grid (points and lines always snap first; lines click into 30 / 45 degree angles, Shift forces them, hold Ctrl / Cmd to bypass)">Snap <select data-floorsnap>' + opts([['0', 'off'], ['5', '5 cm'], ['10', '10 cm'], ['25', '25 cm'], ['50', '50 cm']], String(FS.snap)) + '</select></label>' +
       '<label class="trace-net"><input type="checkbox" data-floorlabels' + (FS.labels ? ' checked' : '') + '> Lengths</label><span class="sep"></span>' + floorBgToolbar();
   }
 
@@ -2571,6 +2596,7 @@
     document.addEventListener('keydown', (e) => {
       if ($('dlg').open) return;
       const typing = /INPUT|SELECT|TEXTAREA/.test((e.target.tagName || ''));
+      floorModifierKey(e);
       if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'a' && !typing) { e.preventDefault(); selectAll(); return; } // never select the page, only the items in the editor
       if (!typing && floorKey(e)) { e.preventDefault(); return; }
       if (e.key === 'Escape') { if (S.place) cancelPlace(); else if (S.pgroup) { clearPgroup(); renderAll(); } else if (S.tool) cancelTool(); else if (S.trace) clearTrace(); else if (S.sel || S.multi.length) { S.sel = null; S.multi = []; renderAll(); } }
@@ -2582,6 +2608,7 @@
       else if (isEdit() && !typing && !e.ctrlKey && !e.metaKey && !e.altKey && S.pgroup && (e.key === 'g' || e.key === 'G')) { e.preventDefault(); nameSelectedPorts(); }
       else if (!typing && !e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'w' || e.key === 'W')) { e.preventDefault(); startWire(); }
     });
+    document.addEventListener('keyup', floorModifierKey);
     window.addEventListener('pagehide', () => { if (S.unsaved) saveNow(); });
     // never lose work silently: reloading or closing with changes that were not exported asks first (the browser shows its own wording)
     window.addEventListener('beforeunload', (e) => {

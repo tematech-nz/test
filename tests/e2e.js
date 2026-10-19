@@ -1575,12 +1575,12 @@ const ok = (m) => console.log('  ok   ' + m);
     await page.waitForSelector('#vp [data-kind="object"]');
   });
 
-  await step('floor plan: lines click into 30 / 45 degree directions, Alt is free, Shift forces', async () => {
+  await step('floor plan: lines click into 30 / 45 degree directions, Ctrl bypasses, Shift forces', async () => {
     const fid = await page.evaluate(() => { let id; NetMap.app.commit('Add floor', (p) => { const mm = NetMap.model.addMap(p, { name: 'E2E Angles', kind: 'floor' }); mm.viewport = { x: 60, y: 120, zoom: 0.4 }; id = mm.id; }); return id; });
     await page.selectOption('#mapSelect', fid); await page.waitForTimeout(150);
     const org = await page.evaluate(() => { const v = NetMap.app.S.p.maps.find((m) => m.id === NetMap.app.S.mapId).viewport; const r = document.getElementById('canvas').getBoundingClientRect(); return { x: r.left + v.x, y: r.top + v.y, z: v.zoom }; });
     const at = (cm) => [org.x + cm[0] * org.z, org.y + cm[1] * org.z];
-    const hover = async (cm, mods) => { const [x, y] = at(cm); await page.mouse.move(x - 3, y - 3); for (const k of mods || []) await page.keyboard.down(k); await page.mouse.move(x, y); for (const k of mods || []) await page.keyboard.up(k); await page.waitForTimeout(60); return page.evaluate(() => { const h = NetMap.app.S.floor.hover; return h && { x: h.x, y: h.y, type: h.type, deg: h.deg }; }); };
+    const hover = async (cm, mods) => { const [x, y] = at(cm); await page.mouse.move(x - 3, y - 3); for (const k of mods || []) await page.keyboard.down(k); await page.mouse.move(x, y); await page.waitForTimeout(60); const res = await page.evaluate(() => { const h = NetMap.app.S.floor.hover; return h && { x: h.x, y: h.y, type: h.type, deg: h.deg }; }); for (const k of mods || []) await page.keyboard.up(k); await page.waitForTimeout(40); return res; };
     await page.click('[data-floortool="line"]');
     const [sx, sy] = at([200, 200]); await page.mouse.move(sx, sy); await page.mouse.click(sx, sy);
     let h = await hover([600, 205]);
@@ -1589,10 +1589,24 @@ const ok = (m) => console.log('  ok   ' + m);
     assert.ok(h.deg === 45 && h.x - 200 === h.y - 200, 'near 45 ' + JSON.stringify(h));
     h = await hover([360, 480]);
     assert.strictEqual(h.deg, 60);
-    h = await hover([600, 330], ['Alt']);
-    assert.strictEqual(h.type, 'grid', 'Alt is free');
+    h = await hover([600, 330], ['Control']);
+    assert.strictEqual(h.type, 'grid', 'Ctrl bypasses the angle snap');
     h = await hover([600, 330], ['Shift']);
     assert.strictEqual(h.type, 'angle', 'Shift forces an angle');
+    await hover([600, 205]);
+    await page.keyboard.down('Control'); await page.waitForTimeout(80);
+    assert.strictEqual(await page.evaluate(() => NetMap.app.S.floor.hover.type), 'grid', 'pressing Ctrl bypasses the snap at once, without moving the mouse');
+    await page.keyboard.up('Control'); await page.waitForTimeout(80);
+    assert.strictEqual(await page.evaluate(() => NetMap.app.S.floor.hover.type), 'angle', 'releasing it brings the snap back');
+    // ending on an existing line (no point there): keep the angle and finish where the ray meets the line
+    await page.keyboard.press('Escape');
+    await page.evaluate(() => NetMap.app.commit('wall', (p) => { const f = NetMap.floor.ensure(p.maps.find((m) => m.id === NetMap.app.S.mapId)); NetMap.floor.addLine(f, 800, 0, 800, 800, 'wall'); }));
+    await page.waitForTimeout(80);
+    const [s2x, s2y] = at([500, 100]); await page.mouse.move(s2x, s2y); await page.mouse.click(s2x, s2y);
+    h = await hover([800, 420]);                // ray at 45 degrees from (500,100) meets x=800 at y=400; pointer is 20 cm away on the line
+    assert.ok(h.type === 'line' && h.deg === 45 && h.x === 800 && h.y === 400, 'angle kept when ending on a line: ' + JSON.stringify(h));
+    h = await hover([800, 760]);                // far from where the ray meets it: plain snap to the line
+    assert.strictEqual(h.type, 'line'); assert.strictEqual(h.deg, undefined);
     assert.ok(!/ deg</.test(await page.evaluate(() => Array.from(document.querySelectorAll('#vp text')).map((t) => t.textContent).join('<'))), 'no angle text while drawing');
     const tool = () => page.evaluate(() => NetMap.app.S.floor.tool + '/' + (NetMap.app.S.floor.draw ? 'drawing' : 'idle'));
     assert.strictEqual(await tool(), 'line/drawing');
