@@ -1429,6 +1429,12 @@
   /* a click on the floor plan (also what a finger tap does) */
   function floorTap(ev) {
     const pt = toMap(ev.clientX, ev.clientY), f = floorOf();
+    // two quick taps on a link open the real item (the first tap re-draws the plan, so the browser's own dblclick is not reliable here)
+    if (!FS.place && (FS.tool === 'select' || !floorEditing())) {
+      const h2 = FL.hitTest(f, pt.x, pt.y, floorTolerance()), now = Date.now(), lt = FS.lastTap;
+      if (h2 && h2.type === 'link' && lt && lt.id === h2.id && now - lt.t < 450) { FS.lastTap = null; const lk = FL.linkById(f, h2.id); if (lk) { floorOpenItem(lk.refId); return; } }
+      FS.lastTap = h2 && h2.type === 'link' ? { id: h2.id, t: now } : null;
+    }
     if (!floorEditing()) { // view mode: links and lines can be looked at
       const hit = FL.hitTest(f, pt.x, pt.y, floorTolerance());
       floorSelect(hit && hit.type !== 'point' ? hit : null); return;

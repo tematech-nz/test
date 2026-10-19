@@ -1943,5 +1943,37 @@ test('the showcase demo is valid, round-trips, and shows the newer features', ()
   assert.strictEqual(M.floorMaps(q)[0].floor.links.length, M.floorMaps(p)[0].floor.links.length);
 });
 
+test('floor plan rendering: edit/view/export, tracing image only on screen, validation of broken plans', () => {
+  const p = B.buildShowcaseProject(), R = NM.render, fm = M.floorMaps(p)[1];
+  const view = R.renderMap(p, fm.id, { mode: 'view', zoom: 0.5 }), exp = R.renderMap(p, fm.id, { mode: 'export' });
+  assert.ok(view.content.indexOf('data-flink') >= 0, 'links drawn');
+  assert.ok(R.renderMap(p, fm.id, { mode: 'edit', zoom: 0.5 }).content.length > view.content.length, 'edit mode adds the point handles');
+  assert.ok(exp.content.indexOf('1 m') >= 0, 'export has a scale bar');
+  const bg = { href: 'blob:x', x: 0, y: 0, w: 500, h: 300, opacity: 0.4 };
+  assert.ok(R.renderMap(p, fm.id, { mode: 'edit', zoom: 1, floorBg: bg }).content.indexOf('<image') >= 0);
+  assert.ok(R.renderMap(p, fm.id, { mode: 'export', floorBg: bg }).content.indexOf('<image') < 0, 'the tracing image never reaches an export');
+  assert.ok(R.svgDocument(p, fm.id).indexOf('<image') < 0);
+  const q = M.clone(p), f = M.floorMaps(q)[0].floor;
+  f.lines[0].b = 'fpt_missing';
+  assert.ok(M.validateProject(q).some((i) => i.code === 'BAD_FLOOR_LINE' && i.severity === 'error'));
+});
+
+test('a schema 4 file (no floor plans) opens as schema 5 unchanged', () => {
+  const old = M.clone(B.buildDemoProject()); old.schemaVersion = 4;
+  const r = M.migrate(JSON.parse(JSON.stringify(old)));
+  assert.strictEqual(r.migratedFrom, 4); assert.strictEqual(r.project.schemaVersion, M.SCHEMA_VERSION);
+  assert.strictEqual(M.floorMaps(r.project).length, 0);
+  assert.strictEqual(r.project.objects.length, old.objects.length);
+});
+
+test('deleting equipment removes its floor plan links; a group or object link can be added once per plan', () => {
+  const p = B.buildShowcaseProject(), fm = M.floorMaps(p)[1], rack = p.objects.find((o) => o.name === 'Rack B');
+  assert.ok(NM.floor.linkOf(fm.floor, rack.id));
+  assert.throws(() => NM.floor.addLink(fm.floor, { kind: 'object', refId: rack.id, x: 0, y: 0, w: 60, d: 100 }), /already linked/);
+  const ws = p.objects.find((o) => o.name === 'Reception PC'); M.deleteContainerOrObject(p, 'object', ws.id);
+  assert.ok(!NM.floor.linkOf(fm.floor, ws.id));
+  assert.deepStrictEqual(M.validateProject(p).filter((i) => i.severity === 'error'), []);
+});
+
 console.log('\n' + passed + ' passed, ' + failed + ' failed');
 process.exit(failed ? 1 : 0);

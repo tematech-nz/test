@@ -1523,6 +1523,52 @@ const ok = (m) => console.log('  ok   ' + m);
     await page.selectOption('#mapSelect', await page.evaluate(() => NetMap.app.S.p.maps[0].id)); await page.waitForTimeout(100);
   });
 
+  await step('floor plans in the showcase: view mode, open the real item, on-floor-plans line, edit line, undo', async () => {
+    await page.click('#btnMode'); await page.waitForTimeout(100); // view mode
+    await page.evaluate(() => NetMap.app.api.loadProject(NetMap.builder.buildShowcaseProject()));
+    const fm = await page.evaluate(() => NetMap.model.floorMaps(NetMap.app.S.p).map((m) => ({ id: m.id, name: m.name })));
+    assert.deepStrictEqual(fm.map((m) => m.name), ['Server room plan', 'Office plan']);
+    await page.selectOption('#mapSelect', fm[1].id); await page.waitForTimeout(200);
+    assert.ok(!(await page.isVisible('[data-floortool="rect"]')), 'no drawing tools in view mode');
+    assert.strictEqual(await page.locator('#vp [data-flink]').count(), 5);
+    assert.ok(await page.isVisible('#scaleBar'), 'scale bar');
+    // double-click the rack link: its real item opens on the equipment map
+    const box = await page.locator('#vp [data-flink] rect').first().boundingBox();
+    await page.mouse.dblclick(box.x + box.width / 2, box.y + box.height / 2); await page.waitForTimeout(250);
+    assert.strictEqual(await page.evaluate(() => NetMap.app.S.p.maps.find((m) => m.id === NetMap.app.S.mapId).kind || 'equipment'), 'equipment');
+    // the item lists the plan it is on
+    const pc = await page.evaluate(() => NetMap.app.S.p.objects.find((o) => o.name === 'WS-02').id);
+    await page.evaluate((id) => NetMap.app.api.select({ kind: 'object', id }), pc); await page.waitForTimeout(100);
+    assert.ok(/On floor plans/.test(await page.innerText('#detailsPane')) && /Office plan/.test(await page.innerText('#detailsPane')));
+    // edit: change a line kind through the details panel, undo restores it
+    await page.click('#btnMode'); await page.waitForTimeout(100);
+    await page.selectOption('#mapSelect', fm[1].id); await page.waitForTimeout(200);
+    const line = await page.evaluate(() => { const f = NetMap.floor.ensure(NetMap.app.S.p.maps.find((m) => m.id === NetMap.app.S.mapId)); const l = f.lines.find((x) => x.kind === 'wall'); NetMap.app.api.select({ kind: 'fline', id: l.id }); return l.id; });
+    await page.waitForSelector('#detailsPane select[data-ff="kind"]');
+    await page.selectOption('#detailsPane select[data-ff="kind"]', 'furniture');
+    const kindOf = () => page.evaluate((id) => NetMap.floor.ensure(NetMap.app.S.p.maps.find((m) => m.id === NetMap.app.S.mapId)).lines.find((x) => x.id === id).kind, line);
+    assert.strictEqual(await kindOf(), 'furniture');
+    await page.click('#btnUndo'); assert.strictEqual(await kindOf(), 'wall');
+    // Delete key removes the selected line, undo brings it back
+    const n0 = await page.evaluate(() => NetMap.floor.ensure(NetMap.app.S.p.maps.find((m) => m.id === NetMap.app.S.mapId)).lines.length);
+    await page.evaluate((id) => NetMap.app.api.select({ kind: 'fline', id }), line);
+    await page.keyboard.press('Delete');
+    assert.strictEqual(await page.evaluate(() => NetMap.floor.ensure(NetMap.app.S.p.maps.find((m) => m.id === NetMap.app.S.mapId)).lines.length), n0 - 1);
+    await page.click('#btnUndo');
+    assert.strictEqual(await page.evaluate(() => NetMap.floor.ensure(NetMap.app.S.p.maps.find((m) => m.id === NetMap.app.S.mapId)).lines.length), n0);
+    // drag a corner point: the walls stay joined to it
+    const before = await page.evaluate(() => { const f = NetMap.floor.ensure(NetMap.app.S.p.maps.find((m) => m.id === NetMap.app.S.mapId)); const q = f.points.find((x) => x.x === 0 && x.y === 0); return { id: q.id, deg: NetMap.floor.degree(f, q.id) }; });
+    await page.evaluate(() => NetMap.app.api.fitMap()); await page.waitForTimeout(150);
+    const org = await page.evaluate(() => { const v = NetMap.app.S.p.maps.find((m) => m.id === NetMap.app.S.mapId).viewport; const r = document.getElementById('canvas').getBoundingClientRect(); return { x: r.left + v.x, y: r.top + v.y, z: v.zoom }; });
+    await page.click('[data-floortool="select"]');
+    await page.mouse.move(org.x, org.y); await page.mouse.down(); await page.mouse.move(org.x + 60 * org.z, org.y + 40 * org.z, { steps: 6 }); await page.mouse.up();
+    const after = await page.evaluate((id) => { const f = NetMap.floor.ensure(NetMap.app.S.p.maps.find((m) => m.id === NetMap.app.S.mapId)); const q = f.points.find((x) => x.id === id); return q && { x: q.x, y: q.y, deg: NetMap.floor.degree(f, id) }; }, before.id);
+    assert.ok(after && after.x > 0 && after.y > 0 && after.deg === before.deg, 'corner moved, still joined: ' + JSON.stringify(after));
+    await page.click('#btnUndo');
+    await page.evaluate(() => NetMap.app.api.loadProject(NetMap.builder.buildDemoProject()));
+    await page.waitForSelector('#vp [data-kind="object"]');
+  });
+
   await step('autosave survives a refresh', async () => {
     await page.click('#btnMode'); // back to view mode flushes the save
     const name = await page.evaluate(() => NetMap.app.S.p.name);
