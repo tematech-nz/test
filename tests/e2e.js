@@ -43,6 +43,10 @@ const ok = (m) => console.log('  ok   ' + m);
     assert.ok((await page.locator('#vp [data-kind="port"]').count()) > 40);
     assert.ok(await page.locator('#vp path[stroke-dasharray="7 5"]').count() >= 1, 'fixed link drawn');
     await shot('view-demo');
+    // the button loads the showcase (floor plans, router, live copy...); the rest of the suite runs on the small base scenario
+    assert.strictEqual(await page.evaluate(() => NetMap.model.floorMaps(NetMap.app.S.p).length), 2, 'showcase has two floor plans');
+    await page.evaluate(() => NetMap.app.api.loadProject(NetMap.builder.buildDemoProject()));
+    await page.waitForSelector('#vp [data-kind="object"]');
   });
 
   await step('view mode is read-only (no handles, drag does nothing)', async () => {
