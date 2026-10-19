@@ -1799,6 +1799,25 @@ const ok = (m) => console.log('  ok   ' + m);
     await page.click('#updateBar button[data-upd="hide"]').catch(() => {});
   });
 
+  await step('floor plan: the left list shows only the links placed on this plan', async () => {
+    await page.evaluate(() => NetMap.app.api.loadProject(NetMap.builder.buildShowcaseProject()));
+    const fm = await page.evaluate(() => NetMap.model.floorMaps(NetMap.app.S.p).map((m) => ({ id: m.id, n: m.floor.links.length, names: m.floor.links.map((l) => NetMap.model.findContainer(NetMap.app.S.p, l.refId).item.name).sort() })));
+    await page.selectOption('#mapSelect', fm[1].id); await page.waitForTimeout(200);
+    const rows = await page.locator('#objectList .list-item .grow').allInnerTexts();
+    assert.deepStrictEqual(rows.slice().sort(), fm[1].names, 'exactly the linked items: ' + rows.join(', '));
+    assert.ok(!/Show equipment on other maps/.test(await page.innerText('#objectList')), 'no list of other maps equipment');
+    assert.ok(/On this floor plan/i.test(await page.innerText('#objectList')));
+    assert.ok(!rows.includes('Switch A') && !rows.includes('Rack A'), 'nothing from the other plan or maps');
+    // clicking a row selects that link on the plan
+    await page.locator('#objectList .list-item', { hasText: 'Rack B' }).click();
+    assert.strictEqual(await page.evaluate(() => NetMap.app.S.sel && NetMap.app.S.sel.kind), 'flink');
+    await page.selectOption('#mapSelect', fm[0].id); await page.waitForTimeout(150);
+    const rows0 = await page.locator('#objectList .list-item .grow').allInnerTexts();
+    assert.deepStrictEqual(rows0.slice().sort(), fm[0].names);
+    await page.evaluate(() => NetMap.app.api.loadProject(NetMap.builder.buildDemoProject()));
+    await page.waitForSelector('#vp [data-kind="object"]');
+  });
+
   await step('autosave survives a refresh', async () => {
     await page.click('#btnMode'); // back to view mode flushes the save
     const name = await page.evaluate(() => NetMap.app.S.p.name);

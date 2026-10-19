@@ -801,6 +801,13 @@
       });
       return h;
     }
+    if (isFloor()) { // a floor plan lists only what is placed on it (its links), nothing from the equipment maps
+      const lks = floorOf().links.map((lk) => ({ lk: lk, c: M.findContainer(S.p, lk.refId) })).filter((x) => x.c).sort((a, b) => a.c.item.name.localeCompare(b.c.item.name));
+      let fl = '<h3>On this floor plan <span class="sub" style="text-transform:none;letter-spacing:0">(' + lks.length + ')</span></h3>';
+      fl += lks.length ? lks.map((x) => '<div class="list-item ' + (S.sel && S.sel.id === x.lk.id ? 'active' : '') + '" data-act="goFloor" data-map="' + esc(mid) + '" data-link="' + esc(x.lk.id) + '"><div class="grow">' + esc(x.c.item.name) + '</div><span class="tag">' + esc(x.c.kind === 'group' ? 'group' : M.typeLabel(x.c.item)) + '</span></div>').join('') :
+        '<div class="sub">Nothing is placed on this plan yet. In edit mode use <b>+ Add link...</b> to place a rack, wall socket, device or group from your equipment maps.</div>';
+      $('objectList').innerHTML = fl;
+    } else {
     let ol = '<h3>Equipment' + (M.realMaps(S.p).length > 1 && !onAll() ? ' <span class="sub" style="text-transform:none;letter-spacing:0">on this map</span>' : '') + '</h3>';
     S.p.groups.filter((g) => !g.parentGroupId).forEach((g) => { ol += node('group', g, 0); });
     S.p.objects.filter((o) => !o.containerId).forEach((o) => { ol += node('object', o, 0); });
@@ -808,6 +815,7 @@
     else if (!S.listAll && hidden) ol += '<div class="sub" style="margin-top:6px"><a class="lnk" data-act="listAll">Show equipment on other maps (' + (S.p.groups.filter((g) => !onMap(g.id) && !unplaced('group', g.id)).length + S.p.objects.filter((o) => !onMap(o.id) && !unplaced('object', o.id)).length) + ')</a></div>';
     else if (S.listAll && M.realMaps(S.p).length > 1) ol += '<div class="sub" style="margin-top:6px"><a class="lnk" data-act="listAll">Only this map\'s equipment</a></div>';
     $('objectList').innerHTML = ol;
+    }
 
     const il = $('issueList');
     const errs = S.issues.filter((i) => i.severity !== 'info'), infos = S.issues.length - errs.length;
@@ -2611,7 +2619,12 @@
         case 'floorBgRemove': if (BG[curMap().id]) URL.revokeObjectURL(BG[curMap().id].href); delete BG[curMap().id]; if (FS.tool === 'calib' || FS.tool === 'bgmove') FS.tool = 'select'; FS.calib = null; renderAll(); break;
         case 'floorDelete': floorDeleteSelection(); break;
         case 'floorOpen': floorOpenItem(d.id); break;
-        case 'goFloor': { switchMap(d.map, true); select({ kind: 'flink', id: d.link }); break; }
+        case 'goFloor': {
+          switchMap(d.map, true); select({ kind: 'flink', id: d.link });
+          const lk0 = FL.linkById(floorOf(), d.link), v0 = vpState(), s0 = stageSize(); // bring it to the middle of the view (zoom unchanged)
+          if (lk0) { v0.x = s0.w / 2 - lk0.x * v0.zoom; v0.y = s0.h / 2 - lk0.y * v0.zoom; applyVp(); scheduleSave(true); }
+          break;
+        }
         case 'listAll': S.listAll = !S.listAll; renderLeft(); break;
         case 'traceNet': S.traceNet = !!a.checked; applyTraceNetwork(); renderAll(); showTab('trace'); break;
         case 'seeOnFullMap': seeOnFullMap(); break;
