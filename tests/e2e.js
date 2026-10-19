@@ -19,6 +19,7 @@ const ok = (m) => console.log('  ok   ' + m);
   // a copy opened from disk asks the repository for the published version: answer it locally (default: same version as this checkout)
   let repoVersion = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'version.json'), 'utf8')).version;
   await ctx.route('https://raw.githubusercontent.com/**', (r) => r.fulfill({ status: 200, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify({ version: repoVersion }) }));
+  ctx.setDefaultTimeout(10000); // a wait that cannot succeed should fail in 10 s, not hang for Playwright's 30 s default
   const page = await ctx.newPage();
   const errors = [];
   const dialogs = []; // beforeunload prompts etc: record and accept so reloads in the tests proceed
@@ -28,7 +29,8 @@ const ok = (m) => console.log('  ok   ' + m);
   // a new item follows the cursor: move over the map and click to drop it (Ctrl keeps going)
   const placeAt = async (x = 640, y = 620, mods = []) => { await page.mouse.move(x, y); await page.mouse.move(x + 3, y + 3); await page.keyboard.down('Control'); await page.keyboard.up('Control'); if (mods.length) await page.keyboard.down(mods[0]); await page.mouse.click(x + 3, y + 3); if (mods.length) await page.keyboard.up(mods[0]); await page.waitForTimeout(150); };
   const shot = async (name) => { if (shots) await page.screenshot({ path: path.join(shots, String(++n).padStart(2, '0') + '-' + name + '.png') }); };
-  const step = async (name, fn) => { try { await fn(); ok(name); } catch (e) { failed++; console.log('  FAIL ' + name + '\n       ' + String(e.stack || e).split('\n').slice(0, 5).join('\n       ')); await shot('FAIL-' + name.replace(/\W+/g, '_')); } };
+  const timings = []; // [ms, name]: printed at the end, slowest first
+  const step = async (name, fn) => { const t0 = Date.now(); try { await fn(); ok(name); timings.push([Date.now() - t0, name]); } catch (e) { failed++; console.log('  FAIL ' + name + '\n       ' + String(e.stack || e).split('\n').slice(0, 5).join('\n       ')); await shot('FAIL-' + name.replace(/\W+/g, '_')); } };
 
   await page.goto(URL);
   await page.evaluate(() => { localStorage.clear(); });
@@ -1794,9 +1796,11 @@ const ok = (m) => console.log('  ok   ' + m);
     assert.ok(/download the new version from the repository/i.test(txt), txt);
     assert.ok(!/reload with/i.test(txt), 'no reload advice for a local copy');
     assert.ok((await page.getAttribute('#updateBar a', 'href')).indexOf('github.com') > 0, 'link to the repository');
-    repoVersion = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'version.json'), 'utf8')).version;
-    await page.evaluate(() => { NetMap.app.S.newVersion = null; NetMap.app.api.checkVersion(); });
-    await page.click('#updateBar button[data-upd="hide"]').catch(() => {});
+    await page.click('#updateBar button[data-upd="hide"]'); // "Remind me later" dismisses the banner
+    assert.ok(!(await page.isVisible('#updateBar')), 'dismissed');
+    repoVersion = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'version.json'), 'utf8')).version; // back to the current version for the rest of the suite
+    await page.evaluate(() => { NetMap.app.S.newVersion = null; return NetMap.app.api.checkVersion(); });
+    assert.ok(!(await page.isVisible('#updateBar')) && !(await page.isVisible('#btnUpdate')), 'no notice when the versions match');
   });
 
   await step('floor plan: the left list shows only the links placed on this plan', async () => {
@@ -1914,7 +1918,8 @@ const ok = (m) => console.log('  ok   ' + m);
     await page.selectOption('#graphView select[data-g="from"]', '@internet');
     assert.ok(/Reachable from Internet \(all ISPs\)/i.test(await page.innerText('#graphView')), 'tree from every ISP');
     assert.ok(/Lone PC/.test(await page.innerText('#graphView .gv-tree')), 'what the Internet can reach');
-    await page.selectOption('#graphView select[data-g="from"]', { label: 'Lone PC (Generic)' }).catch(async () => { const v = await page.evaluate(() => Array.from(document.querySelectorAll('#graphView select[data-g="from"] option')).find((o) => /Lone PC/.test(o.textContent)).value); await page.selectOption('#graphView select[data-g="from"]', v); });
+    const lone = await page.evaluate(() => Array.from(document.querySelectorAll('#graphView select[data-g="from"] option')).find((o) => /Lone PC/.test(o.textContent)).value);
+    await page.selectOption('#graphView select[data-g="from"]', lone);
     await page.selectOption('#graphView select[data-g="to"]', '@internet');
     assert.ok(/Paths from Lone PC to Internet \(all ISPs\)/i.test(await page.innerText('#graphView')), 'how the device reaches the Internet');
     assert.ok(/ISP 2/.test(await page.innerText('#graphView .gv-path')), 'through its own ISP');
@@ -2075,6 +2080,9 @@ const ok = (m) => console.log('  ok   ' + m);
   });
 
   await browser.close();
+  const total = timings.reduce((s, t) => s + t[0], 0);
+  console.log('\nslowest steps (total ' + (total / 1000).toFixed(1) + ' s over ' + timings.length + ' steps):');
+  timings.slice().sort((a, b) => b[0] - a[0]).slice(0, 12).forEach((t) => console.log('  ' + String((t[0] / 1000).toFixed(1)).padStart(6) + ' s  ' + t[1]));
   const real = errors.filter((e) => !/favicon/.test(e));
   if (real.length) { failed++; console.log('  FAIL console/page errors:\n    ' + real.join('\n    ')); }
   console.log(failed ? '\n' + failed + ' e2e failure(s)' : '\nall e2e checks passed');

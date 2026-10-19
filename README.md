@@ -270,7 +270,7 @@ npm test                      # model, tracing, validation, export logic (Node o
 node tests/e2e.js [shotsDir]  # browser checks with Playwright + Chromium (mobile view, edit, autosave, exports)
 ```
 
-The e2e test needs `playwright` resolvable from Node (for example `NODE_PATH=$(npm root -g)`).
+The e2e test needs `playwright` resolvable from Node (for example `NODE_PATH=$(npm root -g)`). It takes about a minute and prints its slowest steps at the end; a wait that cannot succeed fails after 10 seconds (the Playwright default is 30), so a step that suddenly takes 10 s or more usually means a selector or a state that is wrong, not a slow app.
 
 ## Known limits (MVP)
 
