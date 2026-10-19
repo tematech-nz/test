@@ -86,6 +86,12 @@ compact files open identically (`compactProject()` / `expandProject()` in `js/mo
 incompatible terminations, fixed links with missing endpoints or wires on the wrong panel, duplicate wire numbers,
 invalid internal mappings. Unused ports are informational only. Entries link to the affected item.
 
+## The overview map
+
+`auto: "all"` is the automatic "All items" map. Its placements are `ghost: true` links to the real placement of each item on the ordinary maps;
+their `x`, `y`, `w`, `h` are derived (source position plus the `allOff` of the source map, `{x, y}` on that map) and rewritten on every sync, so
+they never need editing by hand. Older files carry `allAt` / `allFrom` instead; they are ignored and `allOff` is rebuilt from the layout.
+
 ## Floor plans (schema 5)
 
 A map with `"kind": "floor"` (equipment maps have no `kind`) carries a `floor` object instead of placements. Units are integer centimetres.

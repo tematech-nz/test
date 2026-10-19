@@ -1478,14 +1478,25 @@ test('All items overview map: appears with 2+ maps, ghosts of everything, positi
   assert.ok(gp.x >= gs.x + gs.w + 100, 'second map is laid out to the right of the first block');
   assert.deepStrictEqual([gs.w, gs.h], [rs.w, rs.h]);
   assert.deepStrictEqual(M.mapsFor(p, 'object', sw.id), [m1], 'the overview is not where an item lives');
-  // moving a ghost sticks; a new item on a map joins that map's block; a removed item loses its ghost
-  gs.x += 500; gs.y += 70; const moved = [gs.x, gs.y];
+  // overview items are links to their sources: a stray nudge is pulled back, the block of a map moves as a whole, a moved source is followed,
+  // a new item on a map joins that map's block, a removed item loses its link
+  const gs0 = [gs.x, gs.y];
+  gs.x += 500; gs.y += 70;
+  M.syncAllMap(p);
+  assert.deepStrictEqual([M.placementOf(p, am.id, sw.id).x, M.placementOf(p, am.id, sw.id).y], gs0, 'an item dragged away on its own snaps back to its source position');
+  M.moveOverviewBlock(p, sw.id, 500, 70);
+  const moved = [M.placementOf(p, am.id, sw.id).x, M.placementOf(p, am.id, sw.id).y];
+  assert.deepStrictEqual(moved, [gs0[0] + 500, gs0[1] + 70], 'the block of the item\'s map moved');
+  assert.strictEqual(M.placementOf(p, am.id, pc.id).x, gp.x, 'other maps\' blocks stay where they are');
+  rs.x += 40; rs.y += 20; M.syncAllMap(p);
+  assert.deepStrictEqual([M.placementOf(p, am.id, sw.id).x, M.placementOf(p, am.id, sw.id).y], [moved[0] + 40, moved[1] + 20], 'moving the source moves its link');
+  assert.strictEqual(M.overviewBlock(p, sw.id).length, 1);
+  rs.x -= 40; rs.y -= 20; M.syncAllMap(p);
   const extra = B.addObjectPlaced(p, m1, { type: 'switch', name: 'Sw2', portCount: 4 }, 40, 300);
   M.syncAllMap(p);
-  assert.deepStrictEqual([M.placementOf(p, am.id, sw.id).x, M.placementOf(p, am.id, sw.id).y], moved);
   const ge = M.placementOf(p, am.id, extra.id), re = M.placementOf(p, m1, extra.id), rsw = M.placementOf(p, m1, sw.id);
-  assert.strictEqual(ge.y - (moved[1] - 70), re.y - rsw.y, 'new item keeps its place relative to its map block (the block was not moved with the ghost)');
-  assert.strictEqual(ge.x - (moved[0] - 500), re.x - rsw.x);
+  assert.strictEqual(ge.y - M.placementOf(p, am.id, sw.id).y, re.y - rsw.y, 'new item keeps its place relative to its map block');
+  assert.strictEqual(ge.x - M.placementOf(p, am.id, sw.id).x, re.x - rsw.x);
   M.deleteContainerOrObject(p, 'object', extra.id, 'delete'); M.syncAllMap(p);
   assert.ok(!M.placementOf(p, am.id, extra.id), 'ghost of a deleted item is removed');
   // an item shown on both maps appears once; ghost copies on real maps do not count as sources

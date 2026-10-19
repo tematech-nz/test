@@ -1831,6 +1831,56 @@ const ok = (m) => console.log('  ok   ' + m);
     await page.waitForSelector('#vp [data-kind="object"]');
   });
 
+  await step('overview: "open the original" and the map link really go to the original map', async () => {
+    await page.evaluate(() => NetMap.app.api.loadProject(NetMap.builder.buildDemoProject()));
+    if (await page.evaluate(() => NetMap.app.S.mode === 'edit')) await page.click('#btnMode');
+    const allId = await page.evaluate(() => NetMap.model.allMap(NetMap.app.S.p).id);
+    const mapName = () => page.evaluate(() => NetMap.app.S.p.maps.find((m) => m.id === NetMap.app.S.mapId).name);
+    await page.selectOption('#mapSelect', allId); await page.waitForTimeout(200);
+    await page.evaluate(() => NetMap.app.api.fitMap()); await page.waitForTimeout(100);
+    const rack = await page.evaluate(() => NetMap.app.S.p.objects.find((o) => o.name === 'Rack B').id);
+    const b = await page.locator('#vp rect[data-kind="object"][data-id="' + rack + '"]').boundingBox();
+    await page.mouse.click(b.x + 8, b.y + b.height - 8); await page.waitForTimeout(150);
+    assert.ok(/Live copy of an item on another map/.test(await page.innerText('#detailsPane')), 'live copy banner');
+    await page.click('#detailsPane [data-act="openOriginal"]'); await page.waitForTimeout(200);
+    assert.strictEqual(await mapName(), 'Office', 'went to the original map');
+    assert.strictEqual(await page.evaluate(() => NetMap.app.S.selGhost), false);
+    // from the overview again, via the "Edit it on its own map" link
+    await page.selectOption('#mapSelect', allId); await page.waitForTimeout(150);
+    const grp = await page.evaluate(() => NetMap.app.S.p.groups.find((g) => g.name === 'Server room').id);
+    await page.evaluate((id) => NetMap.app.api.select({ kind: 'group', id }), grp); await page.waitForTimeout(100);
+    assert.ok(/Overview copy/.test(await page.innerText('#detailsPane')));
+    await page.click('#detailsPane .msg-box a[data-act="goto"]'); await page.waitForTimeout(200);
+    assert.strictEqual(await mapName(), 'Server room');
+    await page.evaluate(() => NetMap.app.api.loadProject(NetMap.builder.buildDemoProject()));
+    await page.waitForSelector('#vp [data-kind="object"]');
+  });
+
+  await step('overview: items are links to their sources; dragging one moves its whole map block, not just that item', async () => {
+    await page.evaluate(() => NetMap.app.api.loadProject(NetMap.builder.buildDemoProject()));
+    if (!(await page.evaluate(() => NetMap.app.S.mode === 'edit'))) await page.click('#btnMode');
+    await page.selectOption('#mapSelect', await page.evaluate(() => NetMap.model.allMap(NetMap.app.S.p).id)); await page.waitForTimeout(200);
+    await page.evaluate(() => NetMap.app.api.fitMap()); await page.waitForTimeout(100);
+    const pos = () => page.evaluate(() => { const S = NetMap.app.S, am = NetMap.model.allMap(S.p), o = {}; S.p.placements.filter((q) => q.mapId === am.id).forEach((q) => { o[NetMap.model.findContainer(S.p, q.refId).item.name] = [q.x, q.y]; }); return o; });
+    const before = await pos();
+    const h = page.locator('#vp rect[data-handle="move"]').first();
+    const hb = await h.boundingBox();
+    await page.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2); await page.mouse.down(); await page.mouse.move(hb.x + hb.width / 2 + 80, hb.y + hb.height / 2 + 50, { steps: 6 }); await page.mouse.up();
+    await page.waitForTimeout(150);
+    const after = await pos();
+    const moved = Object.keys(before).filter((k) => before[k][0] !== after[k][0] || before[k][1] !== after[k][1]);
+    assert.ok(moved.length >= 3, 'a whole block moved: ' + moved.join(', '));
+    const d0 = [after[moved[0]][0] - before[moved[0]][0], after[moved[0]][1] - before[moved[0]][1]];
+    moved.forEach((k) => assert.deepStrictEqual([after[k][0] - before[k][0], after[k][1] - before[k][1]], d0, k + ' moved by the same amount'));
+    const stayed = Object.keys(before).filter((k) => !moved.includes(k));
+    assert.ok(stayed.length >= 2, 'the other map\'s block stayed: ' + stayed.join(', '));
+    // moving a source on its own map moves its link on the overview
+    const src = await page.evaluate(() => { const S = NetMap.app.S, sw = S.p.objects.find((o) => o.name === 'Switch A'); NetMap.app.api.commit('nudge', (p) => { p.placements.find((q) => q.refId === sw.id && !q.ghost).y += 20; }); const am = NetMap.model.allMap(S.p); return S.p.placements.find((q) => q.refId === sw.id && q.mapId === am.id).y; });
+    assert.strictEqual(src, after['Switch A'][1] + 20, 'the overview follows the moved source');
+    await page.evaluate(() => NetMap.app.api.loadProject(NetMap.builder.buildDemoProject()));
+    await page.waitForSelector('#vp [data-kind="object"]');
+  });
+
   await step('autosave survives a refresh', async () => {
     await page.click('#btnMode'); // back to view mode flushes the save
     const name = await page.evaluate(() => NetMap.app.S.p.name);

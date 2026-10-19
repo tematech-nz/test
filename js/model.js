@@ -175,9 +175,9 @@
   }
   /*
    * The automatic "All items" map (map.auto === 'all'): once a project has two or more ordinary maps it shows a ghost copy of every
-   * item that lives on them, so rooms kept on separate maps can be seen together (with the cables between them). The ghosts can be
-   * moved around (positions are the overview's own) but nothing about the items can be edited there. Each ordinary map gets a block
-   * of the overview (map.allAt / map.allFrom remember where its items were laid out) so items added later land in the same block.
+   * item that lives on them, so rooms kept on separate maps can be seen together (with the cables between them). The items there are
+   * links to their sources: they follow them (position and size) and nothing about them can be edited there. Each ordinary map gets a
+   * block of the overview (map.allOff, the shift from its own coordinates) which can be moved as a whole, so items added later land in it.
    */
   function realMaps(p) { return p.maps.filter(function (m) { return !m.auto; }); }
   /* two kinds of map: equipment maps (racks, panels, cables...) and floor plans (walls and to-scale links; see js/floor.js) */
@@ -217,15 +217,15 @@
     reals.forEach(function (m) {
       var mine = Object.keys(want).filter(function (r) { return srcMap[r] === m && !have[r]; });
       if (!mine.length) return;
-      if (!m.allAt) { // first time this map appears in the overview: a block to the right of what is there
+      if (!overviewOffset(p, m, am)) { // first time this map appears in the overview: a block to the right of what is there
         var right = 0, any = false;
         p.placements.forEach(function (pl) { if (pl.mapId === am.id) { any = true; right = Math.max(right, pl.x + pl.w); } });
         var minX = Infinity, minY = Infinity;
         Object.keys(want).forEach(function (r) { if (srcMap[r] === m) { minX = Math.min(minX, want[r].x); minY = Math.min(minY, want[r].y); } });
-        m.allFrom = { x: minX, y: minY }; m.allAt = { x: any ? right + 120 : 40, y: 40 };
+        m.allOff = { x: (any ? right + 120 : 40) - minX, y: 40 - minY };
       }
       mine.forEach(function (r) {
-        var src = want[r], pl = addPlacement(p, am.id, src.refType, r, src.x - m.allFrom.x + m.allAt.x, src.y - m.allFrom.y + m.allAt.y, src.w, src.h);
+        var src = want[r], pl = addPlacement(p, am.id, src.refType, r, src.x + m.allOff.x, src.y + m.allOff.y, src.w, src.h);
         pl.ghost = true; have[r] = pl; changed = true;
       });
     });
@@ -248,12 +248,54 @@
     });
     return n;
   }
+  /*
+   * The overview is a view of the other maps, not a copy of them: each item on it is a link to its source and is drawn where the source
+   * is, shifted by the offset of the block its map occupies there (map.allOff). Files from before that offset existed get it from the
+   * most common shift of their overview items; a stray item that was dragged away on its own is pulled back by the next sync.
+   */
+  function overviewOffset(p, m, am) {
+    if (m.allOff) return m.allOff;
+    var votes = {}, best = null, bc = 0;
+    p.placements.forEach(function (g) {
+      if (g.mapId !== am.id || !g.ghost) return;
+      var r = realPlacement(p, g.refId);
+      if (!r || r.mapId !== m.id) return;
+      var k = (g.x - r.x) + ',' + (g.y - r.y);
+      votes[k] = (votes[k] || 0) + 1;
+      if (votes[k] > bc) { bc = votes[k]; best = { x: g.x - r.x, y: g.y - r.y }; }
+    });
+    if (best) m.allOff = best;
+    return best;
+  }
   function syncGhosts(p) {
+    var am = allMap(p);
     p.placements.forEach(function (pl) {
       if (!pl.ghost) return;
       var r = realPlacement(p, pl.refId);
-      if (r) { pl.w = r.w; pl.h = r.h; }
+      if (!r) return;
+      pl.w = r.w; pl.h = r.h;
+      if (am && pl.mapId === am.id) { // an overview item follows its source
+        var sm = p.maps.filter(function (x) { return x.id === r.mapId; })[0], off = sm && overviewOffset(p, sm, am);
+        if (off) { pl.x = r.x + off.x; pl.y = r.y + off.y; }
+      }
     });
+  }
+  /* the overview items that come from the same map as this item: they move together, because their layout is that of the source map */
+  function overviewBlock(p, refId) {
+    var am = allMap(p), r = realPlacement(p, refId);
+    if (!am || !r) return [];
+    return p.placements.filter(function (g) {
+      if (g.mapId !== am.id || !g.ghost) return false;
+      var q = realPlacement(p, g.refId);
+      return q && q.mapId === r.mapId;
+    });
+  }
+  /* move the block of the item's map on the overview */
+  function moveOverviewBlock(p, refId, dx, dy) {
+    var am = allMap(p), r = realPlacement(p, refId), sm = r && p.maps.filter(function (x) { return x.id === r.mapId; })[0];
+    if (!am || !sm || !overviewOffset(p, sm, am)) return;
+    sm.allOff = { x: sm.allOff.x + dx, y: sm.allOff.y + dy };
+    syncGhosts(p);
   }
   /* the placement itself plus placements of its visual contents on the same map */
   function placementGroup(p, placementId) {
@@ -1252,7 +1294,7 @@
     findContainer: findContainer, groupOf: groupOf, parentOf: parentOf, containerChildren: containerChildren, descendants: descendants,
     addPlacement: addPlacement, placementOf: placementOf, placementGroup: placementGroup, movePlacement: movePlacement,
     growToFit: growToFit, mapsFor: mapsFor, addGroup: addGroup, addObject: addObject, setContainer: setContainer,
-    setPortCount: setPortCount, findPortGroup: findPortGroup, parsePortRange: parsePortRange, addPortGroup: addPortGroup, updatePortGroup: updatePortGroup, deletePortGroup: deletePortGroup, portGroupOf: portGroupOf, prunePortGroups: prunePortGroups, hasDeviceIp: hasDeviceIp, isFloorMap: isFloorMap, equipmentMaps: equipmentMaps, floorMaps: floorMaps, addMap: addMap, moveMap: moveMap, normalizeGhosts: normalizeGhosts, setLinkLabelOffset: setLinkLabelOffset, realMaps: realMaps, allMap: allMap, syncAllMap: syncAllMap, peerGroup: peerGroup, linkPortGroups: linkPortGroups, unlinkPortGroup: unlinkPortGroup, realPlacement: realPlacement, syncGhosts: syncGhosts, pseudoOf: pseudoOf, pseudoDevices: pseudoDevices, hasPortIp: hasPortIp, setDeviceIp: setDeviceIp, effectivePortIp: effectivePortIp, ipList: ipList, setPortIp: setPortIp, IP_ERROR: IP_ERROR, setDeviceKind: setDeviceKind, isTermination: isTermination, DEVICE_KINDS: DEVICE_KINDS, deviceKindInfo: deviceKindInfo, typeLabel: typeLabel, accessPorts: accessPorts, validSectionRows: validSectionRows, setUplinkPorts: setUplinkPorts, setSwitchLayout: setSwitchLayout, setFullWidth: setFullWidth, setSectionSize: setSectionSize, validSectionSizes: validSectionSizes, defaultSectionSize: defaultSectionSize, effectiveSectionSize: effectiveSectionSize, setRouterPorts: setRouterPorts, isValidIp: isValidIp, canConnectPatch: canConnectPatch, addPatchCable: addPatchCable,
+    setPortCount: setPortCount, findPortGroup: findPortGroup, parsePortRange: parsePortRange, addPortGroup: addPortGroup, updatePortGroup: updatePortGroup, deletePortGroup: deletePortGroup, portGroupOf: portGroupOf, prunePortGroups: prunePortGroups, hasDeviceIp: hasDeviceIp, isFloorMap: isFloorMap, equipmentMaps: equipmentMaps, floorMaps: floorMaps, addMap: addMap, moveMap: moveMap, normalizeGhosts: normalizeGhosts, overviewBlock: overviewBlock, moveOverviewBlock: moveOverviewBlock, overviewOffset: overviewOffset, setLinkLabelOffset: setLinkLabelOffset, realMaps: realMaps, allMap: allMap, syncAllMap: syncAllMap, peerGroup: peerGroup, linkPortGroups: linkPortGroups, unlinkPortGroup: unlinkPortGroup, realPlacement: realPlacement, syncGhosts: syncGhosts, pseudoOf: pseudoOf, pseudoDevices: pseudoDevices, hasPortIp: hasPortIp, setDeviceIp: setDeviceIp, effectivePortIp: effectivePortIp, ipList: ipList, setPortIp: setPortIp, IP_ERROR: IP_ERROR, setDeviceKind: setDeviceKind, isTermination: isTermination, DEVICE_KINDS: DEVICE_KINDS, deviceKindInfo: deviceKindInfo, typeLabel: typeLabel, accessPorts: accessPorts, validSectionRows: validSectionRows, setUplinkPorts: setUplinkPorts, setSwitchLayout: setSwitchLayout, setFullWidth: setFullWidth, setSectionSize: setSectionSize, validSectionSizes: validSectionSizes, defaultSectionSize: defaultSectionSize, effectiveSectionSize: effectiveSectionSize, setRouterPorts: setRouterPorts, isValidIp: isValidIp, canConnectPatch: canConnectPatch, addPatchCable: addPatchCable,
     updatePatchCable: updatePatchCable, deletePatchCable: deletePatchCable, addInternalMapping: addInternalMapping,
     removeInternalMapping: removeInternalMapping, autoMapPanel: autoMapPanel, rearPorts: rearPorts,
     sequentialPorts: sequentialPorts, addFixedLink: addFixedLink, updateLinkMeta: updateLinkMeta,

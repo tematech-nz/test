@@ -216,8 +216,8 @@
   function goTo(kind, id, mapId, keepTab) {
     let maps = M.mapsFor(S.p, kind, id);
     if (kind === 'map') { switchMap(id); return; }
-    if ((kind === 'object' || kind === 'group') && onAll() && M.placementOf(S.p, S.mapId, id)) maps = [S.mapId]; // already in the overview
-    else if (mapId && maps.indexOf(mapId) >= 0) maps = [mapId];
+    if (mapId && maps.indexOf(mapId) >= 0) maps = [mapId]; // a map was asked for (e.g. "open the original", a map link): go there even from the overview
+    else if ((kind === 'object' || kind === 'group') && onAll() && M.placementOf(S.p, S.mapId, id)) maps = [S.mapId]; // already in the overview
     else if (maps.indexOf(S.mapId) >= 0) maps = [S.mapId];
     if (!maps.length) toast('This item is not placed on any map yet', true);
     else if (maps[0] !== S.mapId) switchMap(maps[0], true);
@@ -563,7 +563,7 @@
         const q = S.p.placements.find((x) => x.id === h.dataset.pl);
         if (!q) return;
         const kind = h.dataset.handle, start = toMap(e.clientX, e.clientY);
-        const items = kind === 'move' ? M.placementGroup(S.p, q.id).map((x) => ({ q: x, ox: x.x, oy: x.y })) : [{ q: q, ow: q.w, oh: q.h }];
+        const items = kind === 'move' ? (onAll() && q.ghost ? M.overviewBlock(S.p, q.refId) : M.placementGroup(S.p, q.id)).map((x) => ({ q: x, ox: x.x, oy: x.y })) : [{ q: q, ow: q.w, oh: q.h }]; // on the overview a drag moves the whole block of that item's map
         S.drag = { kind: kind, plId: q.id, ctrl: e.ctrlKey || e.metaKey, start: start, snap: JSON.stringify(S.p), items: items, moved: false, chain: kind === 'move' && !q.ghost ? B.captureChain(S.p, q.mapId, q.refId) : [], from: q.ghost ? null : (() => { const c = M.findContainer(S.p, q.refId); return c ? (c.kind === 'group' ? c.item.parentGroupId : c.item.containerId) : null; })() };
         return;
       }
@@ -648,7 +648,11 @@
     const gq = S.p.placements.find((x) => x.id === d.plId);
     if (d.kind === 'label') { /* only the label moved */ }
     else if (/^(fpoint|flink|flabel|fresize|frotate)$/.test(d.kind)) floorDragEnd(d);
-    else if (gq && gq.ghost) { /* a ghost only has a position: no containers, racks or overlaps to sort out */ }
+    else if (gq && gq.ghost && onAll()) { // overview: the block of this item's map moved; remember its new offset (items follow their sources from now on)
+      const it0 = d.items.find((x) => x.q.id === gq.id) || d.items[0];
+      if (it0) { const dx = it0.q.x - it0.ox, dy = it0.q.y - it0.oy; d.items.forEach((x) => { x.q.x = x.ox; x.q.y = x.oy; }); M.moveOverviewBlock(S.p, gq.refId, dx, dy); }
+    }
+    else if (gq && gq.ghost) { /* a live copy on an equipment map only has a position: no containers, racks or overlaps to sort out */ }
     else if (d.kind === 'move') {
       reassignContainer(d.plId, d);
       const q = S.p.placements.find((x) => x.id === d.plId), c = q && M.findContainer(S.p, q.refId);
@@ -2430,6 +2434,7 @@
   function loadProject(p) {
     M.syncAllMap(p);
     const fixed = B.normalizeSizes(p), aligned = B.alignToGrid(p);
+    M.syncGhosts(p); // sizes and grid alignment moved real items: the overview links follow
     if (fixed) setTimeout(() => toast('Adjusted ' + fixed + ' item(s) (too small to read, or not lined up with their rack)', false), 100);
     else if (aligned) setTimeout(() => toast('Aligned ' + aligned + ' item(s) to the grid (older project)', false), 100);
     Object.keys(BG).forEach((k) => { URL.revokeObjectURL(BG[k].href); delete BG[k]; }); // tracing images belong to the page session, not to a project
@@ -2735,7 +2740,7 @@
     try { S.lastExport = localStorage.getItem(KEY_EXPORT); S.fileDirty = localStorage.getItem(KEY_DIRTY) === '1'; } catch (_) { S.lastExport = null; }
     S.p = loadSaved() || M.createProject('Untitled project');
     M.syncAllMap(S.p);
-    if (B.normalizeSizes(S.p) | B.alignToGrid(S.p)) saveNow();
+    if (B.normalizeSizes(S.p) | B.alignToGrid(S.p)) { M.syncGhosts(S.p); saveNow(); }
     S.mapId = firstMap().id;
     loadCollapsed();
     bindUi(); bindCanvas();

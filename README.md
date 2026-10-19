@@ -123,9 +123,11 @@ Try it: File -> Load demo project: two rooms with a fixed link between racks, a 
 - **Folded sections and stacking**: the layout uses an item's drawn height, so you can drop an item right under one whose Front/Rear
   section is folded. In edit mode, items stacked directly under an item (touching it, or one grid step away) follow it down or up
   when it is unfolded or folded, together with what is stacked under them in turn (one undo step).
-- **All items overview**: once a project has two or more maps, an automatic map "All items" appears (not before). It shows a ghost copy of every
-  item from every map, each map laid out as its own block, with the cables and fixed links between them drawn. In edit mode the ghosts can be
-  dragged to arrange the overview (their positions only); nothing about the equipment can be edited there (details are read-only, no toolbar).
+- **All items overview**: once a project has two or more maps, an automatic map "All items" appears (not before). It shows a link to every
+  item from every map (not a copy: it is drawn where the source is and follows it when the source moves or is resized), each map laid out as
+  its own block, with the cables and fixed links between them drawn. In edit mode dragging an item moves the whole block of its map to arrange
+  the overview; nothing about the equipment can be edited there (details are read-only, no toolbar). Ports can be selected and traced there,
+  and "Open the original" (or the map link in the details) goes to the map the item lives on.
   In the map list it is the header (the "lid") of a box that holds all the other maps, wherever it sits in the file; the map selector lists it first.
 - **One editable copy**: an item has exactly one editable placement; on every other map it is a live (ghost) copy. Older files that held the same
   item as editable placements on several maps are converted when opened (the first map keeps the editable one). Showing an item on another map
