@@ -53,7 +53,7 @@
   function scheduleSave(quiet) { if (!quiet) { S.unsaved = true; markDirty(true); setStatus(); } clearTimeout(saveT); saveT = setTimeout(saveNow, 600); }
   function saveNow() {
     clearTimeout(saveT);
-    try { localStorage.setItem(KEY, JSON.stringify(S.p)); S.unsaved = false; S.saveErr = null; S.savedAt = new Date(); }
+    try { localStorage.setItem(KEY, M.serializeProject(S.p)); S.unsaved = false; S.saveErr = null; S.savedAt = new Date(); }
     catch (e) { S.saveErr = e.message || 'storage error'; }
     setStatus();
   }

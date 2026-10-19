@@ -3,7 +3,7 @@
   'use strict';
   var NM = g.NetMap = g.NetMap || {};
 
-  var SCHEMA_VERSION = 3;
+  var SCHEMA_VERSION = 4;
   /* equipment that terminates installed (fixed) cabling on a rear side and presents front jacks */
   var TERMINATIONS = { patchpanel: true, socket: true };
   function isTermination(o) { return !!(o && TERMINATIONS[o.type]); }
@@ -1086,11 +1086,86 @@
     d.schemaVersion = 3;
     return d;
   };
+  /* v4: the file form is compact (see compactProject); nothing to convert - older files simply have everything spelled out */
+  MIGRATIONS[3] = function (d) { d.schemaVersion = 4; return d; };
+
+  /*
+   * Compact file form (what is written to files and to the browser autosave; the app itself always works on the expanded form):
+   *  - a panel or wall socket whose internal mappings are exactly "front N <-> rear N" for every label present on both sides is written
+   *    with `straight: true` instead of listing them (other mappings stay explicit; panels with duplicate labels stay explicit)
+   *  - optional fields that are empty ("" or null) are left out
+   * expandProject() is the exact inverse and is applied on every load, so both forms (and old files) open the same way.
+   */
+  var DROP_EMPTY = {
+    maps: ['location'], groups: ['description', 'location', 'parentGroupId'], objects: ['location', 'description', 'containerId', 'ipAddress'],
+    patchCables: ['length'], fixedLinks: ['length', 'route']
+  };
+  var PORT_EMPTY = ['portType', 'speed', 'media', 'ip', 'description', 'networkColor'];
+  function straightPairs(o) {
+    var front = {}, rear = {}, dup = false;
+    o.ports.forEach(function (pt) {
+      var side = pt.side === 'rear' ? rear : front;
+      if (side[pt.label] !== undefined) dup = true;
+      side[pt.label] = pt.id;
+    });
+    if (dup) return null;
+    var out = [];
+    Object.keys(front).forEach(function (l) { if (rear[l] !== undefined) out.push([front[l], rear[l]]); });
+    return out;
+  }
+  function straightId(frontPortId) { return 'map_i_' + String(frontPortId).replace(/^prt_/, ''); }
+  function compactProject(p) {
+    var d = clone(p);
+    Object.keys(DROP_EMPTY).forEach(function (k) {
+      (d[k] || []).forEach(function (x) { DROP_EMPTY[k].forEach(function (f) { if (x[f] === '' || x[f] === null) delete x[f]; }); });
+    });
+    d.fixedLinks.forEach(function (l) { l.wires.forEach(function (w) { if (w.aPortId === null) delete w.aPortId; if (w.bPortId === null) delete w.bPortId; }); });
+    d.objects.forEach(function (o) {
+      o.ports.forEach(function (pt) { PORT_EMPTY.forEach(function (f) { if (pt[f] === '' || pt[f] === null) delete pt[f]; }); });
+      if (!isTermination(o)) return;
+      var pairs = straightPairs(o);
+      if (!pairs || !pairs.length) return;
+      var mine = d.internalMappings.filter(function (m) { return m.objectId === o.id; }), key = {};
+      pairs.forEach(function (pr) { key[pr[0] + '|' + pr[1]] = true; key[pr[1] + '|' + pr[0]] = true; });
+      var isStraight = function (m) { return key[m.aPortId + '|' + m.bPortId]; };
+      var covered = {};
+      mine.forEach(function (m) { if (isStraight(m)) covered[[m.aPortId, m.bPortId].sort().join('|')] = true; });
+      if (Object.keys(covered).length !== pairs.length) return; // only a part of the straight pairs is mapped: keep them all explicit
+      o.straight = true;
+      d.internalMappings = d.internalMappings.filter(function (m) { return !(m.objectId === o.id && isStraight(m)); });
+    });
+    return d;
+  }
+  function expandProject(d) {
+    (d.maps || []).forEach(function (m) { if (m.location === undefined) m.location = ''; });
+    (d.groups || []).forEach(function (g) { if (g.description === undefined) g.description = ''; if (g.location === undefined) g.location = ''; if (g.parentGroupId === undefined) g.parentGroupId = null; });
+    (d.objects || []).forEach(function (o) {
+      if (o.location === undefined) o.location = ''; if (o.description === undefined) o.description = ''; if (o.containerId === undefined) o.containerId = null;
+    });
+    (d.patchCables || []).forEach(function (c) { if (c.length === undefined) c.length = ''; });
+    (d.fixedLinks || []).forEach(function (l) {
+      if (l.length === undefined) l.length = ''; if (l.route === undefined) l.route = '';
+      (l.wires || []).forEach(function (w) { if (w.aPortId === undefined) w.aPortId = null; if (w.bPortId === undefined) w.bPortId = null; });
+    });
+    d.internalMappings = d.internalMappings || [];
+    (d.objects || []).forEach(function (o) {
+      if (!o.straight) return;
+      var have = {};
+      d.internalMappings.forEach(function (m) { if (m.objectId === o.id) { have[m.aPortId] = true; have[m.bPortId] = true; } });
+      (straightPairs(o) || []).forEach(function (pr) {
+        if (have[pr[0]] || have[pr[1]]) return;
+        d.internalMappings.push({ id: straightId(pr[0]), objectId: o.id, aPortId: pr[0], bPortId: pr[1] });
+      });
+      delete o.straight;
+    });
+    return d;
+  }
   function migrate(data) {
     if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('Not a NetMap project file');
     var d = clone(data), v = d.schemaVersion || 0, from = v;
     if (v > SCHEMA_VERSION) throw new Error('File uses schema version ' + v + ', newer than this app (' + SCHEMA_VERSION + ')');
     while (v < SCHEMA_VERSION) { d = MIGRATIONS[v](d); v = d.schemaVersion; }
+    expandProject(d);
     if (!d.id) d.id = uid('prj');
     if (!d.maps.length) d.maps.push({ id: uid('map'), name: 'Main map', location: '', viewport: { x: 0, y: 0, zoom: 1 } });
     d.maps.forEach(function (m) { m.viewport = m.viewport || { x: 0, y: 0, zoom: 1 }; });
@@ -1106,8 +1181,10 @@
   }
   function exportProject(p) {
     p.updatedAt = now();
-    return JSON.stringify(p, null, 2) + '\n';
+    return JSON.stringify(compactProject(p), null, 2) + '\n'; // readable (indented) but compact: no empty fields, straight panels as a flag
   }
+  /* what the browser autosave stores: the same compact form, without indentation */
+  function serializeProject(p) { return JSON.stringify(compactProject(p)); }
 
   NM.model = {
     SCHEMA_VERSION: SCHEMA_VERSION, CABLE_COLORS: CABLE_COLORS, OBJECT_TYPES: OBJECT_TYPES, TYPE_LABELS: TYPE_LABELS,
@@ -1123,7 +1200,7 @@
     updateWireStatus: updateWireStatus, validateLinkDraft: validateLinkDraft, diffLinkDraft: diffLinkDraft,
     applyLinkEdit: applyLinkEdit, deleteFixedLink: deleteFixedLink, deleteImpact: deleteImpact,
     deleteContainerOrObject: deleteContainerOrObject, search: search, validateProject: validateProject,
-    migrate: migrate, importProject: importProject, exportProject: exportProject
+    migrate: migrate, importProject: importProject, exportProject: exportProject, serializeProject: serializeProject, compactProject: compactProject, expandProject: expandProject
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = NM.model;
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -1329,7 +1329,7 @@ const ok = (m) => console.log('  ok   ' + m);
     const [dl] = await Promise.all([page.waitForEvent('download'), page.click('#dlg button[data-btn="json"]')]);
     const file = await dl.path();
     const text = fs.readFileSync(file, 'utf8');
-    assert.ok(text.indexOf('\r') < 0 && text.indexOf('"schemaVersion": 3') > 0);
+    assert.ok(text.indexOf('\r') < 0 && text.indexOf('"schemaVersion": 4') > 0);
     await page.evaluate(() => NetMap.app.api.loadProject(NetMap.model.createProject('blank')));
     await page.click('#btnFile'); await page.click('#dlg button[data-btn="import"]').catch(() => {});
     await page.keyboard.press('Escape');

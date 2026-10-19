@@ -1,12 +1,25 @@
-# NetMap data format (schema version 3)
+# NetMap data format (schema version 4)
 
 A project is one JSON object. All records have stable, unique string IDs (prefix + random hex, for example
 `obj_9f2c...`). Names, labels and coordinates are never used as identifiers, so renaming or moving something
 cannot break a connection. Files use LF line endings and are written with 2-space indentation.
 
+## Compact form (schema 4)
+
+Files and the browser autosave are written in a compact form; the app expands it on every load, so older (fully spelled out) files and
+compact files open identically (`compactProject()` / `expandProject()` in `js/model.js`):
+
+- **Empty optional fields are left out**: `location`, `description`, `containerId`, `ipAddress` on objects; `description`, `location`,
+  `parentGroupId` on groups; `location` on maps; `length` on patch cables; `length`, `route` on fixed links; `aPortId`/`bPortId` of an
+  unmapped wire; `portType`, `speed`, `media`, `ip`, `description`, `networkColor` on ports. A missing field means empty / null.
+- **Straight-through panels**: a patch panel or wall socket with `"straight": true` has an internal mapping front N <-> rear N for every
+  label that exists on both sides; those mappings are not listed in `internalMappings` (their ids are derived from the front port id when
+  loaded, so they are stable). Panels whose mappings are not exactly that set (partial, crossed, duplicate labels) list all of them.
+- The export is indented for readability and diffs; the autosave is the same data without indentation.
+
 ```
 {
-  "schemaVersion": 1,
+  "schemaVersion": 4,
   "id": "prj_...", "name": "...", "createdAt": ISO, "updatedAt": ISO,
   "settings": { "gridSize": 20, "snapToGrid": true, "gridAligned": true },  // gridAligned: layout was put on the grid (optional)
   "counters": { "patch": 3, "fixed": 1 },          // for generated names PC-003 / FL-001

@@ -197,7 +197,7 @@ Try it: File -> Load demo project (two rooms, a fixed link between racks, a wall
 
 ## Data format
 
-Single JSON document with `schemaVersion`. See [docs/DATA_FORMAT.md](docs/DATA_FORMAT.md) for the schema,
+Single JSON document with `schemaVersion` (schema 4: compact form - no empty optional fields, straight-through panels stored as a flag; the export stays indented and readable). See [docs/DATA_FORMAT.md](docs/DATA_FORMAT.md) for the schema,
 connectivity rules, and migration strategy.
 
 ## Code layout

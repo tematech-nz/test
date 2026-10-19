@@ -144,8 +144,56 @@ test('13. JSON export/import keeps IDs and records', () => {
   const r = M.importProject(text);
   assert.deepStrictEqual(JSON.parse(M.exportProject(r.project)).maps, JSON.parse(text).maps);
   assert.strictEqual(r.issues.filter(i => i.severity === 'error').length, 0);
-  const strip = o => JSON.stringify(Object.assign({}, o, { updatedAt: 0 }));
-  assert.strictEqual(strip(r.project), strip(p));
+  // same records after a round trip (key order and the ids of straight-through mappings, which are regenerated deterministically, aside)
+  const canon = (o) => JSON.stringify(o, (k, v) => (v && typeof v === 'object' && !Array.isArray(v) ? Object.keys(v).sort().reduce((a, x) => { a[x] = v[x]; return a; }, {}) : v));
+  // (an empty optional field and a missing one count as the same)
+  const norm = (o) => { const c = JSON.parse(JSON.stringify(o, (k, v) => (v === '' ? undefined : v))); c.updatedAt = 0; c.internalMappings = c.internalMappings.map(m => [m.objectId, m.aPortId, m.bPortId].join('|')).sort(); return c; };
+  assert.strictEqual(canon(norm(r.project)), canon(norm(p)));
+});
+test('compact file form: straight panels as a flag, empty optional fields left out, exact round trip, old files still open', () => {
+  const p = B.buildDemoProject();
+  const full = JSON.stringify(p, null, 2), text = M.exportProject(p), c = JSON.parse(text);
+  assert.strictEqual(c.schemaVersion, 4);
+  assert.ok(text.length < full.length * 0.75, 'much smaller: ' + text.length + ' vs ' + full.length);
+  assert.ok(c.objects.filter(o => o.type === 'patchpanel').every(o => o.straight === true), 'straight panels carry a flag');
+  assert.strictEqual(c.internalMappings.length, 0, 'straight mappings are not listed');
+  assert.ok(!/"location": ""|"description": ""|"portType"|"speed"|"media"|"length": ""|"route": ""/.test(text), 'no empty optional fields');
+  assert.ok(text.indexOf('\n  "maps"') > 0, 'still indented (readable)');
+  const back = M.importProject(text).project;
+  assert.strictEqual(back.internalMappings.length, p.internalMappings.length, 'mappings come back');
+  assert.ok(back.objects.every(o => o.location === '' && o.description === '' && o.containerId !== undefined && !('straight' in o)));
+  assert.ok(back.fixedLinks.every(l => l.length !== undefined && l.route !== undefined && l.wires.every(w => w.aPortId !== undefined)));
+  // stable: exporting again changes nothing (ids of the regenerated mappings are deterministic)
+  const again = M.exportProject(back);
+  const unstamp = (t) => t.replace(/"updatedAt": "[^"]*"/, '');
+  assert.strictEqual(unstamp(again), unstamp(M.exportProject(M.importProject(again).project)));
+  assert.strictEqual(unstamp(again), unstamp(text));
+  // the browser autosave form is the same data without indentation
+  const ser = M.serializeProject(p);
+  assert.ok(ser.indexOf('\n') < 0 && ser.length < text.length * 0.75 && JSON.stringify(JSON.parse(ser).objects.map(o => o.straight)) === JSON.stringify(c.objects.map(o => o.straight)));
+  // a v3 file (everything spelled out) opens as before
+  const v3 = JSON.parse(full); v3.schemaVersion = 3;
+  const o3 = M.importProject(JSON.stringify(v3));
+  assert.strictEqual(o3.migratedFrom, 3); assert.strictEqual(o3.project.internalMappings.length, p.internalMappings.length);
+});
+test('compact form keeps non-straight and partial mappings explicit', () => {
+  const p = M.createProject('x');
+  const pp = M.addObject(p, { type: 'patchpanel', name: 'Partial', portCount: 4, straight: false });
+  const full = M.addObject(p, { type: 'patchpanel', name: 'Full', portCount: 4, straight: true });
+  const odd = M.addObject(p, { type: 'patchpanel', name: 'Odd', portCount: 4, straight: true });
+  const side = (o, s, n) => o.ports.find(x => x.side === s && x.label === String(n)).id;
+  M.addInternalMapping(p, pp.id, side(pp, 'front', 1), side(pp, 'rear', 1)); // only one of four straight pairs
+  const gone = [side(odd, 'front', 1), side(odd, 'front', 2)];
+  p.internalMappings = p.internalMappings.filter(x => !(x.objectId === odd.id && gone.indexOf(x.aPortId) >= 0));
+  M.addInternalMapping(p, odd.id, side(odd, 'front', 1), side(odd, 'rear', 2)); // Odd: pairs 1 and 2 are crossed, 3 and 4 straight
+  M.addInternalMapping(p, odd.id, side(odd, 'front', 2), side(odd, 'rear', 1));
+  const c = M.compactProject(p), by = (n) => c.objects.find(o => o.name === n);
+  assert.strictEqual(by('Full').straight, true); assert.ok(!by('Partial').straight && !by('Odd').straight);
+  assert.strictEqual(c.internalMappings.filter(x => x.objectId === pp.id).length, 1);
+  assert.strictEqual(c.internalMappings.filter(x => x.objectId === odd.id).length, 4, 'everything of an irregular panel stays explicit');
+  const back = M.importProject(M.exportProject(p)).project;
+  const keyOf = (q) => q.internalMappings.map(x => [x.objectId, x.aPortId, x.bPortId].join('|')).sort();
+  assert.deepStrictEqual(keyOf(back), keyOf(p), 'the same mappings after a round trip');
 });
 test('migration from an unversioned file', () => {
   const r = M.importProject(JSON.stringify({ name: 'old', maps: [{ id: 'm1', name: 'x' }], objects: [] }));
