@@ -927,8 +927,10 @@ test('port isolation: access devices cannot talk directly; only up-and-back thro
   assert.ok(fromT.depth[dead.d1.id] === 2 && fromT.depth[dead.d2.id] === 2, 'the uplink side reaches every access device');
   const fromS = TP.reachTree(g, dead.sw.id);
   assert.ok(fromS.depth[dead.d1.id] === 1 && fromS.depth[dead.d2.id] === 1, 'the switch itself talks to everything');
-  // upstream is a router: D1 and D2 can still meet by going up to the router and back (4 hops)
-  const rt = isoNet(true, 'router'), g2 = TP.buildGraph(rt.p);
+  // upstream is a router and the two devices are in different subnets: they can still meet by going up to the router and back (4 hops)
+  const rt = isoNet(true, 'router');
+  M.setPortIp(rt.p, rt.up.ports.find(q => q.label === 'L1').id, '10.0.0.1'); M.setDeviceIp(rt.p, rt.d1.id, '10.0.1.5'); M.setDeviceIp(rt.p, rt.d2.id, '10.0.2.5');
+  const g2 = TP.buildGraph(rt.p);
   assert.strictEqual(TP.reachTree(g2, rt.d1.id).depth[rt.d2.id], 4);
   const paths = TP.allPaths(g2, rt.d1.id, rt.d2.id);
   assert.strictEqual(paths.length, 1);
@@ -2104,7 +2106,7 @@ test('graph: "Internet (all ISPs)" stands for every Internet object, as a start 
   assert.ok(!/Internet - all ISPs/.test(G.render(one, { from: '', to: '', via: false })), 'a single Internet object is already listed by name');
 });
 
-test('port isolation: a router cannot turn traffic round between two hosts of the same subnet, only between different subnets', () => {
+test('port isolation: a router only turns traffic round between hosts it routes apart (addresses in different subnets)', () => {
   const TP = NM.topology;
   const net = (ip2) => {
     const x = isoNet(true, 'router');
@@ -2125,9 +2127,12 @@ test('port isolation: a router cannot turn traffic round between two hosts of th
   // from the router side every access device is reachable as before
   const fromR = TP.reachTree(g, same.up.id);
   assert.ok(fromR.depth[same.d1.id] === 2 && fromR.depth[same.d2.id] === 2);
-  // no addresses documented: nothing is known, the up-and-back route stays (the existing behaviour)
+  // no address on one or both devices: it is not proven that they are routed apart, so isolation wins and there is no route
   const bare = isoNet(true, 'router'), g3 = TP.buildGraph(bare.p);
-  assert.strictEqual(TP.reachTree(g3, bare.d1.id).depth[bare.d2.id], 4);
+  assert.strictEqual(TP.reachTree(g3, bare.d1.id).depth[bare.d2.id], undefined, 'no addresses at all');
+  assert.ok(TP.reachTree(g3, bare.d1.id).depth[bare.up.id] === 2, 'the router above is still reachable');
+  const half = net('192.168.5.20'); M.setDeviceIp(half.p, half.d2.id, ''); const gh = TP.buildGraph(half.p);
+  assert.strictEqual(TP.reachTree(gh, half.d1.id).depth[half.d2.id], undefined, 'an address on only one side');
 });
 
 console.log('\n' + passed + ' passed, ' + failed + ' failed');

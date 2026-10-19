@@ -98,13 +98,14 @@
    */
   /*
    * hair: the isolated switches this path has already left through an uplink (it went up from an access port). Coming back down into
-   * one of them (a router turning the traffic round) only works when the far end is in another subnet: devices that share a subnet
-   * talk directly (ARP), the isolated switch stops that, and the router never carries traffic between two hosts of one subnet.
-   * Without addresses on both sides nothing is known, so the route is allowed.
+   * one of them (a router turning the traffic round) is only believed when the addresses prove it is routed: both ends have an address
+   * and they are in different subnets. Hosts in one subnet talk directly (ARP), which the isolated switch stops, and a router does not
+   * carry traffic between two hosts of one subnet; with no address on one side the safe reading of "isolated" applies: no route.
    */
-  function sharesNet(graph, a, b) {
+  function routedApart(graph, a, b) {
     var na = graph.nodes[a] && graph.nodes[a].nets, nb = graph.nodes[b] && graph.nodes[b].nets;
-    return !!(na && nb && na.some(function (x) { return nb.indexOf(x) >= 0; }));
+    if (!na || !nb || !na.length || !nb.length) return false;
+    return !na.some(function (x) { return nb.indexOf(x) >= 0; });
   }
   function canPass(graph, nodeId, inLink, outLink, rootId, hair) {
     if (nodeId === rootId || (rootId && typeof rootId === 'object' && rootId[nodeId])) return true;
@@ -115,7 +116,7 @@
       if (!(inLink.uplinkAt[nodeId] || outLink.uplinkAt[nodeId])) return false;
       if (hair && hair[nodeId] && inLink.uplinkAt[nodeId] && !outLink.uplinkAt[nodeId]) { // back down into the switch the path came up from
         var dest = outLink.a === nodeId ? outLink.b : outLink.a, roots = rootId && typeof rootId === 'object' ? Object.keys(rootId) : [rootId];
-        if (roots.some(function (r) { return sharesNet(graph, r, dest); })) return false;
+        if (!roots.every(function (r) { return routedApart(graph, r, dest); })) return false;
       }
     }
     return true;
