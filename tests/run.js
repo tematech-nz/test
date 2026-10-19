@@ -2104,5 +2104,31 @@ test('graph: "Internet (all ISPs)" stands for every Internet object, as a start 
   assert.ok(!/Internet - all ISPs/.test(G.render(one, { from: '', to: '', via: false })), 'a single Internet object is already listed by name');
 });
 
+test('port isolation: a router cannot turn traffic round between two hosts of the same subnet, only between different subnets', () => {
+  const TP = NM.topology;
+  const net = (ip2) => {
+    const x = isoNet(true, 'router');
+    M.setPortIp(x.p, x.up.ports.find(q => q.label === 'L1').id, '192.168.5.1');
+    M.setDeviceIp(x.p, x.d1.id, '192.168.5.10'); M.setDeviceIp(x.p, x.d2.id, ip2);
+    return x;
+  };
+  // same /24: D1 reaches the switch and the router, not D2 (they would talk directly, which isolation stops)
+  const same = net('192.168.5.20'), g = TP.buildGraph(same.p), tree = TP.reachTree(g, same.d1.id);
+  assert.ok(tree.depth[same.sw.id] === 1 && tree.depth[same.up.id] === 2, 'switch and router are reachable');
+  assert.strictEqual(tree.depth[same.d2.id], undefined, 'the other device on the same subnet is not');
+  assert.strictEqual(TP.allPaths(g, same.d1.id, same.d2.id).length, 0, 'and no route is listed to it');
+  assert.strictEqual(TP.pathsBetween(g, same.d1.id, same.d2.id, 10).length, 0);
+  // another subnet: the router routes between them (up and back, 4 hops)
+  const diff = net('10.0.0.20'), g2 = TP.buildGraph(diff.p);
+  assert.strictEqual(TP.reachTree(g2, diff.d1.id).depth[diff.d2.id], 4);
+  assert.strictEqual(TP.allPaths(g2, diff.d1.id, diff.d2.id).length, 1);
+  // from the router side every access device is reachable as before
+  const fromR = TP.reachTree(g, same.up.id);
+  assert.ok(fromR.depth[same.d1.id] === 2 && fromR.depth[same.d2.id] === 2);
+  // no addresses documented: nothing is known, the up-and-back route stays (the existing behaviour)
+  const bare = isoNet(true, 'router'), g3 = TP.buildGraph(bare.p);
+  assert.strictEqual(TP.reachTree(g3, bare.d1.id).depth[bare.d2.id], 4);
+});
+
 console.log('\n' + passed + ' passed, ' + failed + ' failed');
 process.exit(failed ? 1 : 0);

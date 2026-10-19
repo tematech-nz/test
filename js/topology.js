@@ -96,13 +96,35 @@
    * May traffic arriving at nodeId over inLink continue over outLink? Endpoints never pass traffic; a switch with port
    * isolation only forwards between an access port and an uplink port (never access to access).
    */
-  function canPass(graph, nodeId, inLink, outLink, rootId) {
+  /*
+   * hair: the isolated switches this path has already left through an uplink (it went up from an access port). Coming back down into
+   * one of them (a router turning the traffic round) only works when the far end is in another subnet: devices that share a subnet
+   * talk directly (ARP), the isolated switch stops that, and the router never carries traffic between two hosts of one subnet.
+   * Without addresses on both sides nothing is known, so the route is allowed.
+   */
+  function sharesNet(graph, a, b) {
+    var na = graph.nodes[a] && graph.nodes[a].nets, nb = graph.nodes[b] && graph.nodes[b].nets;
+    return !!(na && nb && na.some(function (x) { return nb.indexOf(x) >= 0; }));
+  }
+  function canPass(graph, nodeId, inLink, outLink, rootId, hair) {
     if (nodeId === rootId || (rootId && typeof rootId === 'object' && rootId[nodeId])) return true;
     var n = graph.nodes[nodeId];
     if (!n.transit) return false;
     if (inLink && outLink && inLink === outLink && n.type !== 'router') return false; // no U-turn on the same link (a router on a stick may)
-    if (n.isolated && inLink && outLink) return !!(inLink.uplinkAt[nodeId] || outLink.uplinkAt[nodeId]);
+    if (n.isolated && inLink && outLink) {
+      if (!(inLink.uplinkAt[nodeId] || outLink.uplinkAt[nodeId])) return false;
+      if (hair && hair[nodeId] && inLink.uplinkAt[nodeId] && !outLink.uplinkAt[nodeId]) { // back down into the switch the path came up from
+        var dest = outLink.a === nodeId ? outLink.b : outLink.a, roots = rootId && typeof rootId === 'object' ? Object.keys(rootId) : [rootId];
+        if (roots.some(function (r) { return sharesNet(graph, r, dest); })) return false;
+      }
+    }
     return true;
+  }
+  /* the isolated switches left through an uplink after entering from an access port (the route so far, as {id: true}) */
+  function hairAfter(graph, nodeId, inLink, outLink, hair) {
+    var n = graph.nodes[nodeId];
+    if (!(n && n.isolated && inLink && outLink && !inLink.uplinkAt[nodeId] && outLink.uplinkAt[nodeId]) || (hair && hair[nodeId])) return hair || {};
+    var h = {}; Object.keys(hair || {}).forEach(function (k) { h[k] = true; }); h[nodeId] = true; return h;
   }
 
   /*
@@ -114,22 +136,23 @@
     var roots = [].concat(rootId), rootSet = {}, depth = {}, seenState = {}, queue = [], out = [];
     roots.forEach(function (r) {
       rootSet[r] = true; depth[r] = 0; seenState[r + '|'] = true;
-      queue.push({ id: r, via: null, d: 0 });
+      queue.push({ id: r, via: null, d: 0, hair: {} });
       out.push({ id: r, depth: 0, parent: null, link: null });
     });
     rootId = rootSet;
     while (queue.length) {
       var st = queue.shift();
       (graph.adj[st.id] || []).forEach(function (n) {
-        if (!canPass(graph, st.id, st.via, n.link, rootId)) return;
-        var key = n.to + '|' + n.link.id;
+        if (!canPass(graph, st.id, st.via, n.link, rootId, st.hair)) return;
+        var hair = hairAfter(graph, st.id, st.via, n.link, st.hair);
+        var key = n.to + '|' + n.link.id + '|' + Object.keys(hair).sort().join(',');
         if (seenState[key]) return;
         seenState[key] = true;
         if (depth[n.to] === undefined) {
           depth[n.to] = st.d + 1;
           out.push({ id: n.to, depth: st.d + 1, parent: st.id, link: n.link });
         }
-        queue.push({ id: n.to, via: n.link, d: st.d + 1 });
+        queue.push({ id: n.to, via: n.link, d: st.d + 1, hair: hair });
       });
     }
     var unreachable = graph.order.filter(function (id) { return depth[id] === undefined; });
@@ -159,6 +182,11 @@
     limit = limit || 100; maxHops = maxHops || 12;
     var out = [], visited = {};
     function cap(id) { return graph.nodes[id].isolated ? 2 : 1; }
+    function hairOf(nodes, links) { // isolated switches this route has already gone up out of
+      var h = {};
+      for (var i = 1; i < nodes.length - 1; i++) h = hairAfter(graph, nodes[i], links[i - 1], links[i], h);
+      return h;
+    }
     function dfs(id, nodes, links) {
       if (out.length >= limit * 4) return;
       if (id === to) { out.push({ nodes: nodes.slice(), links: links.slice() }); return; }
@@ -166,7 +194,7 @@
       var inLink = links.length ? links[links.length - 1] : null;
       (graph.adj[id] || []).forEach(function (n) {
         if ((visited[n.to] || 0) >= cap(n.to)) return;
-        if (!canPass(graph, id, inLink, n.link, from)) return;
+        if (!canPass(graph, id, inLink, n.link, from, hairOf(nodes, links))) return;
         visited[n.to] = (visited[n.to] || 0) + 1; nodes.push(n.to); links.push(n.link);
         dfs(n.to, nodes, links);
         nodes.pop(); links.pop(); visited[n.to]--;

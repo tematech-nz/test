@@ -77,7 +77,10 @@ Try it: File -> Load demo project: two rooms with a fixed link between racks, a 
 - **Port isolation** (switches): access ports cannot talk to each other, only to uplink ports. The Graph view honours it:
   devices on an isolated switch's access ports reach the uplink side but not each other directly. They can only meet by going
   up an uplink and back down (e.g. through a router, shown as a longer path through the switch twice); if nothing upstream turns
-  the traffic around, they cannot reach each other at all. A U-turn on the same link is only allowed at a router.
+  the traffic around, they cannot reach each other at all. A U-turn on the same link is only allowed at a router. When both devices have an IP
+  address in the same subnet, even a router above does not help (they would talk directly, which isolation blocks; a router never carries
+  traffic between two hosts of one subnet), so they do not appear in each other's graph; in different subnets the router route stays. Without
+  addresses nothing is known and the route is kept.
 - **Device icons**: generic equipment has a "Device type" (PC / workstation, laptop, Wi-Fi access point, camera, printer, IP
   phone, server, or other) that names it ("PC 1", "AP 1") and draws a small icon (original SVG artwork in `js/icons.js`,
   works offline and in exports).
