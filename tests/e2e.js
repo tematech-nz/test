@@ -1818,6 +1818,19 @@ const ok = (m) => console.log('  ok   ' + m);
     await page.waitForSelector('#vp [data-kind="object"]');
   });
 
+  await step('new fixed link: panel lists lead with the group they are in', async () => {
+    await page.evaluate(() => NetMap.app.api.loadProject(NetMap.builder.buildDemoProject()));
+    if (!(await page.evaluate(() => NetMap.app.S.mode === 'edit'))) await page.click('#btnMode');
+    await page.click('#toolbar button[data-act="newLink"]');
+    await page.waitForSelector('#dlg select[data-s="a"]');
+    const labels = await page.locator('#dlg select[data-s="a"] option').allInnerTexts();
+    assert.ok(labels.includes('Server room: PP-A') && labels.includes('Office: PP-B'), labels.join(' | '));
+    assert.ok(/Panel A: (Server room|Office): /.test(await page.innerText('#dlg .pk-head b')), 'the panel heading too');
+    await page.click('#dlg button[data-btn="no"]');
+    await page.evaluate(() => NetMap.app.api.loadProject(NetMap.builder.buildDemoProject()));
+    await page.waitForSelector('#vp [data-kind="object"]');
+  });
+
   await step('autosave survives a refresh', async () => {
     await page.click('#btnMode'); // back to view mode flushes the save
     const name = await page.evaluate(() => NetMap.app.S.p.name);

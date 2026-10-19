@@ -1976,7 +1976,8 @@
   async function newLink(prefA) {
     const panels = S.p.objects.filter((o) => M.isTermination(o));
     if (panels.length < 2) { toast('Create at least two patch panels (or a panel and a wall socket) first', true); return; }
-    const po = panels.map((o) => [o.id, o.name + (o.type === 'socket' ? ' (wall socket)' : '')]);
+    // panels often share names ("1", "top"): lead with the group they are in, e.g. "L1 Server Room: top"
+    const po = panels.map((o) => { const g = M.groupOf(S.p, o.id); return [o.id, (g ? g.name + ': ' : '') + o.name + (o.type === 'socket' ? ' (wall socket)' : '')]; });
     const a0 = prefA || (S.sel && S.sel.kind === 'object' && panels.some((x) => x.id === S.sel.id) ? S.sel.id : panels[0].id);
     const st = { place: null, a: a0, b: (panels.find((x) => x.id !== a0) || panels[1]).id, sel: { a: [], b: [] }, last: { a: null, b: null }, n: 24, mapping: 'sequential', cableType: 'Cat6', length: '', route: '' };
     const idx = M.buildIndex(S.p);
@@ -2009,7 +2010,7 @@
           (g ? ' style="border-bottom:4px solid ' + esc(g.color) + '" title="' + esc(g.name) + '"' : '') + '>' + esc(pt.label) + (pos >= 0 ? '<i>' + (pos + 1) + '</i>' : '') + '</button>';
       });
       const free = rear.filter((pt) => !idx.portUse[pt.id]).length;
-      return '<div class="pk-side"><div class="pk-head"><b>Panel ' + side.toUpperCase() + ': ' + esc(o.name) + '</b> <span class="sub">' + free + ' of ' + rear.length + ' rear ports free - ' + st.sel[side].length + ' picked</span> ' +
+      return '<div class="pk-side"><div class="pk-head"><b>Panel ' + side.toUpperCase() + ': ' + esc((po.find((q) => q[0] === o.id) || [0, o.name])[1]) + '</b> <span class="sub">' + free + ' of ' + rear.length + ' rear ports free - ' + st.sel[side].length + ' picked</span> ' +
         '<button class="pk-tool" data-pickall="' + side + '">All free</button><button class="pk-tool" data-pickclear="' + side + '">Clear</button>' +
         '<button class="pk-tool pk-place' + (placeOn ? ' on' : '') + '" data-placegroup="' + side + '"' + (st.place && st.place.from !== side ? '' : ' disabled') + ' title="Select a group on the other panel first (click its name), then place it here: possible spots turn green">' + (placeOn ? 'Placing group - click a spot' : 'Place selected group') + '</button></div>' +
         (gl ? '<div class="pk-groups">' + gl + '</div>' : '') + '<div class="pk-grid">' + h + '</div></div>';
