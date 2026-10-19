@@ -1749,9 +1749,10 @@ test('pseudo-devices: ports marked as occupied by cameras show up in the graph w
   assert.throws(() => M.addPortGroup(p, sw.id, { name: 'X', portsText: '24', deviceKind: 'pc' }), /already has a cable/);
   assert.throws(() => M.addPortGroup(p, sw.id, { name: 'X', portsText: '20', deviceKind: 'nope' }), /Unknown device/);
   assert.throws(() => M.updatePortGroup(p, g.id, { deviceKind: 'nope' }), /Unknown device/);
-  // the graph view shows "Cameras x16" hanging off the switch
+  // the graph view shows "Cameras x16" hanging off the switch (the name says x16, the dotted line to it carries no label)
   const html = NM.graphview.render(p, { from: rt.id, to: '', via: false });
   assert.ok(html.indexOf('Cameras x16') > 0 && html.indexOf('pseudo-device') > 0 && html.indexOf('not modelled individually') > 0);
+  assert.ok(!/>x16<\/text>/.test(html), 'no "x16" label on the dotted line');
   assert.ok(R.svgDocument(p, mid).length > 0);
   // switching it off makes the ports ordinary again
   M.updatePortGroup(p, g.id, { deviceKind: '' });

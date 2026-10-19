@@ -108,7 +108,7 @@
       if (!A || !B) return;
       var faded = dim && !hiNode[ps.parent], ep = edgePath(A, B, ps.id);
       svg += '<g' + (faded ? ' opacity="0.2"' : '') + '><title>' + esc(ps.objName + ' <-> ' + ps.name + '\n' + ps.count + ' port(s) occupied by ' + ps.kind.toLowerCase() + ' (not modelled individually)') + '</title><path d="' + ep.d + '" fill="none" stroke="' + esc(ps.color) + '" stroke-width="2.5" stroke-dasharray="2 3"/>' +
-        '<text x="' + ep.lx + '" y="' + ep.ly + '" font-size="10" text-anchor="middle" fill="#222" stroke="#fff" stroke-width="3" paint-order="stroke" font-family="sans-serif">x' + ps.count + '</text></g>';
+        '</g>'; // no "x13" on the dotted line (the node itself says "Cameras x13")
     });
     pseudoList.forEach(function (ps) {
       var P = pos[ps.id]; if (!P) return;
