@@ -148,7 +148,7 @@
   }
   function afterChange() {
     M.syncAllMap(S.p); M.syncGhosts(S.p);
-    if (!shownMaps().some((m) => m.id === S.mapId)) S.mapId = shownMaps()[0].id;
+    if (!shownMaps().some((m) => m.id === S.mapId)) S.mapId = M.realMaps(S.p)[0].id;
     if (!selExists()) S.sel = null;
     if (S.pgroup && !M.buildIndex(S.p).objects[S.pgroup.objId]) clearPgroup();
     if (S.trace) {
@@ -587,7 +587,10 @@
   function setView(v) { S.view = v; clearPgroup(); renderAll(); if (v === 'map' && S.p.placements.some((q) => q.mapId === S.mapId)) applyVp(); }
   function renderTop() {
     $('projTitle').textContent = S.p.name;
-    $('mapSelect').innerHTML = opts(shownMaps().map((m) => [m.id, m.name]), S.mapId);
+    {
+      const ov = M.allMap(S.p), rs = M.realMaps(S.p), one = (m) => '<option value="' + esc(m.id) + '"' + (m.id === S.mapId ? ' selected' : '') + '>' + esc(m.name) + '</option>';
+      $('mapSelect').innerHTML = ov && rs.length > 1 ? one(ov) + '<optgroup label="Maps in the overview">' + rs.map(one).join('') + '</optgroup>' : rs.map(one).join('');
+    }
     $('btnMode').textContent = S.mode === 'edit' ? 'Done editing' : 'Edit';
     $('editBanner').textContent = onAll() ? 'OVERVIEW - ghost copies of every map. Drag them to arrange the overview; nothing here changes the equipment or cabling (edit things on their own maps).' : 'EDIT MODE - changes modify the infrastructure model. Moving things never changes connections.';
     const na = netIssues(), ab = $('btnAlerts');
@@ -648,10 +651,15 @@
       res.style.display = '';
     } else res.style.display = 'none';
 
+    const mapRow = (m) => '<div class="list-item ' + (m.id === S.mapId ? 'active' : '') + '" data-act="goto" data-kind="map" data-id="' + esc(m.id) + '"><div class="grow">' + esc(m.name) +
+      (m.location ? '<div class="sub">' + esc(m.location) + '</div>' : '') + '</div>' +
+      (isEdit() && !m.auto ? '<button data-act="editMap" data-id="' + esc(m.id) + '" style="padding:0 6px">Edit</button>' : '') + '</div>';
+    const ovMap = M.allMap(S.p), reals = M.realMaps(S.p);
+    // with an overview the maps sit in a box under its "lid": the overview is the header, the maps are what it combines
     $('mapList').innerHTML = '<h3>Maps' + (isEdit() ? ' <button data-act="newMap" style="float:right;padding:0 6px">+ Add</button>' : '') + '</h3>' +
-      shownMaps().map((m) => '<div class="list-item ' + (m.id === S.mapId ? 'active' : '') + '" data-act="goto" data-kind="map" data-id="' + esc(m.id) + '"><div class="grow">' + esc(m.name) +
-        (m.location ? '<div class="sub">' + esc(m.location) + '</div>' : '') + '</div>' +
-        (isEdit() && !m.auto ? '<button data-act="editMap" data-id="' + esc(m.id) + '" style="padding:0 6px">Edit</button>' : '') + '</div>').join('');
+      (ovMap && reals.length > 1
+        ? '<div class="map-lid' + (ovMap.id === S.mapId ? ' active' : '') + '" data-act="goto" data-kind="map" data-id="' + esc(ovMap.id) + '" title="Every map together (overview)"><div class="grow"><b>' + esc(ovMap.name) + '</b><div class="sub">Every map together (overview)</div></div></div><div class="map-box">' + reals.map(mapRow).join('') + '</div>'
+        : reals.map(mapRow).join(''));
 
     const idx = M.buildIndex(S.p), mid = curMap().id;
     const onMap = (id) => !!M.placementOf(S.p, mid, id);

@@ -125,6 +125,7 @@ Try it: File -> Load demo project (two rooms, a fixed link between racks, a wall
 - **All items overview**: once a project has two or more maps, an automatic map "All items" appears (not before). It shows a ghost copy of every
   item from every map, each map laid out as its own block, with the cables and fixed links between them drawn. In edit mode the ghosts can be
   dragged to arrange the overview (their positions only); nothing about the equipment can be edited there (details are read-only, no toolbar).
+  In the map list it is the header (the "lid") of a box that holds all the other maps, wherever it sits in the file; the map selector lists it first.
 - **One editable copy**: an item has exactly one editable placement; on every other map it is a live (ghost) copy. Older files that held the same
   item as editable placements on several maps are converted when opened (the first map keeps the editable one). Showing an item on another map
   always makes a live copy. A tap on a live copy shows it read-only, **double-click** opens the original on its own map to edit it, and Delete
