@@ -197,10 +197,13 @@ body.view-graph #canvas, body.view-graph #toolbar, body.view-graph #zoomctl, bod
 body.on-all #toolbar { display: none !important; }
 body.on-all #editBanner { background: #546e7a; }
 
-.map-lid { display: flex; align-items: center; padding: 6px 8px; margin-top: 4px; background: var(--accent); color: #fff; border-radius: 8px 8px 0 0; cursor: pointer; }
-.map-lid .sub { color: #dbe9f8; font-size: 11px; }
-.map-lid.active { background: #0b3d91; box-shadow: inset 0 0 0 2px #ffd54f; }
-.map-box { border: 2px solid var(--accent); border-top: 0; border-radius: 0 0 8px 8px; padding: 3px 3px 3px 10px; margin-bottom: 6px; }
+.map-lid { display: flex; align-items: center; padding: 6px 8px; margin-top: 4px; background: #e3eefb; color: #1b2a38; border: 2px solid #bcd4ee; border-bottom: 0; border-radius: 8px 8px 0 0; cursor: pointer; }
+.map-lid .sub { color: #5b7083; font-size: 11px; }
+.map-lid:hover { background: #d6e6f9; }
+.map-lid.active { background: var(--accent); color: #fff; }
+.map-lid.active .sub { color: #dbe9f8; }
+.map-box { border: 2px solid #bcd4ee; border-top: 0; border-radius: 0 0 8px 8px; padding: 3px 3px 3px 10px; margin-bottom: 6px; }
+.map-lid.in-bin, .map-box.in-bin { border-color: var(--accent); }
 
 .map-grip { flex: none; width: 14px; align-self: stretch; margin: -2px 6px -2px -4px; cursor: grab; touch-action: none; border-radius: 3px;
   background: radial-gradient(circle, #90a4ae 1.4px, transparent 1.6px) 0 0 / 7px 7px; opacity: .85; }

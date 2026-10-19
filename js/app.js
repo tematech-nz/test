@@ -752,10 +752,11 @@
       (m.location ? '<div class="sub">' + esc(m.location) + '</div>' : '') + '</div>' +
       (isEdit() && !m.auto ? '<button data-act="editMap" data-id="' + esc(m.id) + '" style="padding:0 6px">Edit</button>' : '') + '</div>';
     const ovMap = M.allMap(S.p), reals = M.equipmentMaps(S.p), floors = M.floorMaps(S.p);
+    const inBin = !!ovMap && (ovMap.id === S.mapId || reals.some((m) => m.id === S.mapId)); // the box is outlined strongly only while one of its maps (or the overview) is open
     // with an overview the maps sit in a box under its "lid": the overview is the header, the maps are what it combines
     $('mapList').innerHTML = '<h3>Maps' + (isEdit() ? ' <button data-act="newMap" style="float:right;padding:0 6px">+ Add</button>' : '') + '</h3>' +
       (ovMap && reals.length > 1
-        ? '<div class="map-lid' + (ovMap.id === S.mapId ? ' active' : '') + '" data-act="goto" data-kind="map" data-id="' + esc(ovMap.id) + '" title="Every map together (overview)"><div class="grow"><b>' + esc(ovMap.name) + '</b><div class="sub">Every map together (overview)</div></div></div><div class="map-box map-rows">' + reals.map(mapRow).join('') + '</div>'
+        ? '<div class="map-lid' + (ovMap.id === S.mapId ? ' active' : '') + (inBin ? ' in-bin' : '') + '" data-act="goto" data-kind="map" data-id="' + esc(ovMap.id) + '" title="Every map together (overview)"><div class="grow"><b>' + esc(ovMap.name) + '</b><div class="sub">Every map together (overview)</div></div></div><div class="map-box map-rows' + (inBin ? ' in-bin' : '') + '">' + reals.map(mapRow).join('') + '</div>'
         : '<div class="map-rows">' + reals.map(mapRow).join('') + '</div>') +
       (floors.length ? '<h3 style="margin-top:8px">Floor plans</h3><div class="map-rows">' + floors.map(mapRow).join('') + '</div>' : '');
 
