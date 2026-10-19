@@ -96,7 +96,7 @@
       var dim = hl && !container && !hl.objects[ref.id];
       var x = [];
       var ghost = !!pl.ghost;
-      x.push('<g data-kind="' + (it.isGroup ? 'group' : 'object') + '" data-id="' + esc(ref.id) + '"' + (ghost ? ' data-ghost="1" opacity="0.42"' : (dim ? ' opacity="0.25"' : '')) + '>');
+      x.push('<g data-kind="' + (it.isGroup ? 'group' : 'object') + '" data-id="' + esc(ref.id) + '"' + (ghost ? ' data-ghost="1" opacity="' + (hl ? (container || hl.objects[ref.id] ? '0.85' : '0.14') : '0.42') + '"' : (dim ? ' opacity="0.25"' : '')) + '>'); // while tracing, the live copies on the route stand out
       x.push('<rect data-kind="' + (it.isGroup ? 'group' : 'object') + '" data-id="' + esc(ref.id) + '" x="' + num(pl.x) + '" y="' + num(pl.y) + '" width="' + num(pl.w) + '" height="' + num(pl.h) + '" rx="' + (container ? 6 : (ref.type === 'internet' ? 14 : 3)) + '" fill="' + st.fill + '"' +
         (hl && container ? ' fill-opacity="0.6"' : '') + ' stroke="' + (isDrop ? '#00c853' : (isSel ? SEL : st.stroke)) + '" stroke-width="' + (isDrop ? 4 : (isSel ? 3 : 1.5)) + '"' + (st.dash ? ' stroke-dasharray="' + st.dash + '"' : '') + '/>');
       var tx = pl.x + (editing || opts.moveGhosts ? 22 : 6);

@@ -323,6 +323,27 @@ const ok = (m) => console.log('  ok   ' + m);
     await page.click('#btnUndo'); await page.click('#btnUndo');
   });
 
+  await step('trace: "See on full map" opens the All items overview with the route highlighted, and back again', async () => {
+    const pid = await page.evaluate(() => { const A = NetMap.app; A.commit('touch', (p) => { p.name = p.name; }); const c = A.S.p.patchCables[0]; return c && c.aPortId; });
+    if (!pid) return;
+    const from = await page.evaluate(() => NetMap.app.S.mapId);
+    await page.evaluate((id) => NetMap.app.api.startTrace('port', id), pid);
+    await page.waitForTimeout(150);
+    assert.ok(await page.isVisible('#tracePane button[data-act="seeOnFullMap"]'), 'button offered while the overview exists');
+    await page.click('#tracePane button[data-act="seeOnFullMap"]');
+    await page.waitForTimeout(250);
+    assert.strictEqual(await page.evaluate(() => NetMap.app.S.p.maps.find((m) => m.id === NetMap.app.S.mapId).auto), 'all');
+    assert.ok(await page.evaluate(() => !!NetMap.app.S.trace), 'trace kept');
+    const ops = await page.$$eval('#vp g[data-ghost="1"][data-kind="object"]', (gs) => gs.map((g) => g.getAttribute('opacity')));
+    assert.ok(ops.some((o) => +o > 0.5) && ops.some((o) => +o < 0.2), 'route stands out from the rest: ' + ops.join(','));
+    assert.ok(await page.isVisible('#tracePane button[data-act="backFromFullMap"]'));
+    await page.click('#tracePane button[data-act="backFromFullMap"]');
+    await page.waitForTimeout(200);
+    assert.strictEqual(await page.evaluate(() => NetMap.app.S.mapId), from);
+    await page.evaluate(() => document.querySelector('#tracePane button[data-act="clearTrace"]') && document.querySelector('#tracePane button[data-act="clearTrace"]').click());
+    await page.click('#btnUndo');
+  });
+
   await step('hidden navigation stays hidden when clicking the map or changing mode', async () => {
     await page.click('#btnMenu');
     assert.ok(!(await page.isVisible('#left')));

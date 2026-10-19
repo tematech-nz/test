@@ -130,6 +130,7 @@ Try it: File -> Load demo project (two rooms, a fixed link between racks, a wall
   item as editable placements on several maps are converted when opened (the first map keeps the editable one). Showing an item on another map
   always makes a live copy. A tap on a live copy shows it read-only, **double-click** opens the original on its own map to edit it, and Delete
   (or its red x) removes just the copy.
+- **See on full map**: while a trace is shown on an ordinary map, the trace panel has a **See on full map** button that opens the All items overview with the whole route highlighted (and a **Back to <map>** button there).
 - **Delete vs remove from map**: deleting an item that is shown on more than one map asks whether to **remove it from this map only** (it and its
   connections stay on the other maps; a group or rack is removed together with what is shown inside it) or delete it everywhere.
 - **Fixed link labels** can be dragged out of the way in edit mode (per map; a dashed leader line shows where the label belongs, "Reset label

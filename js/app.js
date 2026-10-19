@@ -745,6 +745,8 @@
     removeFromMap: 'Hide this item from the current map only; the equipment and its connections stay in the project',
     startPatchFrom: 'Start one patch cable at this port (hotkey W): click the other port on the map; the new cable then stays selected so you can set its colour',
     clearTrace: 'Remove the trace highlight and return to the normal map',
+    seeOnFullMap: 'Open the All items overview (every map together) with the whole route highlighted',
+    backFromFullMap: 'Return to the map you came from; the trace stays',
     fitTrace: 'Zoom the map to the parts of the trace that are on this map',
     patchTool: 'Draw patch cables: click one port, then another (hotkey W). Select a port first and press W to draw a single cable from it. Esc stops.',
     newLink: 'Create a fixed link between two patch panels',
@@ -1016,7 +1018,8 @@
     const idx = M.buildIndex(S.p);
     const t = S.trace.target;
     const title = t.kind === 'port' ? M.portName(S.p, t.id, idx) : t.kind === 'cable' ? idx.cables[t.id].name : t.kind === 'link' ? idx.links[t.id].name + ' (all wires)' : M.wireName(idx.wireLink[t.id], idx.wires[t.id]);
-    let h = '<h3>Trace: ' + esc(title) + '</h3><div class="btn-row">' + btn('clearTrace', 'Clear trace', '', 'primary') + btn('fitTrace', 'Fit to path') + '</div>';
+    let h = '<h3>Trace: ' + esc(title) + '</h3><div class="btn-row">' + btn('clearTrace', 'Clear trace', '', 'primary') + btn('fitTrace', 'Fit to path') +
+      (M.allMap(S.p) && M.realMaps(S.p).length > 1 ? (onAll() ? (S.prevMapId && S.p.maps.some((m) => m.id === S.prevMapId) ? btn('backFromFullMap', 'Back to ' + S.p.maps.find((m) => m.id === S.prevMapId).name) : '') : btn('seeOnFullMap', 'See on full map')) : '') + '</div>';
     const many = S.trace.traces.length > 1;
     S.trace.traces.forEach((tr, i) => {
       const lines = T.describe(S.p, tr);
@@ -1037,6 +1040,17 @@
       } else h += body;
     });
     pane.innerHTML = h;
+  }
+  /* show the whole route on the "All items" overview (every map together), keeping the trace highlight */
+  function seeOnFullMap() {
+    const ov = M.allMap(S.p);
+    if (!ov || !S.trace) return;
+    S.prevMapId = S.mapId;
+    switchMap(ov.id, true); showTab('trace'); openRight(); fitTrace();
+  }
+  function backFromFullMap() {
+    const id = S.prevMapId; S.prevMapId = null;
+    if (id && S.p.maps.some((m) => m.id === id)) { switchMap(id, true); showTab('trace'); fitTrace(); }
   }
   function fitTrace() {
     if (!S.trace) return;
@@ -1916,6 +1930,8 @@
         case 'trace': startTrace(d.kind, d.id); break;
         case 'clearTrace': clearTrace(); break;
         case 'fitTrace': fitTrace(); break;
+        case 'seeOnFullMap': seeOnFullMap(); break;
+        case 'backFromFullMap': backFromFullMap(); break;
         case 'addToMap': commit('Add to map', (p) => { const pos = viewCentre(); B.placeItem(p, curMap().id, d.kind, d.id, pos.x, pos.y, true); }); break;
         case 'removeFromMap': removeFromThisMap(d.id); break;
         case 'deleteSel': deleteSelection(); break;
