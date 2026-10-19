@@ -638,6 +638,7 @@
       obj.ipAddress = String(o.ipAddress || '').trim();
     }
     if (kind) obj.deviceKind = kind;
+    if (o.type === 'internet' && o.publicIp) obj.publicIp = true;
     if (o.type === 'rack') obj.rackHeight = o.rackHeight || 42;
     p.objects.push(obj);
     if (o.type === 'switch') {

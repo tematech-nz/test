@@ -988,7 +988,8 @@
     if (o.type === 'generic') h += isEdit() ? fld('Device type', '<select data-f="deviceKind">' + opts(M.DEVICE_KINDS.map((k) => [k[0], k[1]]), o.deviceKind || 'other') + '</select>') : fld('Device type', esc(M.typeLabel(o)));
     if (o.type === 'rack') h += inp('Height (U)', 'rackHeight', o.rackHeight || '');
     if (M.hasDeviceIp(o)) {
-      h += inp(o.type === 'internet' ? 'Public IP' : (o.type === 'switch' ? 'Management IP' : 'IP address'), 'ipAddress', o.ipAddress || '');
+      h += inp(o.type === 'switch' ? 'Management IP' : 'IP address', 'ipAddress', o.ipAddress || '');
+      if (o.type === 'internet') h += isEdit() ? fld('Public IP', '<label><input type="checkbox" data-f="publicIp"' + (o.publicIp ? ' checked' : '') + '> the Internet can reach in (a routable address, not behind the ISP\'s CGNAT)</label>') : fld('Public IP', o.publicIp ? 'yes: reachable from the Internet' : 'no: outbound only');
       if (isEdit() && o.type === 'switch') h += '<div class="sub">Address of the switch\'s web interface (managed switch). It joins the network of the switch, not its ports.</div>';
       if (isEdit() && o.type === 'generic') h += '<div class="sub">Every port without its own address uses this one. For several networks (e.g. a PC with two NICs) give ports their own IP below - a device never joins its networks together.</div>';
     }
@@ -1313,7 +1314,8 @@
     if (type === 'internet') {
       fields[0].v = 'INTERNET'; fields[0].hint = 'The ISP / upstream network. Cable its ports to your router WAN ports.';
       fields.push({ k: 'portCount', label: 'ISP ports', type: 'number', v: 1, min: 1, max: 12 });
-      fields.push({ k: 'ipAddress', label: 'Public IP / circuit', v: '' });
+      fields.push({ k: 'ipAddress', label: 'IP address / circuit', v: '' });
+      fields.push({ k: 'publicIp', label: 'Public IP', type: 'check', v: false, hint: 'Tick when this ISP gives you a routable address, so the Internet can reach in (not CGNAT). The graph uses it for "what can be reached from the Internet".' });
     }
     if (type === 'switch') fields.push({ k: 'ipAddress', label: 'Management IP', v: '', hint: 'Optional: the web interface address of a managed switch (IPv4, e.g. 192.168.1.2).' });
     if (type === 'generic') fields.push({ k: 'ipAddress', label: 'IP address', v: '', hint: 'Optional IPv4 address; all ports use it unless given an address of their own.' });
@@ -1332,7 +1334,7 @@
     const v = await formDlg('New ' + (isGroup ? 'group' : M.TYPE_LABELS[type]), fields, 'Create', '', (vals) => (vals.ipAddress && !M.isValidIp(vals.ipAddress) ? M.IP_ERROR : null));
     if (!v) return;
     const portCount = v.portCount != null ? parseInt(v.portCount, 10) : undefined;
-    const spec = isGroup ? { name: v.name || undefined } : { type: type, name: v.name || undefined, portCount: portCount, rackHeight: v.rackHeight, straight: v.straight, wanPorts: v.wanPorts, lanPorts: v.lanPorts, deviceKind: v.deviceKind, sectionSize: (type === 'patchpanel' || type === 'switch') && v.sectionSize > 0 ? v.sectionSize : undefined, uplinkPorts: v.uplinkPorts > 0 ? v.uplinkPorts : undefined, sectionRows: v.sectionRows > 1 ? v.sectionRows : undefined, portIsolation: !!v.portIsolation, ipAddress: v.ipAddress };
+    const spec = isGroup ? { name: v.name || undefined } : { type: type, name: v.name || undefined, portCount: portCount, rackHeight: v.rackHeight, straight: v.straight, wanPorts: v.wanPorts, lanPorts: v.lanPorts, deviceKind: v.deviceKind, sectionSize: (type === 'patchpanel' || type === 'switch') && v.sectionSize > 0 ? v.sectionSize : undefined, uplinkPorts: v.uplinkPorts > 0 ? v.uplinkPorts : undefined, sectionRows: v.sectionRows > 1 ? v.sectionRows : undefined, portIsolation: !!v.portIsolation, ipAddress: v.ipAddress, publicIp: !!v.publicIp };
     startPlace(isGroup ? 'group' : 'object', spec, type);
   }
 
@@ -2348,6 +2350,7 @@
         else if (f === 'portOrder' || f === 'align' || f === 'uplinkSide') M.setSwitchLayout(p, sel.id, { [f]: val });
         else if (f === 'uplinkRows') { M.setSwitchLayout(p, sel.id, { uplinkRows: parseInt(val, 10) }); B.refitObject(p, sel.id); }
         else if (f === 'portIsolation') M.setSwitchLayout(p, sel.id, { portIsolation: !!val });
+        else if (f === 'publicIp') { const io = M.findContainer(p, sel.id).item; if (io.type === 'internet') { if (val) io.publicIp = true; else delete io.publicIp; } }
         else if (f === 'fullWidth') { M.setFullWidth(p, sel.id, !!val); B.applyFullWidthFor(p, sel.id); }
         else if (f === 'container') {
           M.setContainer(p, sel.kind, sel.id, val || null);

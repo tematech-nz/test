@@ -48,10 +48,14 @@
   function render(p, state) {
     var graph = TP.buildGraph(p, { viaInternet: !!state.via });
     if (!graph.order.length) return '<div class="gv-empty">No active devices yet. Add routers, switches, an Internet / ISP object and cable them to see the topology.</div>';
-    if (!graph.nodes[state.from]) state.from = defaultRoot(graph);
-    if (state.to && !graph.nodes[state.to]) state.to = '';
-    var tree = TP.reachTree(graph, state.from);
-    var paths = state.to ? TP.allPaths(graph, state.from, state.to, 60) : [];
+    var inets = TP.endpoints(graph, TP.INTERNET), valid = function (v) { return v === TP.INTERNET ? inets.length > 1 : !!graph.nodes[v]; };
+    if (!valid(state.from)) state.from = defaultRoot(graph);
+    if (state.to && !valid(state.to)) state.to = '';
+    var fromSet = {}, toSet = {}, nameOf = function (v) { return v === TP.INTERNET ? 'Internet (all ISPs)' : graph.nodes[v].name; };
+    TP.endpoints(graph, state.from, true).forEach(function (id) { fromSet[id] = true; });
+    TP.endpoints(graph, state.to).forEach(function (id) { toSet[id] = true; });
+    var tree = TP.reachTree(graph, TP.endpoints(graph, state.from, true));
+    var paths = state.to ? TP.pathsBetween(graph, state.from, state.to, 60) : [];
 
     // highlight sets
     var hiNode = {}, hiLink = {}, best = {};
@@ -116,8 +120,8 @@
     });
     graph.order.forEach(function (id) {
       var n = graph.nodes[id], P = pos[id], c = COLORS[n.type] || COLORS.generic;
-      var faded = dim && !hiNode[id], isRoot = id === state.from, isTo = id === state.to;
-      var sub = n.label + (n.isolated ? ' (isolated)' : '') + (n.ip ? '  ' + n.ip : '');
+      var faded = dim && !hiNode[id], isRoot = !!fromSet[id], isTo = !!toSet[id];
+      var sub = n.label + (n.isolated ? ' (isolated)' : '') + (n.publicIp ? ' (public IP)' : '') + (n.ip ? '  ' + n.ip : '');
       var nets = n.nets.join(', ');
       svg += '<g data-gnode="' + esc(id) + '" style="cursor:pointer"' + (faded ? ' opacity="0.25"' : '') + '><title>' + esc(n.name + ' (' + n.label + ')' + (nets ? '\nNetworks: ' + nets : '') + (n.transit ? '' : '\nEndpoint: paths do not pass through') + (n.isolated ? '\nPort isolation: only uplink ports talk to access ports' : '')) + '</title>' +
         '<rect x="' + P.x + '" y="' + P.y + '" width="' + NW + '" height="' + NH + '" rx="' + (n.type === 'internet' ? 22 : 6) + '" fill="' + c[0] + '" stroke="' + (isRoot ? '#d32f2f' : (isTo ? '#6a1b9a' : c[1])) + '" stroke-width="' + (isRoot || isTo ? 3.5 : 1.5) + '"' + (n.transit ? '' : ' stroke-dasharray="6 3"') + '/>' +
@@ -127,7 +131,9 @@
     });
     svg += '</svg>';
 
-    var opt = graph.order.map(function (id) { return [id, graph.nodes[id].name + ' (' + graph.nodes[id].label + ')']; });
+    var opt = graph.order.map(function (id) { return [id, graph.nodes[id].name + ' (' + graph.nodes[id].label + ')']; })
+      .sort(function (a, b) { return a[1].localeCompare(b[1], undefined, { sensitivity: 'base', numeric: true }); }); // A to Z, "Switch 2" before "Switch 10"
+    if (inets.length > 1) opt.unshift([TP.INTERNET, 'Internet - all ISPs (' + inets.length + ' Internet objects, ' + inets.filter(function (id) { return graph.nodes[id].publicIp; }).length + ' with a public IP)']);
     var sel = function (name, list, cur, empty) {
       return '<select data-g="' + name + '">' + (empty ? '<option value="">' + empty + '</option>' : '') + list.map(function (o) { return '<option value="' + esc(o[0]) + '"' + (o[0] === cur ? ' selected' : '') + '>' + esc(o[1]) + '</option>'; }).join('') + '</select>';
     };
@@ -138,11 +144,19 @@
       '</div><div class="gv-note">Theoretical physical reachability over documented cabling, collapsing patch panels and fixed links. Switches and routers pass traffic through; the Internet, wall sockets and generic devices are endpoints (dashed). Solid dark lines are the shortest-path tree, dashed grey lines are extra links.</div>' +
       '<div class="gv-scroll">' + svg + '</div>';
 
+    var fromNode = graph.nodes[state.from], noPublic = [], nPub = Object.keys(fromSet).length;
+    if (state.from === TP.INTERNET) {
+      if (!nPub) noPublic.push('No Internet object is marked as having a public IP, so nothing can be reached from the Internet. Tick <b>Public IP</b> on the Internet object of an ISP that gives you a routable address.');
+      else if (inets.length > nPub) noPublic.push('Only the ' + nPub + ' Internet object(s) with a public IP count as a start; the others give outbound access only.');
+    } else if (fromNode && fromNode.type === 'internet' && !fromNode.publicIp) {
+      noPublic.push('<b>' + esc(fromNode.name) + '</b> is not marked as having a public IP (for example behind the ISP\'s CGNAT): connections can only start from inside, so this shows what could be reached if it were routable.');
+    }
+    noPublic.forEach(function (m) { html += '<div class="msg-box">' + m + '</div>'; });
     function nameLink(id) { return '<a class="lnk" data-gnode="' + esc(id) + '">' + esc(graph.nodes[id].name) + '</a>'; }
     function viaText(l) { return l.paths.map(function (e) { return e.via.join(' > ') || 'direct'; }).join('; '); }
 
     if (state.to) {
-      html += '<h3>Paths from ' + esc(graph.nodes[state.from].name) + ' to ' + esc(graph.nodes[state.to].name) + ' (' + paths.length + (paths.length >= 60 ? '+' : '') + ')</h3>';
+      html += '<h3>Paths from ' + esc(nameOf(state.from)) + ' to ' + esc(nameOf(state.to)) + ' (' + paths.length + (paths.length >= 60 ? '+' : '') + ')</h3>';
       if (!paths.length) html += '<div class="msg-box">No route: every physical path is broken or would need to pass through an endpoint' + (state.via ? '' : ' (try "Allow paths through Internet")') + '.</div>';
       paths.forEach(function (pt, i) {
         html += '<div class="gv-path' + (i === 0 ? ' best' : '') + '"><b>' + (pt.nodes.length - 1) + ' hop' + (pt.nodes.length === 2 ? '' : 's') + (i === 0 ? ' (shortest)' : '') + ':</b> ' +
@@ -150,7 +164,7 @@
           '<div class="sub">' + pt.links.map(function (l, k) { return esc(graph.nodes[pt.nodes[k]].name) + ' - ' + esc(graph.nodes[pt.nodes[k + 1]].name) + ': ' + esc(viaText(l)); }).join('<br>') + '</div></div>';
       });
     } else {
-      html += '<h3>Reachable from ' + esc(graph.nodes[state.from].name) + ' (' + (tree.order.length - 1) + ' device(s))</h3><div class="gv-tree">';
+      html += '<h3>Reachable from ' + esc(nameOf(state.from)) + ' (' + (tree.order.length - Object.keys(fromSet).length) + ' device(s))</h3><div class="gv-tree">';
       tree.order.forEach(function (n) {
         html += '<div class="gv-tn" style="margin-left:' + (n.depth * 18) + 'px">' + (n.depth ? '&boxur; ' : '') + nameLink(n.id) +
           ' <span class="tag">' + esc(graph.nodes[n.id].label) + '</span>' + (n.link ? ' <span class="sub">via ' + esc(viaText(n.link)) + '</span>' : '') +

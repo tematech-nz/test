@@ -1881,6 +1881,48 @@ const ok = (m) => console.log('  ok   ' + m);
     await page.waitForSelector('#vp [data-kind="object"]');
   });
 
+  await step('graph: "Internet (all ISPs)" in From and To', async () => {
+    await page.evaluate(() => {
+      const A = NetMap.app; A.api.loadProject(NetMap.builder.buildShowcaseProject());
+      A.api.commit('second ISP', (p) => {
+        const B = NetMap.builder, M = NetMap.model, m1 = p.maps[0].id;
+        const isp = B.addObjectPlaced(p, m1, { type: 'internet', name: 'ISP 2' }, 900, 600), r = B.addObjectPlaced(p, m1, { type: 'router', name: 'Router 2', wanPorts: 1, lanPorts: 2, ipAddress: '10.9.0.1' }, 900, 700);
+        const pc = B.addObjectPlaced(p, m1, { type: 'generic', name: 'Lone PC', deviceKind: 'pc', portCount: 1 }, 900, 800);
+        M.addPatchCable(p, { aPortId: isp.ports[0].id, bPortId: r.ports.find((x) => x.role === 'wan').id });
+        M.addPatchCable(p, { aPortId: r.ports.find((x) => x.role === 'lan').id, bPortId: pc.ports[0].id });
+      });
+    });
+    if (await page.evaluate(() => NetMap.app.S.view !== 'graph')) await page.click('#btnGraph');
+    await page.waitForSelector('#graphView select[data-g="from"]');
+    const opts = await page.locator('#graphView select[data-g="from"] option').allInnerTexts();
+    assert.ok(opts.some((o) => /Internet - all ISPs \(2/.test(o)), opts.join(' | '));
+    await page.selectOption('#graphView select[data-g="from"]', '@internet');
+    assert.ok(/No Internet object is marked as having a public IP/i.test(await page.innerText('#graphView')), 'no public IP anywhere: nothing reachable from the Internet');
+    // tick "Public IP" on the ISPs in the details panel (edit mode)
+    await page.click('#btnGraph'); // back to the map
+    if (!(await page.evaluate(() => NetMap.app.S.mode === 'edit'))) await page.click('#btnMode');
+    const ispIds = await page.evaluate(() => NetMap.app.S.p.objects.filter((o) => o.type === 'internet').map((o) => o.id));
+    for (const id of ispIds) {
+      await page.evaluate((i) => NetMap.app.api.select({ kind: 'object', id: i }), id);
+      await page.waitForSelector('#detailsPane input[data-f="publicIp"]');
+      await page.check('#detailsPane input[data-f="publicIp"]');
+    }
+    assert.strictEqual(await page.evaluate(() => NetMap.app.S.p.objects.filter((o) => o.type === 'internet' && o.publicIp).length), 2, 'both marked');
+    await page.click('#btnMode');
+    await page.click('#btnGraph');
+    await page.waitForSelector('#graphView select[data-g="from"]');
+    await page.selectOption('#graphView select[data-g="from"]', '@internet');
+    assert.ok(/Reachable from Internet \(all ISPs\)/i.test(await page.innerText('#graphView')), 'tree from every ISP');
+    assert.ok(/Lone PC/.test(await page.innerText('#graphView .gv-tree')), 'what the Internet can reach');
+    await page.selectOption('#graphView select[data-g="from"]', { label: 'Lone PC (Generic)' }).catch(async () => { const v = await page.evaluate(() => Array.from(document.querySelectorAll('#graphView select[data-g="from"] option')).find((o) => /Lone PC/.test(o.textContent)).value); await page.selectOption('#graphView select[data-g="from"]', v); });
+    await page.selectOption('#graphView select[data-g="to"]', '@internet');
+    assert.ok(/Paths from Lone PC to Internet \(all ISPs\)/i.test(await page.innerText('#graphView')), 'how the device reaches the Internet');
+    assert.ok(/ISP 2/.test(await page.innerText('#graphView .gv-path')), 'through its own ISP');
+    await page.click('#btnGraph'); // back to the map
+    await page.evaluate(() => NetMap.app.api.loadProject(NetMap.builder.buildDemoProject()));
+    await page.waitForSelector('#vp [data-kind="object"]');
+  });
+
   await step('autosave survives a refresh', async () => {
     await page.click('#btnMode'); // back to view mode flushes the save
     const name = await page.evaluate(() => NetMap.app.S.p.name);

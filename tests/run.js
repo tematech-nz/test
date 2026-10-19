@@ -2067,5 +2067,41 @@ test('fixed link label moved slightly under its panel: the wire enters the middl
   assert.ok(nums[1] < endY && endY - nums[1] < 120, 'a short stub from the panel');
 });
 
+test('graph: "Internet (all ISPs)" stands for every Internet object, as a start or an end', () => {
+  const p = B.buildShowcaseProject(), G = NM.graphview, T = NM.topology, m1 = p.maps[0].id;
+  const isp2 = B.addObjectPlaced(p, m1, { type: 'internet', name: 'ISP 2' }, 900, 600);
+  const r2 = B.addObjectPlaced(p, m1, { type: 'router', name: 'Router 2', wanPorts: 1, lanPorts: 2, ipAddress: '10.9.0.1' }, 900, 700);
+  const pc = B.addObjectPlaced(p, m1, { type: 'generic', name: 'Lone PC', deviceKind: 'pc', portCount: 1 }, 900, 800);
+  M.addPatchCable(p, { aPortId: isp2.ports[0].id, bPortId: r2.ports.find(x => x.role === 'wan').id });
+  M.addPatchCable(p, { aPortId: r2.ports.find(x => x.role === 'lan').id, bPortId: pc.ports[0].id });
+  let g = T.buildGraph(p, {}); const inet = T.endpoints(g, T.INTERNET);
+  assert.strictEqual(inet.length, 2, 'both Internet objects');
+  // without a public IP nothing can be reached FROM the Internet (outbound access still works)
+  assert.strictEqual(T.endpoints(g, T.INTERNET, true).length, 0);
+  assert.deepStrictEqual(T.pathsBetween(g, T.INTERNET, byName(p, 'Switch A').id, 10), []);
+  assert.ok(T.pathsBetween(g, pc.id, T.INTERNET, 10).length >= 1, 'a device still gets out');
+  assert.ok(/No Internet object is marked as having a public IP/.test(G.render(p, { from: T.INTERNET, to: '', via: false })));
+  p.objects.filter(o => o.type === 'internet').forEach(o => { o.publicIp = true; });
+  g = T.buildGraph(p, {});
+  assert.strictEqual(T.endpoints(g, T.INTERNET, true).length, 2);
+  const tree = T.reachTree(g, T.endpoints(g, T.INTERNET, true)), names = tree.order.map(n => g.nodes[n.id].name);
+  assert.ok(names.includes('Lone PC') && names.includes('Switch A') && names.includes('Edge router'), 'everything either ISP can reach: ' + names.join(', '));
+  assert.ok(inet.every(id => tree.depth[id] === 0), 'every Internet object is a root');
+  const out = T.pathsBetween(g, pc.id, T.INTERNET, 10);
+  assert.ok(out.length >= 1 && out.every(x => x.nodes[x.nodes.length - 1] === isp2.id), 'how the PC gets out: through its own ISP only');
+  const inb = T.pathsBetween(g, T.INTERNET, byName(p, 'Switch A').id, 10);
+  assert.ok(inb.length >= 1 && g.nodes[inb[0].nodes[0]].type === 'internet', 'how the Internet reaches Switch A');
+  const html = G.render(p, { from: T.INTERNET, to: '', via: false });
+  assert.ok(/Internet - all ISPs \(2/.test(html) && /Reachable from Internet \(all ISPs\)/.test(html));
+  const html2 = G.render(p, { from: pc.id, to: T.INTERNET, via: false });
+  assert.ok(/Paths from Lone PC to Internet \(all ISPs\)/.test(html2));
+  const optNames = [...html.matchAll(/<option value="[^"]*"[^>]*>([^<]*)<\/option>/g)].map(m => m[1]).slice(1, 1 + g.order.length);
+  const sorted = optNames.slice().sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base', numeric: true }));
+  assert.deepStrictEqual(optNames, sorted, 'From / To lists are sorted A to Z (after the Internet entry)');
+  assert.ok(/<option value="@internet"[^>]*>Internet - all ISPs/.test(html), 'the combined Internet entry comes first');
+  const one = M.clone(p); M.deleteContainerOrObject(one, 'object', isp2.id, 'delete');
+  assert.ok(!/Internet - all ISPs/.test(G.render(one, { from: '', to: '', via: false })), 'a single Internet object is already listed by name');
+});
+
 console.log('\n' + passed + ' passed, ' + failed + ' failed');
 process.exit(failed ? 1 : 0);

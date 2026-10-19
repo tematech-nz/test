@@ -91,6 +91,10 @@ Try it: File -> Load demo project: two rooms with a fixed link between racks, a 
 - **Internet / ISP** (`+ Internet / ISP`): a special endpoint object (default name INTERNET) with one or more ISP ports
   and an optional public IP / circuit note. Cable its ports to router WAN ports like anything else. Use several
   for multiple ISPs.
+- **Internet objects and "Public IP"**: tick **Public IP** on an Internet object when its ISP gives you a routable address (not behind the ISP's CGNAT). The
+  Graph's From / To lists then offer **Internet - all ISPs** (shown when there are two or more Internet objects). *From* it you get everything the Internet can reach
+  through the ISPs that have a public IP (the others give outbound access only, and the view says so); *To* it you get how a device gets out through any ISP.
+  The From / To lists are sorted A to Z.
 - **Graph** (header button): collapses patch cables, patch panels and fixed links into device-to-device links and shows
   the interconnection graph from a chosen device (default: INTERNET). With "To" empty you get the reachability tree
   (what can be reached, via which cables, how many hops, what is unreachable). Pick a target device to list every

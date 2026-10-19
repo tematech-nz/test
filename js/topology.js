@@ -46,7 +46,8 @@
       nodes[o.id] = {
         id: o.id, name: o.name, type: o.type, label: M.typeLabel(o), ip: M.ipList(o).map(function (x) { return x.ip; }).filter(function (v, i, a) { return a.indexOf(v) === i; }).join(', '), nets: nodeNets(o),
         transit: !TERMINAL[o.type] || (o.type === 'internet' && !!opts.viaInternet),
-        isolated: o.type === 'switch' && !!o.portIsolation
+        isolated: o.type === 'switch' && !!o.portIsolation,
+        publicIp: o.type === 'internet' && !!o.publicIp
       };
       order.push(o.id);
     });
@@ -96,7 +97,7 @@
    * isolation only forwards between an access port and an uplink port (never access to access).
    */
   function canPass(graph, nodeId, inLink, outLink, rootId) {
-    if (nodeId === rootId) return true;
+    if (nodeId === rootId || (rootId && typeof rootId === 'object' && rootId[nodeId])) return true;
     var n = graph.nodes[nodeId];
     if (!n.transit) return false;
     if (inLink && outLink && inLink === outLink && n.type !== 'router') return false; // no U-turn on the same link (a router on a stick may)
@@ -110,10 +111,13 @@
    * coming back down (for example through a router), which counts as a longer path.
    */
   function reachTree(graph, rootId) {
-    var depth = {}, seenState = {}, queue = [{ id: rootId, via: null, d: 0 }], out = [];
-    depth[rootId] = 0;
-    out.push({ id: rootId, depth: 0, parent: null, link: null });
-    seenState[rootId + '|'] = true;
+    var roots = [].concat(rootId), rootSet = {}, depth = {}, seenState = {}, queue = [], out = [];
+    roots.forEach(function (r) {
+      rootSet[r] = true; depth[r] = 0; seenState[r + '|'] = true;
+      queue.push({ id: r, via: null, d: 0 });
+      out.push({ id: r, depth: 0, parent: null, link: null });
+    });
+    rootId = rootSet;
     while (queue.length) {
       var st = queue.shift();
       (graph.adj[st.id] || []).forEach(function (n) {
@@ -132,6 +136,24 @@
     return { order: out, depth: depth, unreachable: unreachable };
   }
 
+  /*
+   * The pseudo end "Internet (all ISPs)": a project often has one Internet object per ISP. INTERNET stands for all of them, so "from" it
+   * gives everything any ISP can reach, and "to" it gives how a device gets out through any of them.
+   */
+  var INTERNET = '@internet';
+  /* inbound: the starting side of "what can be reached" - only an ISP with a public IP lets the Internet start a connection into the network */
+  function endpoints(graph, v, inbound) {
+    if (v === INTERNET) return graph.order.filter(function (id) { return graph.nodes[id].type === 'internet' && (!inbound || graph.nodes[id].publicIp); });
+    return graph.nodes[v] ? [v] : [];
+  }
+  function pathsBetween(graph, from, to, limit, maxHops) {
+    var out = [];
+    endpoints(graph, from, true).forEach(function (a) {
+      endpoints(graph, to).forEach(function (b) { allPaths(graph, a, b, limit, maxHops).forEach(function (p) { out.push(p); }); });
+    });
+    out.sort(function (x, y) { return x.nodes.length - y.nodes.length; });
+    return out.slice(0, limit || 100);
+  }
   /* all paths from -> to; transit and isolation rules apply; shortest first. Devices are visited once, except isolated switches (up and back down) */
   function allPaths(graph, from, to, limit, maxHops) {
     limit = limit || 100; maxHops = maxHops || 12;
@@ -416,6 +438,6 @@
     return out;
   }
 
-  NM.topology = { segments: segments, networkIssues: networkIssues, effectiveIp: effectiveIp, networkColorFor: networkColorFor, networkTraces: networkTraces, routeShortcuts: routeShortcuts, networkCables: networkCables, canPass: canPass, buildGraph: buildGraph, reachTree: reachTree, allPaths: allPaths, subnetOf: subnetOf, PASSIVE: PASSIVE, TERMINAL: TERMINAL };
+  NM.topology = { segments: segments, networkIssues: networkIssues, effectiveIp: effectiveIp, networkColorFor: networkColorFor, networkTraces: networkTraces, routeShortcuts: routeShortcuts, networkCables: networkCables, canPass: canPass, INTERNET: INTERNET, endpoints: endpoints, pathsBetween: pathsBetween, buildGraph: buildGraph, reachTree: reachTree, allPaths: allPaths, subnetOf: subnetOf, PASSIVE: PASSIVE, TERMINAL: TERMINAL };
   if (typeof module !== 'undefined' && module.exports) module.exports = NM.topology;
 })(typeof window !== 'undefined' ? window : globalThis);
