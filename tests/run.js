@@ -1500,6 +1500,20 @@ test('All items overview map: appears with 2+ maps, ghosts of everything, positi
   p.maps = p.maps.filter(m => m.id !== m2); p.placements = p.placements.filter(q => q.mapId !== m2);
   assert.strictEqual(M.syncAllMap(p), false); assert.strictEqual(M.realMaps(p).length, 1);
 });
+test('moveMap reorders the ordinary maps; the overview map stays at the end and keeps working', () => {
+  const p = M.createProject('mm'), m1 = p.maps[0].id, mk = (n) => { const id = M.uid('map'); p.maps.push({ id: id, name: n, location: '', viewport: { x: 0, y: 0, zoom: 1 } }); return id; };
+  const b = mk('B'), c = mk('C');
+  B.addObjectPlaced(p, m1, { type: 'generic', name: 'X', portCount: 1 }, 40, 40); M.syncAllMap(p);
+  const names = () => M.realMaps(p).map(m => m.name);
+  const first = p.maps[0].name;
+  assert.deepStrictEqual(names(), [first, 'B', 'C']);
+  M.moveMap(p, c, 0); assert.deepStrictEqual(names(), ['C', first, 'B']);
+  M.moveMap(p, c, 99); assert.deepStrictEqual(names(), [first, 'B', 'C'], 'index is clamped');
+  M.moveMap(p, b, 0); assert.deepStrictEqual(names(), ['B', first, 'C']);
+  assert.strictEqual(p.maps[p.maps.length - 1].auto, 'all', 'overview map last in the file');
+  assert.throws(() => M.moveMap(p, M.allMap(p).id, 0), /Map not found/, 'the overview cannot be moved');
+  assert.ok(M.syncAllMap(p) === false && p.placements.some(q => q.mapId === M.allMap(p).id), 'overview intact');
+});
 test('only one editable placement per item: duplicates in old files become live copies, placeItem makes a ghost on a second map', () => {
   const p = M.createProject('one'), m1 = p.maps[0].id;
   const m2 = M.uid('map'); p.maps.push({ id: m2, name: 'Second', location: '', viewport: { x: 0, y: 0, zoom: 1 } });

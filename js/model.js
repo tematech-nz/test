@@ -187,6 +187,15 @@
    */
   function realMaps(p) { return p.maps.filter(function (m) { return !m.auto; }); }
   function allMap(p) { for (var i = 0; i < p.maps.length; i++) if (p.maps[i].auto === 'all') return p.maps[i]; return null; }
+  /* put a map at position `index` among the ordinary maps (the overview map always stays out of the way, at the end of the list) */
+  function moveMap(p, mapId, index) {
+    var reals = realMaps(p), from = reals.findIndex(function (m) { return m.id === mapId; });
+    if (from < 0) throw new Error('Map not found');
+    index = Math.max(0, Math.min(reals.length - 1, index));
+    var m = reals.splice(from, 1)[0];
+    reals.splice(index, 0, m);
+    p.maps = reals.concat(p.maps.filter(function (x) { return x.auto; }));
+  }
   function syncAllMap(p) {
     var reals = realMaps(p), am = allMap(p);
     if (reals.length < 2) return false; // not shown (and not kept up to date) until there is something to combine
@@ -1218,7 +1227,7 @@
     findContainer: findContainer, groupOf: groupOf, parentOf: parentOf, containerChildren: containerChildren, descendants: descendants,
     addPlacement: addPlacement, placementOf: placementOf, placementGroup: placementGroup, movePlacement: movePlacement,
     growToFit: growToFit, mapsFor: mapsFor, addGroup: addGroup, addObject: addObject, setContainer: setContainer,
-    setPortCount: setPortCount, findPortGroup: findPortGroup, parsePortRange: parsePortRange, addPortGroup: addPortGroup, updatePortGroup: updatePortGroup, deletePortGroup: deletePortGroup, portGroupOf: portGroupOf, prunePortGroups: prunePortGroups, hasDeviceIp: hasDeviceIp, normalizeGhosts: normalizeGhosts, setLinkLabelOffset: setLinkLabelOffset, realMaps: realMaps, allMap: allMap, syncAllMap: syncAllMap, peerGroup: peerGroup, linkPortGroups: linkPortGroups, unlinkPortGroup: unlinkPortGroup, realPlacement: realPlacement, syncGhosts: syncGhosts, pseudoOf: pseudoOf, pseudoDevices: pseudoDevices, hasPortIp: hasPortIp, setDeviceIp: setDeviceIp, effectivePortIp: effectivePortIp, ipList: ipList, setPortIp: setPortIp, IP_ERROR: IP_ERROR, setDeviceKind: setDeviceKind, isTermination: isTermination, DEVICE_KINDS: DEVICE_KINDS, deviceKindInfo: deviceKindInfo, typeLabel: typeLabel, accessPorts: accessPorts, validSectionRows: validSectionRows, setUplinkPorts: setUplinkPorts, setSwitchLayout: setSwitchLayout, setFullWidth: setFullWidth, setSectionSize: setSectionSize, validSectionSizes: validSectionSizes, defaultSectionSize: defaultSectionSize, effectiveSectionSize: effectiveSectionSize, setRouterPorts: setRouterPorts, isValidIp: isValidIp, canConnectPatch: canConnectPatch, addPatchCable: addPatchCable,
+    setPortCount: setPortCount, findPortGroup: findPortGroup, parsePortRange: parsePortRange, addPortGroup: addPortGroup, updatePortGroup: updatePortGroup, deletePortGroup: deletePortGroup, portGroupOf: portGroupOf, prunePortGroups: prunePortGroups, hasDeviceIp: hasDeviceIp, moveMap: moveMap, normalizeGhosts: normalizeGhosts, setLinkLabelOffset: setLinkLabelOffset, realMaps: realMaps, allMap: allMap, syncAllMap: syncAllMap, peerGroup: peerGroup, linkPortGroups: linkPortGroups, unlinkPortGroup: unlinkPortGroup, realPlacement: realPlacement, syncGhosts: syncGhosts, pseudoOf: pseudoOf, pseudoDevices: pseudoDevices, hasPortIp: hasPortIp, setDeviceIp: setDeviceIp, effectivePortIp: effectivePortIp, ipList: ipList, setPortIp: setPortIp, IP_ERROR: IP_ERROR, setDeviceKind: setDeviceKind, isTermination: isTermination, DEVICE_KINDS: DEVICE_KINDS, deviceKindInfo: deviceKindInfo, typeLabel: typeLabel, accessPorts: accessPorts, validSectionRows: validSectionRows, setUplinkPorts: setUplinkPorts, setSwitchLayout: setSwitchLayout, setFullWidth: setFullWidth, setSectionSize: setSectionSize, validSectionSizes: validSectionSizes, defaultSectionSize: defaultSectionSize, effectiveSectionSize: effectiveSectionSize, setRouterPorts: setRouterPorts, isValidIp: isValidIp, canConnectPatch: canConnectPatch, addPatchCable: addPatchCable,
     updatePatchCable: updatePatchCable, deletePatchCable: deletePatchCable, addInternalMapping: addInternalMapping,
     removeInternalMapping: removeInternalMapping, autoMapPanel: autoMapPanel, rearPorts: rearPorts,
     sequentialPorts: sequentialPorts, addFixedLink: addFixedLink, updateLinkMeta: updateLinkMeta,

@@ -651,7 +651,8 @@
       res.style.display = '';
     } else res.style.display = 'none';
 
-    const mapRow = (m) => '<div class="list-item ' + (m.id === S.mapId ? 'active' : '') + '" data-act="goto" data-kind="map" data-id="' + esc(m.id) + '"><div class="grow">' + esc(m.name) +
+    const grips = S.mode === 'edit' && M.realMaps(S.p).length > 1; // in edit mode every ordinary map has a handle to drag it to another position
+    const mapRow = (m) => '<div class="list-item ' + (m.id === S.mapId ? 'active' : '') + '" data-act="goto" data-kind="map" data-id="' + esc(m.id) + '">' + (grips && !m.auto ? '<span class="map-grip" data-mapgrip="' + esc(m.id) + '" title="Drag to change the order of the maps"></span>' : '') + '<div class="grow">' + esc(m.name) +
       (m.location ? '<div class="sub">' + esc(m.location) + '</div>' : '') + '</div>' +
       (isEdit() && !m.auto ? '<button data-act="editMap" data-id="' + esc(m.id) + '" style="padding:0 6px">Edit</button>' : '') + '</div>';
     const ovMap = M.allMap(S.p), reals = M.realMaps(S.p);
@@ -1907,6 +1908,30 @@
     $('searchBox').onkeydown = (e) => { if (e.key === 'Enter') { const r = M.search(S.p, S.query); if (r[0]) { goTo(r[0].kind, r[0].id); } } };
     $('tabDetails').onclick = () => showTab('details'); $('tabTrace').onclick = () => showTab('trace');
     $('zoomIn').onclick = () => zoomAt(1.25); $('zoomOut').onclick = () => zoomAt(0.8); $('zoomFit').onclick = fitMap;
+    // reorder maps: drag the handle in the map list (edit mode)
+    $('mapList').addEventListener('pointerdown', (e) => {
+      const grip = e.target.closest && e.target.closest('[data-mapgrip]');
+      if (!grip || S.mode !== 'edit') return;
+      e.preventDefault(); e.stopPropagation();
+      const list = $('mapList'), id = grip.dataset.mapgrip;
+      const rows = () => Array.from(list.querySelectorAll('.list-item')).filter((r) => r.querySelector('[data-mapgrip]'));
+      const row0 = grip.closest('.list-item'); row0.classList.add('dragging');
+      let to = rows().indexOf(row0);
+      const mark = (i) => { rows().forEach((r, k) => { r.classList.toggle('drop-before', k === i && i <= rows().indexOf(row0) && k !== rows().indexOf(row0)); r.classList.toggle('drop-after', k === i && i > rows().indexOf(row0)); }); };
+      const move = (ev) => {
+        const rs = rows();
+        let k = rs.findIndex((r) => ev.clientY < r.getBoundingClientRect().top + r.getBoundingClientRect().height / 2);
+        if (k < 0) k = rs.length - 1;
+        to = k; mark(k);
+      };
+      const done = (ev) => {
+        document.removeEventListener('pointermove', move); document.removeEventListener('pointerup', done); document.removeEventListener('pointercancel', done);
+        const from = rows().indexOf(row0);
+        rows().forEach((r) => r.classList.remove('dragging', 'drop-before', 'drop-after'));
+        if (ev.type === 'pointerup' && to !== from) commit('Reorder maps', (p) => M.moveMap(p, id, to));
+      };
+      document.addEventListener('pointermove', move); document.addEventListener('pointerup', done); document.addEventListener('pointercancel', done);
+    });
     $('fileInput').onchange = (e) => { const f = e.target.files[0]; e.target.value = ''; if (f) importFile(f); };
     $('toolbar').addEventListener('change', (e) => {
       const f = e.target.dataset.f;

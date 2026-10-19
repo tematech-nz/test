@@ -344,6 +344,27 @@ const ok = (m) => console.log('  ok   ' + m);
     await page.click('#btnUndo');
   });
 
+  await step('map order: drag a map by its handle in the map list (edit mode)', async () => {
+    await page.evaluate(() => { const A = NetMap.app, M = NetMap.model; A.commit('three maps', (p) => { ['Order X', 'Order Y'].forEach((n) => p.maps.push({ id: M.uid('map'), name: n, location: '', viewport: { x: 0, y: 0, zoom: 1 } })); }); });
+    await page.waitForTimeout(100);
+    const order = () => page.evaluate(() => NetMap.model.realMaps(NetMap.app.S.p).map((m) => m.name));
+    const before = await order();
+    assert.ok(await page.locator('#mapList .map-grip').count() >= 3, 'grab handles in edit mode');
+    const last = page.locator('#mapList .list-item', { hasText: 'Order Y' }), first = page.locator('#mapList .map-box .list-item').first();
+    const g = await last.locator('.map-grip').boundingBox(), f = await first.boundingBox();
+    await page.mouse.move(g.x + 4, g.y + g.height / 2); await page.mouse.down();
+    await page.mouse.move(g.x + 4, f.y + 3, { steps: 8 }); await page.mouse.up();
+    await page.waitForTimeout(150);
+    const after = await order();
+    assert.strictEqual(after[0], 'Order Y', 'moved to the top: ' + after.join(','));
+    assert.deepStrictEqual(after.slice(1), before.filter((n) => n !== 'Order Y'));
+    assert.strictEqual(await page.evaluate(() => NetMap.app.S.p.maps[NetMap.app.S.p.maps.length - 1].auto), 'all');
+    await page.evaluate(() => NetMap.app.api.setMode('view')); await page.waitForTimeout(100);
+    assert.strictEqual(await page.locator('#mapList .map-grip').count(), 0, 'no handles in view mode');
+    await page.evaluate(() => NetMap.app.api.setMode('edit')); await page.waitForTimeout(100);
+    await page.click('#btnUndo'); await page.click('#btnUndo');
+  });
+
   await step('hidden navigation stays hidden when clicking the map or changing mode', async () => {
     await page.click('#btnMenu');
     assert.ok(!(await page.isVisible('#left')));
