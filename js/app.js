@@ -438,9 +438,28 @@
     if (r && r !== true) { toast('Created fixed link - edit its properties on the right'); select({ kind: 'link', id: r }); }
   }
 
+  /* double-click a fixed link's label: go to the map where the link terminates (its far end) */
+  function openLinkFarEnd(linkId) {
+    const l = S.p.fixedLinks.find((x) => x.id === linkId); if (!l) return;
+    const here = (id) => !!M.placementOf(S.p, S.mapId, id);
+    const far = here(l.aObjectId) && !here(l.bObjectId) ? l.bObjectId : (here(l.bObjectId) && !here(l.aObjectId) ? l.aObjectId : null);
+    if (!far) { toast('Both ends of this link are on this map', false); return; }
+    const real = M.realPlacement(S.p, far), mapId = real ? real.mapId : M.mapsFor(S.p, 'object', far)[0];
+    if (!mapId) { toast('The other end is not on any map yet', true); return; }
+    goTo('object', far, mapId);
+    toast('Other end of ' + l.name + ' on ' + (S.p.maps.find((m) => m.id === mapId) || {}).name);
+  }
   function handleTap(target, ev) {
     if (isFloor() && ev) { floorTap(ev); return; }
     if (S.place && ev) { placeHere(ev); return; }
+    // two quick taps on a fixed link's label: the label stays click-through (ports under it keep working), so it is found by position
+    let ll = null;
+    if (!isEdit() && !S.tool && ev) Array.prototype.forEach.call($('vp').querySelectorAll('[data-lblink]'), (r) => { const b = r.getBoundingClientRect(); if (ev.clientX >= b.left && ev.clientX <= b.right && ev.clientY >= b.top && ev.clientY <= b.bottom) ll = r; });
+    if (ll) {
+      const now = Date.now(), lt = S.lastLabelTap;
+      if (lt && lt.id === ll.dataset.lblink && now - lt.t < 450) { S.lastLabelTap = null; openLinkFarEnd(lt.id); return; }
+      S.lastLabelTap = { id: ll.dataset.lblink, t: now };
+    } else S.lastLabelTap = null;
     const tg = target.closest ? target.closest('[data-toggle]') : null;
     if (tg) { toggleCollapse(tg.dataset.pl, tg.dataset.toggle); return; }
     const el = target.closest ? target.closest('[data-kind]') : null;

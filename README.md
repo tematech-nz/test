@@ -141,8 +141,10 @@ Try it: File -> Load demo project: two rooms with a fixed link between racks, a 
 - **Equipment list**: the navigation list shows the equipment of the current map (live copies are tagged "live copy", and items that are on no map yet "no map"); a link under it brings back the equipment of the other maps ("other map" tag). The overview lists everything.
 - **Delete vs remove from map**: deleting an item that is shown on more than one map asks whether to **remove it from this map only** (it and its
   connections stay on the other maps; a group or rack is removed together with what is shown inside it) or delete it everywhere.
-- **Fixed link labels** can be dragged out of the way in edit mode (per map; a dashed leader line shows where the label belongs, "Reset label
-  position" in the link's panel puts it back). Labels are always drawn on top of equipment, so they never hide behind it.
+- **Fixed link labels** can be dragged out of the way in edit mode (per map; "Reset label position" in the link's panel puts it back). Labels are always
+  drawn on top of equipment, so they never hide behind it. When a link continues on another map, its wire runs to the label in full, drawn above
+  everything, and follows the label when you move it (it joins the side of the label that faces the panel). In view mode, double-click a link's
+  label to jump to the map where the link ends. A link with both ends on the map keeps a thin dashed leader line to a moved label.
 - **Quick start**: File > Quick start / help (shown once automatically on the first visit with an empty project) explains the workflow,
   including that a fixed link can join panels on different maps, plus keyboard shortcuts.
 - **New fixed link** shows the real rear ports of both panels: occupied ports are greyed out and cannot be picked, port groups are shown

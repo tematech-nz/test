@@ -1742,6 +1742,24 @@ const ok = (m) => console.log('  ok   ' + m);
     await page.waitForSelector('#vp [data-kind="object"]');
   });
 
+  await step('view mode: double-click a fixed link label goes to the map where the link terminates', async () => {
+    await page.evaluate(() => NetMap.app.api.loadProject(NetMap.builder.buildDemoProject()));
+    if (await page.evaluate(() => NetMap.app.S.mode === 'edit')) await page.click('#btnMode');
+    await page.waitForSelector('#vp [data-lblink]');
+    const here = await page.evaluate(() => NetMap.app.S.p.maps.find((m) => m.id === NetMap.app.S.mapId).name);
+    const box = await page.locator('#vp [data-lblink]').first().boundingBox();
+    await page.mouse.dblclick(box.x + box.width / 2, box.y + box.height / 2); await page.waitForTimeout(250);
+    const there = await page.evaluate(() => NetMap.app.S.p.maps.find((m) => m.id === NetMap.app.S.mapId).name);
+    assert.notStrictEqual(there, here, 'moved to the other end: ' + here + ' -> ' + there);
+    // and back again from the far end's label
+    await page.waitForSelector('#vp [data-lblink]');
+    const box2 = await page.locator('#vp [data-lblink]').first().boundingBox();
+    await page.mouse.dblclick(box2.x + box2.width / 2, box2.y + box2.height / 2); await page.waitForTimeout(250);
+    assert.strictEqual(await page.evaluate(() => NetMap.app.S.p.maps.find((m) => m.id === NetMap.app.S.mapId).name), here, 'and back');
+    // a single click only selects the link
+    await page.mouse.click(box2.x + 5, box2.y + 5); await page.waitForTimeout(100);
+  });
+
   await step('autosave survives a refresh', async () => {
     await page.click('#btnMode'); // back to view mode flushes the save
     const name = await page.evaluate(() => NetMap.app.S.p.name);

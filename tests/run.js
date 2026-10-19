@@ -2026,5 +2026,22 @@ test('floor labels: scalable, rotatable boxes with pt size and colour; hit testi
   assert.ok(R.renderMap(p, fm.id, { mode: 'view', zoom: 0.5 }).content.indexOf('Drag to rotate') < 0);
 });
 
+test('fixed link that ends in a label: wire never clipped behind other elements, follows a moved label and joins its facing side', () => {
+  const p = B.buildDemoProject(), R = NM.render, l = p.fixedLinks[0], m1 = p.maps[0];
+  const base = R.renderMap(p, m1.id, { mode: 'view' }).content;
+  assert.ok(base.indexOf('url(#lc_' + l.id) < 0, 'stub wires are not clipped');
+  M.setLinkLabelOffset(p, l.id, m1.id, -300, 80);
+  const moved = R.renderMap(p, m1.id, { mode: 'edit' }).content;
+  const grp = moved.slice(moved.lastIndexOf('<g data-kind="link" data-id="' + l.id + '"', moved.indexOf('data-linklabel')));
+  assert.ok(moved.indexOf('stroke-dasharray="3 2"') < 0, 'no thin leader any more: the wire itself runs to the label');
+  const wire = new RegExp('<path d="(M[^"]*C[^"]*)" stroke="#37474f" stroke-width="6"').exec(moved);
+  assert.ok(wire, 'the thick wire is a curve to the label');
+  const lab = /data-linklabel="[^"]*"[^>]* x="([-\d.]+)" y="([-\d.]+)" width="([-\d.]+)" height="13"/.exec(moved);
+  const nums = wire[1].match(/-?[\d.]+/g).map(Number), endX = nums[nums.length - 2], endY = nums[nums.length - 1];
+  assert.ok(Math.abs(endX - (Number(lab[1]) + Number(lab[3]))) < 1 || Math.abs(endX - Number(lab[1])) < 1, 'ends on a side edge of the label, not its centre');
+  assert.ok(Math.abs(endY - (Number(lab[2]) + 6.5)) < 1.5, 'at mid height');
+  void grp;
+});
+
 console.log('\n' + passed + ' passed, ' + failed + ' failed');
 process.exit(failed ? 1 : 0);

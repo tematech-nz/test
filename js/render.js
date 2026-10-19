@@ -415,9 +415,10 @@
       var isHi = hl && (hl.links[l.id]);
       var dim = hl && !isHi;
       var label = l.name + ' x' + l.wires.length;
-      var clip = isSel || isHi ? '' : hiddenBehind(l);
+      var stub = !(linkAnchor(l, l.aObjectId) && linkAnchor(l, l.bObjectId)); // only one end is on this map: the wire runs to its label
+      var clip = isSel || isHi || stub ? '' : hiddenBehind(l); // a wire that ends in a label is never hidden behind other elements
       var o = (clip ? '<defs>' + clip + '</defs>' : '') + '<g data-kind="link" data-id="' + esc(l.id) + '"' + (dim ? ' opacity="0.15"' : '') + (clip ? ' clip-path="url(#lc_' + esc(l.id) + ')"' : '') + '>';
-      var anchors = [], d, mx, my;
+      var anchors = [], d, mx, my, tail = false;
       var aA = linkAnchor(l, l.aObjectId), aB = linkAnchor(l, l.bObjectId);
       if (aA && aB) {
         var key = [l.aObjectId, l.bObjectId].sort().join('|');
@@ -435,6 +436,14 @@
         mx = an.x; my = sy + 12;
         label = label + ' -> ' + (other ? other.name : '?') + (other ? ' [' + (M.mapsFor(p, 'object', other.id).map(function (m) { return idx.maps[m].name; }).join(', ') || 'not on a map') + ']' : '');
         grow(an.x - 20, an.y, 40, sy - an.y + 20);
+        var lo0 = (l.labelAt && l.labelAt[mapId]) || [0, 0];
+        if (lo0[0] || lo0[1]) { // label moved by hand: the wire itself follows it, ending at the label's side that faces the panel
+          var tw0 = label.length * 5.8 + 8, lx = mx + lo0[0], ly = my + lo0[1], right = an.x >= lx, ex = right ? lx + tw0 / 2 : lx - tw0 / 2, ey = ly - 2.5, sg = right ? 1 : -1;
+          var c1y = an.y + Math.max(30, Math.abs(ey - an.y) / 2), c2x = ex + sg * Math.max(30, Math.abs(ex - an.x) / 2);
+          d = 'M' + num(an.x) + ' ' + num(an.y) + 'C' + num(an.x) + ' ' + num(c1y) + ' ' + num(c2x) + ' ' + num(ey) + ' ' + num(ex) + ' ' + num(ey);
+          grow(Math.min(an.x, ex) - 10, Math.min(an.y, ey) - 10, Math.abs(an.x - ex) + 20, Math.abs(an.y - ey) + 20);
+          tail = true;
+        }
         anchors = [an];
       }
       // bar + ticks tie the thick line to the exact rear ports
@@ -450,16 +459,16 @@
       o += '<path d="' + d + '" stroke="' + (isSel ? SEL : '#37474f') + '" stroke-width="6" fill="none" stroke-linecap="round" pointer-events="none"/>';
       o += '<path d="' + d + '" stroke="#ffffff" stroke-width="1.6" stroke-dasharray="7 5" fill="none" pointer-events="none"/>';
       var lab = '', tw = label.length * 5.8 + 8, lo = (l.labelAt && l.labelAt[mapId]) || [0, 0], movable = editing && !exporting;
-      if (lo[0] || lo[1]) { // dragged by hand: leader line from the default spot to the moved label
-        lab += '<path d="M' + num(mx) + ' ' + num(my - 3) + 'L' + num(mx + lo[0]) + ' ' + num(my + lo[1] - 3) + '" stroke="#37474f" stroke-width="1" stroke-dasharray="3 2" fill="none" pointer-events="none"/>';
+      if (lo[0] || lo[1]) { // dragged by hand: a wire to the label (stub links, above) or a thin leader line from the default spot
+        if (!tail) lab += '<path d="M' + num(mx) + ' ' + num(my - 3) + 'L' + num(mx + lo[0]) + ' ' + num(my + lo[1] - 3) + '" stroke="#37474f" stroke-width="1" stroke-dasharray="3 2" fill="none" pointer-events="none"/>';
         mx += lo[0]; my += lo[1];
         grow(mx - tw / 2, my - 10, tw, 16);
       }
-      lab += '<rect' + (movable ? ' data-linklabel="' + esc(l.id) + '" style="cursor:move"' : '') + ' x="' + num(mx - tw / 2) + '" y="' + num(my - 9) + '" width="' + num(tw) + '" height="13" rx="3" fill="#fff" stroke="' + (movable ? '#1565c0' : '#37474f') + '" stroke-width="' + (movable ? 1.2 : 0.8) + '"' + (movable ? '' : ' pointer-events="none"') + '/>' +
+      lab += '<rect' + (movable ? ' data-linklabel="' + esc(l.id) + '" style="cursor:move"' : (opts.mode === 'export' ? '' : ' data-lblink="' + esc(l.id) + '"')) + ' x="' + num(mx - tw / 2) + '" y="' + num(my - 9) + '" width="' + num(tw) + '" height="13" rx="3" fill="#fff" stroke="' + (movable ? '#1565c0' : '#37474f') + '" stroke-width="' + (movable ? 1.2 : 0.8) + '"' + (movable ? '' : ' pointer-events="none"') + '/>' +
         '<text x="' + num(mx) + '" y="' + num(my + 1) + '" font-size="10" text-anchor="middle" fill="#222" font-family="sans-serif" pointer-events="none">' + esc(label) + '</text>';
       o += '</g>'; // the link itself may hide behind unrelated containers, its label never does
       labelParts.push('<g data-kind="link" data-id="' + esc(l.id) + '"' + (dim ? ' opacity="0.15"' : '') + '>' + lab + '</g>');
-      cableParts.push(o);
+      if (stub) labelParts.splice(labelParts.length - 1, 0, o); else cableParts.push(o); // a stub's wire is drawn with its label, above every element
     });
 
     // patch cables
