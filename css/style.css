@@ -184,6 +184,9 @@ body.view-graph #canvas, body.view-graph #toolbar, body.view-graph #zoomctl, bod
 .pk.on { background: #fff3c4; border: 2px solid #e65100; font-weight: 700; }
 .pk.busy, .pk:disabled { background: #e3e3e3; color: #999; border-color: #bbb; cursor: not-allowed; text-decoration: line-through; }
 .pk i { position: absolute; top: -7px; right: -5px; background: #e65100; color: #fff; font-size: 9px; font-style: normal; border-radius: 8px; min-width: 14px; line-height: 14px; text-align: center; }
+.pk-wrap.valid .pk.on { background: #c8e6c9; border-color: #2e7d32; }
+.pk-wrap.valid .pk i { background: #2e7d32; }
+.pk-sum.valid { background: #e8f5e9; color: #1b5e20; }
 .pk-sum { margin: 8px 0; padding: 6px 8px; background: #eef6ff; border-radius: 6px; font-weight: 600; }
 
 .pk.cand { background: #e8f5e9; border-color: #43a047; }
