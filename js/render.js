@@ -42,6 +42,7 @@
     var byRef = {};
     var portGeo = {}; // portId -> absolute rect
     var parts = [], cableParts = [], labelParts = [], bounds = null;
+    var onOverview = !!(p.maps.find(function (m) { return m.id === mapId; }) || {}).auto;
 
     function grow(x, y, w, h) {
       if (!bounds) bounds = { x0: x, y0: y, x1: x + w, y1: y + h };
@@ -96,7 +97,7 @@
       var dim = hl && !container && !hl.objects[ref.id];
       var x = [];
       var ghost = !!pl.ghost;
-      x.push('<g data-kind="' + (it.isGroup ? 'group' : 'object') + '" data-id="' + esc(ref.id) + '"' + (ghost ? ' data-ghost="1" opacity="' + (hl ? (container || hl.objects[ref.id] ? '0.85' : '0.14') : '0.42') + '"' : (dim ? ' opacity="0.25"' : '')) + '>'); // while tracing, the live copies on the route stand out
+      x.push('<g data-kind="' + (it.isGroup ? 'group' : 'object') + '" data-id="' + esc(ref.id) + '"' + (ghost ? ' data-ghost="1" opacity="' + (onOverview ? (hl ? (container || hl.objects[ref.id] ? '1' : '0.3') : '0.92') : (hl ? (container || hl.objects[ref.id] ? '0.85' : '0.14') : '0.42')) + '"' : (dim ? ' opacity="0.25"' : '')) + '>'); // while tracing, the live copies on the route stand out
       x.push('<rect data-kind="' + (it.isGroup ? 'group' : 'object') + '" data-id="' + esc(ref.id) + '" x="' + num(pl.x) + '" y="' + num(pl.y) + '" width="' + num(pl.w) + '" height="' + num(pl.h) + '" rx="' + (container ? 6 : (ref.type === 'internet' ? 14 : 3)) + '" fill="' + st.fill + '"' +
         (hl && container ? ' fill-opacity="0.6"' : '') + ' stroke="' + (isDrop ? '#00c853' : (isSel ? SEL : st.stroke)) + '" stroke-width="' + (isDrop ? 4 : (isSel ? 3 : 1.5)) + '"' + (st.dash ? ' stroke-dasharray="' + st.dash + '"' : '') + '/>');
       var tx = pl.x + (editing || opts.moveGhosts ? 22 : 6);
@@ -176,7 +177,7 @@
         });
       }
       if (ghost) {
-        x.push('<rect x="' + num(pl.x) + '" y="' + num(pl.y) + '" width="' + num(pl.w) + '" height="' + num(pl.h) + '" rx="4" fill="#bbdefb" fill-opacity="0.35" stroke="#1565c0" stroke-width="2.5" stroke-dasharray="7 4" pointer-events="none"/>'); // live copy: tinted, dashed blue outline
+        x.push('<rect x="' + num(pl.x) + '" y="' + num(pl.y) + '" width="' + num(pl.w) + '" height="' + num(pl.h) + '" rx="4" fill="#bbdefb" fill-opacity="' + (onOverview ? '0.08' : '0.35') + '" stroke="#1565c0" stroke-width="2.5" stroke-dasharray="7 4" pointer-events="none"/>'); // live copy: tinted, dashed blue outline (the overview keeps the outline but shows the equipment in full colour)
         if (opts.moveGhosts) x.push('<rect data-handle="move" data-pl="' + esc(plId) + '" x="' + num(pl.x + 3) + '" y="' + num(pl.y + 3) + '" width="16" height="14" rx="2" fill="#37474f" style="cursor:move"/><path d="M' + num(pl.x + 6) + ' ' + num(pl.y + 8) + 'h10M' + num(pl.x + 6) + ' ' + num(pl.y + 12) + 'h10" stroke="#fff" stroke-width="1.5" pointer-events="none"/>');
         else if (editing) x.push('<g data-handle="unghost" data-pl="' + esc(plId) + '" style="cursor:pointer"><title>Remove this ghost copy from the map</title><rect data-handle="unghost" data-pl="' + esc(plId) + '" x="' + num(pl.x + 3) + '" y="' + num(pl.y + 3) + '" width="16" height="14" rx="2" fill="#b71c1c"/><path data-handle="unghost" data-pl="' + esc(plId) + '" d="M' + num(pl.x + 7) + ' ' + num(pl.y + 6) + 'l8 8M' + num(pl.x + 15) + ' ' + num(pl.y + 6) + 'l-8 8" stroke="#fff" stroke-width="1.6"/></g>');
       } else if (editing) {

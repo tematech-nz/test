@@ -335,7 +335,7 @@ const ok = (m) => console.log('  ok   ' + m);
     assert.strictEqual(await page.evaluate(() => NetMap.app.S.p.maps.find((m) => m.id === NetMap.app.S.mapId).auto), 'all');
     assert.ok(await page.evaluate(() => !!NetMap.app.S.trace), 'trace kept');
     const ops = await page.$$eval('#vp g[data-ghost="1"][data-kind="object"]', (gs) => gs.map((g) => g.getAttribute('opacity')));
-    assert.ok(ops.some((o) => +o > 0.5) && ops.some((o) => +o < 0.2), 'route stands out from the rest: ' + ops.join(','));
+    assert.ok(ops.some((o) => +o > 0.9) && ops.some((o) => +o < 0.5), 'route stands out from the rest: ' + ops.join(','));
     assert.ok(await page.isVisible('#tracePane button[data-act="backFromFullMap"]'));
     await page.click('#tracePane button[data-act="backFromFullMap"]');
     await page.waitForTimeout(200);
