@@ -884,6 +884,7 @@
     moveToMap: 'Cut this item (with its contents) from this map and paste it, editable, on another map or a new one. Only possible while nothing in it is patch-corded to anything outside it; fixed links stay and keep a label here.',
     deleteSel: 'Delete the selected item (you will be asked to confirm and shown what else is removed)',
     deleteCable: 'Remove this patch cable; both ports become free',
+    showGraph: 'Open the Graph from this device (To: all devices): what it can reach and how',
     editWiring: 'Change installed wiring: endpoints, wire mappings, add or delete wires. Changes are reviewed before they are applied.',
     automap: 'Document a straight-through panel: map every unmapped front port N to rear port N',
     newLinkFrom: 'Create a fixed link (installed multi-wire cable) from this patch panel to another one',
@@ -1038,6 +1039,7 @@
         '<button data-act="trace" data-kind="port" data-id="' + esc(pt.id) + '" title="Trace connection">Trace</button></td></tr>').join('') + '</table>';
     }
     h += pgroupSection(o);
+    if (!NM.topology.PASSIVE[o.type]) h += '<div class="btn-row">' + btn('showGraph', 'Show graph', 'data-id="' + esc(id) + '"', 'primary') + '</div>';
     if (isEdit()) {
       h += '<div class="btn-row">' + placeButtons(id, 'object') + btn('duplicate', 'Copy / duplicate', 'data-kind="object" data-id="' + esc(id) + '"') + btn('moveToMap', 'Move to another map...', 'data-kind="object" data-id="' + esc(id) + '"') + (M.isTermination(o) ? btn('automap', 'Map front N <-> rear N') + btn('newLinkFrom', 'Fixed link from here...') : '') +
         btn('deleteSel', 'Delete...', '', 'danger') + '</div>';
@@ -2649,6 +2651,11 @@
         case 'addToMap': commit('Add to map', (p) => { const pos = viewCentre(); B.placeItem(p, curMap().id, d.kind, d.id, pos.x, pos.y, true); }); break;
         case 'removeFromMap': removeFromThisMap(d.id); break;
         case 'deleteSel': deleteSelection(); break;
+        case 'showGraph': { // the Graph, starting from this device (To: all devices)
+          const gr = NM.topology.buildGraph(S.p, { viaInternet: S.graph.via });
+          if (!gr.nodes[d.id]) { toast('This device is not part of the graph: nothing documented connects it to other active devices', true); break; }
+          S.graph.from = d.id; S.graph.to = ''; setView('graph'); break;
+        }
         case 'clearMulti': S.multi = []; S.sel = null; renderAll(); break;
         case 'duplicate': if (copySelection(d.kind, d.id, true)) pasteStart(); break;
         case 'deleteCable': { S.sel = { kind: 'cable', id: d.id }; deleteSelection(); break; }

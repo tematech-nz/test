@@ -1970,6 +1970,26 @@ const ok = (m) => console.log('  ok   ' + m);
     await page.waitForSelector('#vp [data-kind="object"]');
   });
 
+  await step('"Show graph" button on a selected device opens the Graph from it (To: all devices)', async () => {
+    await page.evaluate(() => NetMap.app.api.loadProject(NetMap.builder.buildShowcaseProject()));
+    if (await page.evaluate(() => NetMap.app.S.mode === 'edit')) await page.click('#btnMode');
+    const sw = await page.evaluate(() => NetMap.app.S.p.objects.find((o) => o.name === 'Switch A').id);
+    await page.evaluate((id) => NetMap.app.api.select({ kind: 'object', id }), sw);
+    await page.click('#detailsPane button[data-act="showGraph"]');
+    await page.waitForSelector('#graphView select[data-g="from"]');
+    assert.strictEqual(await page.evaluate(() => NetMap.app.S.view), 'graph');
+    assert.strictEqual(await page.inputValue('#graphView select[data-g="from"]'), sw, 'From is the selected device');
+    assert.strictEqual(await page.inputValue('#graphView select[data-g="to"]'), '', 'To is all devices');
+    assert.ok(/Reachable from Switch A/i.test(await page.innerText('#graphView')));
+    await page.click('#btnGraph');
+    // not offered for passive equipment (racks, patch panels)
+    const pp = await page.evaluate(() => NetMap.app.S.p.objects.find((o) => o.name === 'PP-A').id);
+    await page.evaluate((id) => NetMap.app.api.select({ kind: 'object', id }), pp);
+    assert.strictEqual(await page.locator('#detailsPane button[data-act="showGraph"]').count(), 0);
+    await page.evaluate(() => NetMap.app.api.loadProject(NetMap.builder.buildDemoProject()));
+    await page.waitForSelector('#vp [data-kind="object"]');
+  });
+
   await step('autosave survives a refresh', async () => {
     await page.click('#btnMode'); // back to view mode flushes the save
     const name = await page.evaluate(() => NetMap.app.S.p.name);

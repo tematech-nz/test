@@ -97,6 +97,7 @@ Try it: File -> Load demo project: two rooms with a fixed link between racks, a 
   The From / To lists are sorted A to Z.
 - **Leaving a view or a trace**: in the Graph, picking any map, floor plan or equipment entry (navigation list or the map selector) switches back to the map. A trace ends when you
   click another element or free space, switch map, open something from the lists, or press Esc; clicking a step inside the trace panel keeps it.
+- **Show graph**: select a switch, router, Internet object, socket or device and press **Show graph** in its details: the Graph opens from that device with *To* set to all devices (its reachability tree).
 - **Graph** (header button): collapses patch cables, patch panels and fixed links into device-to-device links and shows
   the interconnection graph from a chosen device (default: INTERNET). With "To" empty you get the reachability tree
   (what can be reached, via which cables, how many hops, what is unreachable). Pick a target device to list every
