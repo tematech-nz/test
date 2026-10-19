@@ -106,6 +106,7 @@
     // length labels
     if (opts.labels !== false) {
       f.lines.forEach(function (l) {
+        if (mode === 'view' && opts.hoverLine !== l.id && selLine !== l.id) return; // view mode: only on hover (or when selected)
         if (l.kind === 'furniture' && !(selLine === l.id)) return;
         var a = F.pt(f, l.a), b = F.pt(f, l.b), len = a && b ? F.lineLength(f, l) : 0;
         if (!len || (len < 25 && selLine !== l.id)) return;

@@ -1333,7 +1333,7 @@
     if (!isFloor()) return {};
     const z = vpState().zoom, h = FS.hover, active = floorEditing(), bg = floorBg();
     return {
-      zoom: z, labels: FS.labels,
+      zoom: z, labels: active ? FS.labels : true, hoverLine: active ? null : FS.hoverLine,
       floorDraw: active && FS.draw && h ? { a: FS.draw.a, to: h, kind: FS.kind, typed: FS.typed } : null,
       floorRect: active && FS.rect && h ? { x0: FS.rect.a.x, y0: FS.rect.a.y, x1: h.x, y1: h.y, kind: FS.kind } : null,
       floorPlace: active && FS.place && h ? { x: h.x, y: h.y, w: FS.place.w, d: FS.place.d, rot: FS.place.rot, name: FS.place.name } : null,
@@ -1352,7 +1352,7 @@
     bar.querySelector('span').textContent = (ns.cm >= 100 ? ns.cm / 100 + ' m' : ns.cm + ' cm');
     if (FS.lastZoom !== v.zoom) { FS.lastZoom = v.zoom; scheduleRender(); }
   }
-  function floorReset() { FS.draw = null; FS.rect = null; FS.place = null; FS.hover = null; FS.typed = ''; FS.calib = null; }
+  function floorReset() { FS.hoverLine = null; FS.draw = null; FS.rect = null; FS.place = null; FS.hover = null; FS.typed = ''; FS.calib = null; }
   function floorTolerance() { return 10 / vpState().zoom; }
   /* where a click lands: on an existing point, on a line (which will be split there), or on the snap grid; Shift keeps 15-degree angles */
   function floorSnapPoint(pt, o) {
@@ -1387,7 +1387,12 @@
     renderAll();
   }
   function floorHover(e) {
-    if (!floorEditing() || !(FS.draw || FS.rect || FS.place || FS.calib)) return;
+    if (!floorEditing()) { // view mode: a wall shows its length only while the pointer is on it
+      const pt = toMap(e.clientX, e.clientY), hit = FL.hitTest(floorOf(), pt.x, pt.y, floorTolerance()), id = hit && hit.type === 'line' ? hit.id : null;
+      if (id !== FS.hoverLine) { FS.hoverLine = id; scheduleRender(); }
+      return;
+    }
+    if (!(FS.draw || FS.rect || FS.place || FS.calib)) return;
     const pt = toMap(e.clientX, e.clientY), from = FS.draw ? FS.draw.a : (FS.rect ? FS.rect.a : (FS.calib ? FS.calib.a : null));
     FS.hover = FS.calib ? { x: pt.x, y: pt.y, type: 'free' } : floorSnapPoint(pt, { from: from, shift: e.shiftKey });
     scheduleRender();

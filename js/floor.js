@@ -260,14 +260,16 @@
     var i, best = null;
     for (i = 0; i < f.points.length; i++) { var d = dist(x, y, f.points[i].x, f.points[i].y); if (d <= tol && (!best || d < best.d)) best = { type: 'point', id: f.points[i].id, d: d }; }
     if (best) return { type: best.type, id: best.id };
-    for (i = f.links.length - 1; i >= 0; i--) if (inLink(f.links[i], x, y)) return { type: 'link', id: f.links[i].id };
+    for (i = f.links.length - 1; i >= 0; i--) if (f.links[i].kind !== 'group' && inLink(f.links[i], x, y)) return { type: 'link', id: f.links[i].id };
     best = null;
     f.lines.forEach(function (l) {
       var a = pt(f, l.a), b = pt(f, l.b); if (!a || !b) return;
       var s = toSegment(x, y, a.x, a.y, b.x, b.y);
       if (s.d <= tol && (!best || s.d < best.d)) best = { type: 'line', id: l.id, d: s.d };
     });
-    return best ? { type: 'line', id: best.id } : null;
+    if (best) return { type: 'line', id: best.id };
+    for (i = f.links.length - 1; i >= 0; i--) if (inLink(f.links[i], x, y)) return { type: 'link', id: f.links[i].id }; // a group's area sits under walls and equipment
+    return null;
   }
 
   /* ---------- measuring ---------- */

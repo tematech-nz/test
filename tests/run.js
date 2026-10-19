@@ -1949,6 +1949,12 @@ test('floor plan rendering: edit/view/export, tracing image only on screen, vali
   assert.ok(view.content.indexOf('data-flink') >= 0, 'links drawn');
   assert.ok(R.renderMap(p, fm.id, { mode: 'edit', zoom: 0.5 }).content.length > view.content.length, 'edit mode adds the point handles');
   assert.ok(exp.content.indexOf('1 m') >= 0, 'export has a scale bar');
+  const lenLabels = (c) => (c.match(/ m<\/text>/g) || []).length;
+  assert.strictEqual(lenLabels(view.content), 0, 'view mode: no wall lengths');
+  const hov = fm.floor.lines.find((l) => l.kind === 'wall');
+  assert.strictEqual(lenLabels(R.renderMap(p, fm.id, { mode: 'view', zoom: 0.5, hoverLine: hov.id }).content), 1, 'only the hovered wall shows its length');
+  assert.ok(lenLabels(R.renderMap(p, fm.id, { mode: 'edit', zoom: 0.5 }).content) > 3, 'edit mode shows them');
+  assert.ok(lenLabels(exp.content) > 3, 'exports keep them');
   const bg = { href: 'blob:x', x: 0, y: 0, w: 500, h: 300, opacity: 0.4 };
   assert.ok(R.renderMap(p, fm.id, { mode: 'edit', zoom: 1, floorBg: bg }).content.indexOf('<image') >= 0);
   assert.ok(R.renderMap(p, fm.id, { mode: 'export', floorBg: bg }).content.indexOf('<image') < 0, 'the tracing image never reaches an export');

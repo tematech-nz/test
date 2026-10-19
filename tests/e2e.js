@@ -1532,6 +1532,11 @@ const ok = (m) => console.log('  ok   ' + m);
     assert.ok(!(await page.isVisible('[data-floortool="rect"]')), 'no drawing tools in view mode');
     assert.strictEqual(await page.locator('#vp [data-flink]').count(), 5);
     assert.ok(await page.isVisible('#scaleBar'), 'scale bar');
+    assert.strictEqual(await page.locator('#vp text', { hasText: / m$/ }).count(), 0, 'view mode: no wall lengths until hover');
+    const wl = await page.evaluate(() => { const f = NetMap.floor.ensure(NetMap.app.S.p.maps.find((m) => m.id === NetMap.app.S.mapId)); const l = f.lines.find((x) => x.kind === 'wall'); const a = NetMap.floor.pt(f, l.a), b = NetMap.floor.pt(f, l.b); const v = NetMap.app.S.p.maps.find((m) => m.id === NetMap.app.S.mapId).viewport, r = document.getElementById('canvas').getBoundingClientRect(); return [r.left + v.x + (a.x + b.x) / 2 * v.zoom, r.top + v.y + (a.y + b.y) / 2 * v.zoom]; });
+    await page.mouse.move(wl[0], wl[1]); await page.waitForTimeout(150);
+    assert.strictEqual(await page.locator('#vp text', { hasText: / m$/ }).count(), 1, 'hovered wall shows its length');
+    await page.mouse.move(wl[0] + 5, wl[1] + 120); await page.waitForTimeout(150);
     // double-click the rack link: its real item opens on the equipment map
     const box = await page.locator('#vp [data-flink] rect').first().boundingBox();
     await page.mouse.dblclick(box.x + box.width / 2, box.y + box.height / 2); await page.waitForTimeout(250);
