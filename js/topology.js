@@ -47,7 +47,8 @@
         id: o.id, name: o.name, type: o.type, label: M.typeLabel(o), ip: M.ipList(o).map(function (x) { return x.ip; }).filter(function (v, i, a) { return a.indexOf(v) === i; }).join(', '), nets: nodeNets(o),
         transit: !TERMINAL[o.type] || (o.type === 'internet' && !!opts.viaInternet),
         isolated: o.type === 'switch' && !!o.portIsolation,
-        publicIp: o.type === 'internet' && !!o.publicIp
+        publicIp: o.type === 'internet' && !!o.publicIp,
+        dhcp: !!o.dhcp && (o.type === 'generic' || o.type === 'switch')
       };
       order.push(o.id);
     });
@@ -88,6 +89,29 @@
       l.paths.push(e);
       if (idx.ports[e.aPortId].role === 'uplink') l.uplinkAt[e.a] = true;
       if (idx.ports[e.bPortId].role === 'uplink') l.uplinkAt[e.b] = true;
+    });
+    // a DHCP device has no address of its own to read a subnet from: it is in the LAN of the router it hangs off (reached over switches only)
+    order.forEach(function (id) {
+      var n = nodes[id];
+      if (!n.dhcp) return;
+      var seenN = {}, stack = [id]; seenN[id] = true;
+      while (stack.length) {
+        var cur = stack.pop();
+        (adj[cur] || []).forEach(function (e) {
+          if (seenN[e.to]) return;
+          var far = nodes[e.to];
+          if (far.type === 'router') {
+            e.link.paths.forEach(function (pe) {
+              [pe.aPortId, pe.bPortId].forEach(function (pid) {
+                var po = idx.portObj[pid];
+                if (!po || po.id !== e.to || idx.ports[pid].role !== 'lan') return;
+                var s = subnetOf(M.effectivePortIp(po, idx.ports[pid]));
+                if (s && n.nets.indexOf(s) < 0) n.nets.push(s);
+              });
+            });
+          } else if (far.type === 'switch') { seenN[e.to] = true; stack.push(e.to); }
+        });
+      }
     });
     return { nodes: nodes, order: order, links: linkList, adj: adj, dangling: dangling };
   }

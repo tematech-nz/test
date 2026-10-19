@@ -40,6 +40,7 @@ compact files open identically (`compactProject()` / `expandProject()` in `js/mo
 - Generic equipment may carry `deviceKind` (`pc`, `laptop`, `ap`, `camera`, `printer`, `phone`, `server`; omitted = other), which only
   selects the icon and default name.
 - `containerId` points at a group, or at a rack (racks hold patch panels, switches and generic objects).
+- `generic` devices and managed `switch`es may carry `dhcp: true` (takes any address from its LAN; omitted when false).
 - `internet` objects (ISP / upstream) have ordinary front ports, an optional `ipAddress` (address or circuit note) and an optional `publicIp: true` (the ISP gives a routable address, so the Internet can reach in; used by the Graph's "from Internet" view).
 - Routers have an optional `ipAddress` and ports with `"role": "wan"|"lan"` (labels `W1..`, `L1..`) and an optional
   per-port `"ip"`. IPs are plain IPv4 strings without a prefix (schema 3 strips a `/nn` from older files); the subnet used for network warnings is assumed to be the /24. Invalid values produce validation warnings.

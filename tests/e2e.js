@@ -1990,6 +1990,25 @@ const ok = (m) => console.log('  ok   ' + m);
     await page.waitForSelector('#vp [data-kind="object"]');
   });
 
+  await step('DHCP checkbox next to the IP address: "any address from this LAN"', async () => {
+    await page.evaluate(() => NetMap.app.api.loadProject(NetMap.builder.buildShowcaseProject()));
+    if (!(await page.evaluate(() => NetMap.app.S.mode === 'edit'))) await page.click('#btnMode');
+    const pc = await page.evaluate(() => NetMap.app.S.p.objects.find((o) => o.name === 'Reception PC').id);
+    await page.evaluate((id) => NetMap.app.api.select({ kind: 'object', id }), pc);
+    await page.waitForSelector('#detailsPane input[data-f="dhcp"]');
+    assert.strictEqual(await page.locator('#detailsPane input[data-f="dhcp"]').isChecked(), false);
+    await page.check('#detailsPane input[data-f="dhcp"]');
+    assert.strictEqual(await page.evaluate((id) => NetMap.app.S.p.objects.find((o) => o.id === id).dhcp, pc), true);
+    await page.uncheck('#detailsPane input[data-f="dhcp"]');
+    assert.ok(!(await page.evaluate((id) => 'dhcp' in NetMap.app.S.p.objects.find((o) => o.id === id), pc)), 'unchecking removes it');
+    // not offered for racks / patch panels / routers
+    const rk = await page.evaluate(() => NetMap.app.S.p.objects.find((o) => o.name === 'Rack A').id);
+    await page.evaluate((id) => NetMap.app.api.select({ kind: 'object', id }), rk);
+    assert.strictEqual(await page.locator('#detailsPane input[data-f="dhcp"]').count(), 0);
+    await page.evaluate(() => NetMap.app.api.loadProject(NetMap.builder.buildDemoProject()));
+    await page.waitForSelector('#vp [data-kind="object"]');
+  });
+
   await step('autosave survives a refresh', async () => {
     await page.click('#btnMode'); // back to view mode flushes the save
     const name = await page.evaluate(() => NetMap.app.S.p.name);

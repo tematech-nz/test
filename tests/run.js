@@ -2135,5 +2135,27 @@ test('port isolation: a router only turns traffic round between hosts it routes 
   assert.strictEqual(TP.reachTree(gh, half.d1.id).depth[half.d2.id], undefined, 'an address on only one side');
 });
 
+test('DHCP: a device with "any address from this LAN" belongs to the LAN of the router it hangs off', () => {
+  const TP = NM.topology;
+  const x = isoNet(true, 'router');
+  M.setPortIp(x.p, x.up.ports.find(q => q.label === 'L1').id, '192.168.5.1');
+  assert.deepStrictEqual(TP.buildGraph(x.p).nodes[x.d1.id].nets, [], 'no address, no DHCP: nothing known');
+  M.setDhcp(x.p, x.d1.id, true); M.setDhcp(x.p, x.d2.id, true);
+  const g = TP.buildGraph(x.p);
+  assert.deepStrictEqual(g.nodes[x.d1.id].nets, ['192.168.5.0/24'], 'its subnet comes from the router LAN port it is behind (through the switch)');
+  assert.ok(g.nodes[x.d1.id].dhcp && /DHCP/.test(M.ipList(x.p.objects.find(o => o.id === x.d1.id))[0].ip));
+  assert.strictEqual(TP.reachTree(g, x.d1.id).depth[x.d2.id], undefined, 'two DHCP devices of one LAN on an isolated switch: no route between them');
+  // a static device in another subnet next to it: the router routes between the two LANs, so the up-and-back route is believed
+  M.setDhcp(x.p, x.d2.id, false); M.setDeviceIp(x.p, x.d2.id, '10.0.2.5');
+  assert.strictEqual(TP.reachTree(TP.buildGraph(x.p), x.d1.id).depth[x.d2.id], 4);
+  // the flag only exists on generic devices and managed switches, survives save and load, and can be switched off again
+  assert.throws(() => M.setDhcp(x.p, x.up.id, true), /generic devices and managed switches/);
+  const back = M.migrate(JSON.parse(M.serializeProject(x.p))).project;
+  assert.strictEqual(back.objects.find(o => o.id === x.d1.id).dhcp, true);
+  M.setDhcp(x.p, x.d1.id, false); assert.ok(!('dhcp' in x.p.objects.find(o => o.id === x.d1.id)));
+  const made = M.addObject(x.p, { type: 'generic', name: 'D3', portCount: 1, dhcp: true });
+  assert.strictEqual(made.dhcp, true);
+});
+
 console.log('\n' + passed + ' passed, ' + failed + ' failed');
 process.exit(failed ? 1 : 0);
