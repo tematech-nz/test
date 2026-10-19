@@ -143,7 +143,7 @@ Try it: File -> Load demo project: two rooms with a fixed link between racks, a 
   connections stay on the other maps; a group or rack is removed together with what is shown inside it) or delete it everywhere.
 - **Fixed link labels** can be dragged out of the way in edit mode (per map; "Reset label position" in the link's panel puts it back). Labels are always
   drawn on top of equipment, so they never hide behind it. When a link continues on another map, its wire runs to the label in full, drawn above
-  everything, and follows the label when you move it (it joins the side of the label that faces the panel). In view mode, double-click a link's
+  everything, and follows the label when you move it (a label right under or over its panel gets a short stub into the middle of its top or bottom edge, otherwise the wire joins the side of the label that faces the panel). In view mode, double-click a link's
   label to jump to the map where the link ends. A link with both ends on the map keeps a thin dashed leader line to a moved label.
 - **Quick start**: File > Quick start / help (shown once automatically on the first visit with an empty project) explains the workflow,
   including that a fixed link can join panels on different maps, plus keyboard shortcuts.

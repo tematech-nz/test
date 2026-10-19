@@ -2043,5 +2043,18 @@ test('fixed link that ends in a label: wire never clipped behind other elements,
   void grp;
 });
 
+test('fixed link label moved slightly under its panel: the wire enters the middle of the label (short stub), not a side', () => {
+  const p = B.buildDemoProject(), R = NM.render, l = p.fixedLinks[0], m1 = p.maps[0];
+  M.setLinkLabelOffset(p, l.id, m1.id, 10, 40);
+  const moved = R.renderMap(p, m1.id, { mode: 'edit' }).content;
+  const wire = new RegExp('<path d="(M[^"]*C[^"]*)" stroke="#37474f" stroke-width="6"').exec(moved);
+  const lab = /data-linklabel="[^"]*"[^>]* x="([-\d.]+)" y="([-\d.]+)" width="([-\d.]+)" height="13"/.exec(moved);
+  assert.ok(wire && lab);
+  const nums = wire[1].match(/-?[\d.]+/g).map(Number), endX = nums[nums.length - 2], endY = nums[nums.length - 1], cx = Number(lab[1]) + Number(lab[3]) / 2;
+  assert.ok(Math.abs(endX - cx) < 1, 'ends at the label centre: ' + endX + ' vs ' + cx);
+  assert.ok(Math.abs(endY - Number(lab[2])) < 1, 'on its top edge');
+  assert.ok(nums[1] < endY && endY - nums[1] < 120, 'a short stub from the panel');
+});
+
 console.log('\n' + passed + ' passed, ' + failed + ' failed');
 process.exit(failed ? 1 : 0);

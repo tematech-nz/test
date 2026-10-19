@@ -438,10 +438,20 @@
         grow(an.x - 20, an.y, 40, sy - an.y + 20);
         var lo0 = (l.labelAt && l.labelAt[mapId]) || [0, 0];
         if (lo0[0] || lo0[1]) { // label moved by hand: the wire itself follows it, ending at the label's side that faces the panel
-          var tw0 = label.length * 5.8 + 8, lx = mx + lo0[0], ly = my + lo0[1], right = an.x >= lx, ex = right ? lx + tw0 / 2 : lx - tw0 / 2, ey = ly - 2.5, sg = right ? 1 : -1;
-          var c1y = an.y + Math.max(30, Math.abs(ey - an.y) / 2), c2x = ex + sg * Math.max(30, Math.abs(ex - an.x) / 2);
-          d = 'M' + num(an.x) + ' ' + num(an.y) + 'C' + num(an.x) + ' ' + num(c1y) + ' ' + num(c2x) + ' ' + num(ey) + ' ' + num(ex) + ' ' + num(ey);
-          grow(Math.min(an.x, ex) - 10, Math.min(an.y, ey) - 10, Math.abs(an.x - ex) + 20, Math.abs(an.y - ey) + 20);
+          var tw0 = label.length * 5.8 + 8, lx = mx + lo0[0], ly = my + lo0[1], top = ly - 9, bot = ly + 4;
+          if (Math.abs(an.x - lx) <= tw0 / 2 && an.y < top - 2) { // the panel is above the label: a short stub into the middle of its top edge
+            var vm = (an.y + top) / 2;
+            d = 'M' + num(an.x) + ' ' + num(an.y) + 'C' + num(an.x) + ' ' + num(vm) + ' ' + num(lx) + ' ' + num(vm) + ' ' + num(lx) + ' ' + num(top);
+            grow(Math.min(an.x, lx) - 10, an.y, Math.abs(an.x - lx) + 20, top - an.y + 10);
+          } else if (Math.abs(an.x - lx) <= tw0 / 2 && an.y > bot + 2) { // the panel is below it: into the middle of its bottom edge
+            d = 'M' + num(an.x) + ' ' + num(an.y) + 'C' + num(an.x) + ' ' + num(an.y + 30) + ' ' + num(lx) + ' ' + num(bot + 30) + ' ' + num(lx) + ' ' + num(bot);
+            grow(Math.min(an.x, lx) - 10, bot - 10, Math.abs(an.x - lx) + 20, an.y - bot + 50);
+          } else { // otherwise the side of the label that faces the panel
+            var right = an.x >= lx, ex = right ? lx + tw0 / 2 : lx - tw0 / 2, ey = ly - 2.5, sg = right ? 1 : -1;
+            var c1y = an.y + Math.max(30, Math.abs(ey - an.y) / 2), c2x = ex + sg * Math.max(30, Math.abs(ex - an.x) / 2);
+            d = 'M' + num(an.x) + ' ' + num(an.y) + 'C' + num(an.x) + ' ' + num(c1y) + ' ' + num(c2x) + ' ' + num(ey) + ' ' + num(ex) + ' ' + num(ey);
+            grow(Math.min(an.x, ex) - 10, Math.min(an.y, ey) - 10, Math.abs(an.x - ex) + 20, Math.abs(an.y - ey) + 20);
+          }
           tail = true;
         }
         anchors = [an];
