@@ -1,4 +1,4 @@
-# NetMap data format (schema version 4)
+# NetMap data format (schema version 5)
 
 A project is one JSON object. All records have stable, unique string IDs (prefix + random hex, for example
 `obj_9f2c...`). Names, labels and coordinates are never used as identifiers, so renaming or moving something
@@ -85,6 +85,22 @@ compact files open identically (`compactProject()` / `expandProject()` in `js/mo
 `File -> Validate project` and every import report: duplicate IDs, missing references, occupied or doubly used ports,
 incompatible terminations, fixed links with missing endpoints or wires on the wrong panel, duplicate wire numbers,
 invalid internal mappings. Unused ports are informational only. Entries link to the affected item.
+
+## Floor plans (schema 5)
+
+A map with `"kind": "floor"` (equipment maps have no `kind`) carries a `floor` object instead of placements. Units are integer centimetres.
+
+```json
+"floor": {
+  "points": [{ "id": "fpt_..", "x": 100, "y": 100 }],
+  "lines":  [{ "id": "fln_..", "a": "fpt_..", "b": "fpt_..", "kind": "wall" }],
+  "links":  [{ "id": "flk_..", "kind": "object", "refId": "obj_..", "x": 300, "y": 200, "rot": 0, "w": 60, "d": 100 }]
+}
+```
+
+- `lines[].kind` is `wall`, `door`, `window` or `furniture`. Lines join only at points; a point lying on a line splits it. Length is derived from the points and is locked in the UI when both ends are connected to other lines.
+- `links[]` reference a real item (`kind` `object` or `group`, `refId` its id). `x`,`y` is the centre, `w`x`d` the footprint, `rot` degrees. One link per item per plan. Deleting the item removes its links. Links never create connections or cable lengths.
+- Migration 4 -> 5 adds nothing to existing maps; floor plans are simply new.
 
 ## Versioning and migration
 

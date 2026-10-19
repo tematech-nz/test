@@ -189,6 +189,17 @@ Try it: File -> Load demo project (two rooms, a fixed link between racks, a wall
 - **Maps**: the same object can be shown on several maps ("Add existing here"); connections reference the shared
   object and port records. Trace results offer "open <map>" links to continue across maps.
 
+### Floor plans
+
+A second kind of map (New map -> Type: Floor plan, listed under "Floor plans") for drawing a room to scale. Units are whole centimetres (no mm).
+
+- Tools: Select (V), Line (L), Rectangle (R). Pick what the lines are first: wall, door, window or furniture (a plain box, for example a desk). Walls are built; doors, windows and furniture are stored the same way.
+- A rectangle is four lines sharing corner points. Lines may be diagonal. Where lines cross, or a line or rectangle starts or ends on another line, a point is created and the line splits there; nothing overlaps. Any line can be deleted.
+- While drawing a line you can type a length in metres and press Enter. Select a line to edit its type, length and angle.
+- A line whose both ends are connected to other lines cannot change length ("defined by the connected elements"): move a point instead.
+- "+ Add link..." opens a search with type filters (group, rack, wall socket, generic equipment, other). Pick an item and click the plan to place it at its real size; R rotates, Esc cancels, Ctrl+click keeps placing. Double-click a link to open the real item on its equipment map. The link only references the item: the equipment keeps living on its equipment map, and its details list the floor plans it is on.
+- Cable lengths are never computed from the plan.
+
 ## Updates and unsaved changes
 
 - **New-version notice**: every build has a version stamp (a short hash of the sources: `js/version.js` is what this page runs,
@@ -214,7 +225,7 @@ Try it: File -> Load demo project (two rooms, a fixed link between racks, a wall
 
 ## Data format
 
-Single JSON document with `schemaVersion` (schema 4: compact form - no empty optional fields, straight-through panels stored as a flag; the export stays indented and readable). See [docs/DATA_FORMAT.md](docs/DATA_FORMAT.md) for the schema,
+Single JSON document with `schemaVersion` (schema 5: floor plans; compact form since 4 - no empty optional fields, straight-through panels stored as a flag; the export stays indented and readable). See [docs/DATA_FORMAT.md](docs/DATA_FORMAT.md) for the schema,
 connectivity rules, and migration strategy.
 
 ## Code layout
@@ -223,6 +234,7 @@ connectivity rules, and migration strategy.
 | --- | --- |
 | `js/model.js` | Data model, rules, validation, search, migration. No DOM. |
 | `js/trace.js` | End-to-end tracing. |
+| `js/floor.js` | Floor plan geometry engine (points, lines, splitting, locked lengths, links). |
 | `js/layout.js`, `js/render.js` | Geometry and SVG rendering (shared by screen and exports). |
 | `tools/version.js`, `tools/serve.js` | Version stamp (`version.json`, `js/version.js`) and the optional dev server. |
 | `js/exporters.js` | Connection table, PDF writer, download helpers. |

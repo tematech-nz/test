@@ -2,7 +2,7 @@
 (function (g) {
   'use strict';
   var NM = g.NetMap = g.NetMap || {};
-  if (typeof require === 'function') { if (!NM.model) require('./model.js'); if (!NM.layout) require('./layout.js'); if (!NM.icons) require('./icons.js'); }
+  if (typeof require === 'function') { if (!NM.model) require('./model.js'); if (!NM.floor) require('./floor.js'); if (!NM.layout) require('./layout.js'); if (!NM.icons) require('./icons.js'); }
   var M = NM.model, L = NM.layout;
 
   var STYLE = {
@@ -33,8 +33,118 @@
     return d;
   }
 
+  /*
+   * Floor plan (map.kind 'floor'): walls, doors, windows and furniture boxes as lines in real centimetres, plus to-scale symbols for
+   * linked items. opts: mode, zoom (screen px per cm, to keep labels and handles readable), selection {kind: fline|fpoint|flink, id},
+   * labels (length labels), and previews: floorDraw {a, to, kind}, floorRect {x0, y0, x1, y1, kind}, floorPlace {x, y, w, d, rot, name}.
+   */
+  var LINE_STYLE = {
+    wall: { color: '#37474f', width: 10 }, door: { color: '#8d6e63', width: 6 }, window: { color: '#039be5', width: 6 }, furniture: { color: '#78909c', width: 2 }
+  };
+  var LINK_STYLE = {
+    rack: ['#cfd8dc', '#37474f'], socket: ['#f3e5f5', '#7b1fa2'], patchpanel: ['#fdf6e3', '#b58900'], 'switch': ['#e6f4ea', '#2e7d32'], router: ['#e3f2fd', '#1565c0'],
+    internet: ['#fff3cd', '#e65100'], generic: ['#ffffff', '#555'], group: ['#bbdefb', '#1565c0']
+  };
+  function renderFloor(p, mapId, opts) {
+    var F = NM.floor, map = p.maps.filter(function (m) { return m.id === mapId; })[0], f = F.ensure(map);
+    var mode = opts.mode || 'view', editing = mode === 'edit', exporting = mode === 'export', sel = opts.selection || null;
+    var zoom = opts.zoom > 0 ? opts.zoom : 1, px = function (n) { return n / zoom; }, out = [];
+    var bb = F.bounds(f) || { x: 0, y: 0, w: 800, h: 600 };
+    var bx0 = Math.min(bb.x, 0) - 100, by0 = Math.min(bb.y, 0) - 100, bx1 = Math.max(bb.x + bb.w, 800) + 100, by1 = Math.max(bb.y + bb.h, 600) + 100;
+    var kindOrder = ['furniture', 'window', 'wall', 'door'];
+    var gx0 = Math.floor(bx0 / 100) * 100, gy0 = Math.floor(by0 / 100) * 100, i;
+    if (!exporting) { // 1 m grid (and 10 cm when zoomed in)
+      var grid = '';
+      for (i = gx0; i <= bx1; i += 100) grid += 'M' + i + ' ' + gy0 + 'V' + by1;
+      for (i = gy0; i <= by1; i += 100) grid += 'M' + gx0 + ' ' + i + 'H' + bx1;
+      out.push('<path d="' + grid + '" stroke="#cfd8dc" stroke-width="' + num(px(1)) + '" fill="none" pointer-events="none"/>');
+      if (zoom * 10 >= 9) {
+        var minor = '';
+        for (i = gx0; i <= bx1; i += 10) if (i % 100) minor += 'M' + i + ' ' + gy0 + 'V' + by1;
+        for (i = gy0; i <= by1; i += 10) if (i % 100) minor += 'M' + gx0 + ' ' + i + 'H' + bx1;
+        out.push('<path d="' + minor + '" stroke="#eceff1" stroke-width="' + num(px(0.6)) + '" fill="none" pointer-events="none"/>');
+      }
+    }
+    var selLine = sel && sel.kind === 'fline' ? sel.id : null;
+    kindOrder.forEach(function (kind) {
+      f.lines.forEach(function (l) {
+        if (l.kind !== kind) return;
+        var a = F.pt(f, l.a), b = F.pt(f, l.b);
+        if (!a || !b) return;
+        var st = LINE_STYLE[kind] || LINE_STYLE.wall, w = Math.max(st.width, px(2)), d = 'M' + a.x + ' ' + a.y + 'L' + b.x + ' ' + b.y;
+        if (selLine === l.id) out.push('<path d="' + d + '" stroke="#1565c0" stroke-opacity="0.35" stroke-width="' + num(w + px(8)) + '" stroke-linecap="round" fill="none" pointer-events="none"/>');
+        if (kind === 'window') {
+          out.push('<path d="' + d + '" stroke="' + st.color + '" stroke-width="' + num(w) + '" fill="none" pointer-events="none"/><path d="' + d + '" stroke="#ffffff" stroke-width="' + num(w / 3) + '" fill="none" pointer-events="none"/>');
+        } else if (kind === 'furniture') {
+          out.push('<path d="' + d + '" stroke="' + st.color + '" stroke-width="' + num(w) + '" stroke-dasharray="' + num(px(6)) + ' ' + num(px(4)) + '" fill="none" pointer-events="none"/>');
+        } else {
+          out.push('<path d="' + d + '" stroke="' + st.color + '" stroke-width="' + num(w) + '" stroke-linecap="' + (kind === 'wall' ? 'square' : 'butt') + '" fill="none" pointer-events="none"/>');
+          if (kind === 'door') { // swing arc: from the free end round to the hinge side
+            var vx = b.x - a.x, vy = b.y - a.y, len = Math.sqrt(vx * vx + vy * vy);
+            out.push('<path d="M' + b.x + ' ' + b.y + 'A' + num(len) + ' ' + num(len) + ' 0 0 1 ' + num(a.x - vy) + ' ' + num(a.y + vx) + '" stroke="' + st.color + '" stroke-width="' + num(px(1.2)) + '" stroke-dasharray="' + num(px(4)) + ' ' + num(px(3)) + '" fill="none" pointer-events="none"/>');
+          }
+        }
+      });
+    });
+    // links: to-scale symbols of the real items
+    f.links.forEach(function (lk) {
+      var c = M.findContainer(p, lk.refId), item = c && c.item, type = lk.kind === 'group' ? 'group' : (item ? item.type : 'generic');
+      var col = LINK_STYLE[type] || LINK_STYLE.generic, isSel = sel && sel.kind === 'flink' && sel.id === lk.id, missing = !item;
+      var g0 = '<g data-flink="' + esc(lk.id) + '" transform="rotate(' + num(lk.rot) + ' ' + num(lk.x) + ' ' + num(lk.y) + ')"><title>' + esc(item ? item.name + ' (' + (lk.kind === 'group' ? 'group' : M.typeLabel(item)) + ')' : 'missing item') + '</title>';
+      g0 += '<rect x="' + num(lk.x - lk.w / 2) + '" y="' + num(lk.y - lk.d / 2) + '" width="' + num(lk.w) + '" height="' + num(lk.d) + '" rx="' + num(Math.min(3, lk.w / 6)) + '" fill="' + col[0] + '" fill-opacity="' + (type === 'group' ? '0.35' : '1') + '" stroke="' + (isSel ? '#e91e63' : (missing ? '#d32f2f' : col[1])) + '" stroke-width="' + num(isSel ? px(3) : px(1.6)) + '"' + (type === 'group' || missing ? ' stroke-dasharray="' + num(px(6)) + ' ' + num(px(4)) + '"' : '') + '/>';
+      if (type !== 'group') g0 += '<path d="M' + num(lk.x - lk.w / 2) + ' ' + num(lk.y - lk.d / 2) + 'h' + num(lk.w) + '" stroke="' + col[1] + '" stroke-width="' + num(Math.max(px(3), lk.d / 12)) + '"/>'; // the front edge
+      g0 += '</g>';
+      out.push(g0);
+      var fs = px(11), name = item ? item.name : '(missing)';
+      out.push('<text x="' + num(lk.x) + '" y="' + num(lk.y + Math.max(lk.w, lk.d) / 2 + fs * 1.15) + '" font-size="' + num(fs) + '" text-anchor="middle" fill="#1b2a38" stroke="#fff" stroke-width="' + num(px(3)) + '" paint-order="stroke" font-family="sans-serif" pointer-events="none">' + esc(trunc(name, 30)) + '</text>');
+    });
+    // length labels
+    if (opts.labels !== false) {
+      f.lines.forEach(function (l) {
+        if (l.kind === 'furniture' && !(selLine === l.id)) return;
+        var a = F.pt(f, l.a), b = F.pt(f, l.b), len = a && b ? F.lineLength(f, l) : 0;
+        if (!len || (len < 25 && selLine !== l.id)) return;
+        var mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2, fs = px(10.5);
+        out.push('<text x="' + num(mx) + '" y="' + num(my - px(7)) + '" font-size="' + num(fs) + '" text-anchor="middle" fill="' + (selLine === l.id ? '#0d47a1' : '#546e7a') + '" font-weight="' + (selLine === l.id ? 'bold' : 'normal') + '" stroke="#fff" stroke-width="' + num(px(3)) + '" paint-order="stroke" font-family="sans-serif" pointer-events="none">' + F.fmtLen(len) + '</text>');
+      });
+    }
+    // points (edit mode): the handles that lines are joined at
+    if (editing) {
+      f.points.forEach(function (pp) {
+        var sl = selLine && F.lineById(f, selLine), isSel = sel && sel.kind === 'fpoint' && sel.id === pp.id, onSel = sl && (sl.a === pp.id || sl.b === pp.id);
+        out.push('<circle cx="' + pp.x + '" cy="' + pp.y + '" r="' + num(px(isSel ? 6 : (onSel ? 5 : 3.2))) + '" fill="' + (isSel ? '#e91e63' : (onSel ? '#1565c0' : '#ffffff')) + '" stroke="#1565c0" stroke-width="' + num(px(1.4)) + '" pointer-events="none"/>');
+      });
+    }
+    // previews while drawing / placing
+    var fs2 = px(11);
+    if (opts.floorDraw && opts.floorDraw.a && opts.floorDraw.to) {
+      var da = opts.floorDraw.a, dt = opts.floorDraw.to, dlen = Math.round(Math.sqrt(Math.pow(dt.x - da.x, 2) + Math.pow(dt.y - da.y, 2))), dst = LINE_STYLE[opts.floorDraw.kind] || LINE_STYLE.wall;
+      out.push('<path d="M' + da.x + ' ' + da.y + 'L' + dt.x + ' ' + dt.y + '" stroke="' + dst.color + '" stroke-opacity="0.6" stroke-width="' + num(Math.max(dst.width, px(2))) + '" stroke-dasharray="' + num(px(8)) + ' ' + num(px(5)) + '" fill="none" pointer-events="none"/>');
+      out.push('<text x="' + num((da.x + dt.x) / 2) + '" y="' + num((da.y + dt.y) / 2 - px(10)) + '" font-size="' + num(fs2) + '" text-anchor="middle" font-weight="bold" fill="#e65100" stroke="#fff" stroke-width="' + num(px(3)) + '" paint-order="stroke" font-family="sans-serif" pointer-events="none">' + esc(opts.floorDraw.typed ? opts.floorDraw.typed + ' m (Enter)' : F.fmtLen(dlen)) + '</text>');
+    }
+    if (opts.floorRect) {
+      var r0 = opts.floorRect, rs = LINE_STYLE[r0.kind] || LINE_STYLE.wall;
+      out.push('<rect x="' + num(Math.min(r0.x0, r0.x1)) + '" y="' + num(Math.min(r0.y0, r0.y1)) + '" width="' + num(Math.abs(r0.x1 - r0.x0)) + '" height="' + num(Math.abs(r0.y1 - r0.y0)) + '" fill="none" stroke="' + rs.color + '" stroke-opacity="0.6" stroke-width="' + num(Math.max(rs.width, px(2))) + '" stroke-dasharray="' + num(px(8)) + ' ' + num(px(5)) + '" pointer-events="none"/>');
+      out.push('<text x="' + num((r0.x0 + r0.x1) / 2) + '" y="' + num(Math.min(r0.y0, r0.y1) - px(8)) + '" font-size="' + num(fs2) + '" text-anchor="middle" font-weight="bold" fill="#e65100" stroke="#fff" stroke-width="' + num(px(3)) + '" paint-order="stroke" font-family="sans-serif" pointer-events="none">' + F.fmtLen(Math.abs(r0.x1 - r0.x0)) + ' x ' + F.fmtLen(Math.abs(r0.y1 - r0.y0)) + '</text>');
+    }
+    if (opts.floorPlace) {
+      var fp = opts.floorPlace;
+      out.push('<g opacity="0.7" pointer-events="none" transform="rotate(' + num(fp.rot || 0) + ' ' + num(fp.x) + ' ' + num(fp.y) + ')"><rect x="' + num(fp.x - fp.w / 2) + '" y="' + num(fp.y - fp.d / 2) + '" width="' + num(fp.w) + '" height="' + num(fp.d) + '" fill="#fff59d" stroke="#e65100" stroke-width="' + num(px(2)) + '" stroke-dasharray="' + num(px(6)) + ' ' + num(px(4)) + '"/></g>' +
+        '<text x="' + num(fp.x) + '" y="' + num(fp.y + Math.max(fp.w, fp.d) / 2 + fs2 * 1.2) + '" font-size="' + num(fs2) + '" text-anchor="middle" fill="#e65100" stroke="#fff" stroke-width="' + num(px(3)) + '" paint-order="stroke" font-family="sans-serif" pointer-events="none">' + esc(trunc(fp.name || '', 30)) + '</text>');
+    }
+    if (opts.floorSnap) out.push('<circle cx="' + opts.floorSnap.x + '" cy="' + opts.floorSnap.y + '" r="' + num(px(opts.floorSnap.type === 'point' ? 8 : 6)) + '" fill="none" stroke="#00c853" stroke-width="' + num(px(2)) + '" pointer-events="none"/>');
+    var b = { x: bx0, y: by0, w: bx1 - bx0, h: by1 - by0 };
+    if (exporting) { // a scale bar, since exports have no zoom: 1 m or the nearest round length
+      var sb = b.y + b.h - 40;
+      out.push('<g font-family="sans-serif" font-size="14" pointer-events="none"><path d="M' + (b.x + 30) + ' ' + sb + 'h100M' + (b.x + 30) + ' ' + (sb - 6) + 'v12M' + (b.x + 130) + ' ' + (sb - 6) + 'v12" stroke="#333" stroke-width="3" fill="none"/><text x="' + (b.x + 30) + '" y="' + (sb - 12) + '" fill="#333">1 m</text></g>');
+    }
+    return { content: out.join(''), bounds: b, portGeo: {}, floor: true };
+  }
+
   function renderMap(p, mapId, opts) {
     opts = opts || {};
+    var mapRec = p.maps.filter(function (m) { return m.id === mapId; })[0];
+    if (mapRec && mapRec.kind === 'floor') return renderFloor(p, mapId, opts);
     var idx = M.buildIndex(p);
     var mode = opts.mode || 'view', editing = mode === 'edit', exporting = mode === 'export';
     var hl = opts.highlight || null, sel = opts.selection || null;

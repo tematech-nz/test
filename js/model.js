@@ -3,7 +3,7 @@
   'use strict';
   var NM = g.NetMap = g.NetMap || {};
 
-  var SCHEMA_VERSION = 4;
+  var SCHEMA_VERSION = 5;
   /* equipment that terminates installed (fixed) cabling on a rear side and presents front jacks */
   var TERMINATIONS = { patchpanel: true, socket: true };
   function isTermination(o) { return !!(o && TERMINATIONS[o.type]); }
@@ -186,18 +186,29 @@
    * of the overview (map.allAt / map.allFrom remember where its items were laid out) so items added later land in the same block.
    */
   function realMaps(p) { return p.maps.filter(function (m) { return !m.auto; }); }
+  /* two kinds of map: equipment maps (racks, panels, cables...) and floor plans (walls and to-scale links; see js/floor.js) */
+  function isFloorMap(m) { return !!m && m.kind === 'floor'; }
+  function equipmentMaps(p) { return p.maps.filter(function (m) { return !m.auto && !isFloorMap(m); }); }
+  function floorMaps(p) { return p.maps.filter(isFloorMap); }
+  function addMap(p, spec) {
+    var m = { id: uid('map'), name: String(spec.name || '').trim() || 'Map ' + (realMaps(p).length + 1), location: spec.location || '', viewport: { x: 0, y: 0, zoom: 1 } };
+    if (spec.kind === 'floor') { m.kind = 'floor'; m.floor = { points: [], lines: [], links: [] }; }
+    p.maps.push(m);
+    return m;
+  }
   function allMap(p) { for (var i = 0; i < p.maps.length; i++) if (p.maps[i].auto === 'all') return p.maps[i]; return null; }
   /* put a map at position `index` among the ordinary maps (the overview map always stays out of the way, at the end of the list) */
   function moveMap(p, mapId, index) {
-    var reals = realMaps(p), from = reals.findIndex(function (m) { return m.id === mapId; });
-    if (from < 0) throw new Error('Map not found');
-    index = Math.max(0, Math.min(reals.length - 1, index));
-    var m = reals.splice(from, 1)[0];
-    reals.splice(index, 0, m);
-    p.maps = reals.concat(p.maps.filter(function (x) { return x.auto; }));
+    var me = p.maps.filter(function (m) { return m.id === mapId && !m.auto; })[0];
+    if (!me) throw new Error('Map not found');
+    var eq = equipmentMaps(p), fl = floorMaps(p), group = isFloorMap(me) ? fl : eq, from = group.indexOf(me);
+    index = Math.max(0, Math.min(group.length - 1, index));
+    group.splice(from, 1); group.splice(index, 0, me);
+    // equipment maps, then floor plans, then the overview; each group keeps its own order
+    p.maps = eq.concat(fl).concat(p.maps.filter(function (x) { return x.auto; }));
   }
   function syncAllMap(p) {
-    var reals = realMaps(p), am = allMap(p);
+    var reals = equipmentMaps(p), am = allMap(p);
     if (reals.length < 2) return false; // not shown (and not kept up to date) until there is something to combine
     var changed = false;
     if (!am) { am = { id: uid('map'), name: 'All items', location: 'Every map together (overview)', auto: 'all', viewport: { x: 0, y: 0, zoom: 1 } }; p.maps.push(am); changed = true; }
@@ -876,7 +887,9 @@
   }
 
   /* ---------- deletion ---------- */
+  function dropFloorLinks(p, refId) { p.maps.forEach(function (m) { if (m.floor) m.floor.links = (m.floor.links || []).filter(function (l) { return l.refId !== refId; }); }); }
   function removeObjectCore(p, id) {
+    dropFloorLinks(p, id);
     var o = p.objects.filter(function (x) { return x.id === id; })[0];
     if (!o) return;
     var pids = {};
@@ -888,6 +901,7 @@
     p.objects = p.objects.filter(function (x) { return x.id !== id; });
   }
   function removeGroupCore(p, id) {
+    dropFloorLinks(p, id);
     p.placements = p.placements.filter(function (pl) { return pl.refId !== id; });
     p.groups = p.groups.filter(function (x) { return x.id !== id; });
   }
@@ -1029,6 +1043,17 @@
       var unused = o.ports.filter(function (pt) { return !idx.portUse[pt.id] && !idx.mapByPort[pt.id]; }).length;
       if (o.ports.length && unused) add('info', 'UNUSED_PORTS', unused + ' of ' + o.ports.length + ' terminations on "' + o.name + '" are unused', 'object', o.id);
     });
+    p.maps.forEach(function (mp) { // floor plans: every line joins two existing points; every link points at an existing item, once
+      if (!mp.floor) return;
+      var pts = {}, seenLink = {};
+      mp.floor.points.forEach(function (q) { pts[q.id] = true; });
+      mp.floor.lines.forEach(function (l) { if (!pts[l.a] || !pts[l.b] || l.a === l.b) add('error', 'BAD_FLOOR_LINE', 'Floor plan "' + mp.name + '" has a line with a missing or identical end point'); });
+      mp.floor.links.forEach(function (lk) {
+        if (!findContainer(p, lk.refId)) add('warning', 'BAD_FLOOR_LINK', 'Floor plan "' + mp.name + '" links an item that no longer exists');
+        else if (seenLink[lk.refId]) add('warning', 'DUP_FLOOR_LINK', 'Floor plan "' + mp.name + '" links "' + findContainer(p, lk.refId).item.name + '" more than once', lk.kind, lk.refId);
+        seenLink[lk.refId] = true;
+      });
+    });
     p.placements.forEach(function (pl) {
       if (!idx.maps[pl.mapId]) add('error', 'BAD_PLACEMENT', 'A placement refers to a missing map');
       var ok = pl.refType === 'group' ? idx.groups[pl.refId] : idx.objects[pl.refId];
@@ -1119,6 +1144,8 @@
     d.schemaVersion = 3;
     return d;
   };
+  /* v5: floor plan maps (map.kind 'floor' with map.floor); nothing to convert - older files simply have none */
+  MIGRATIONS[4] = function (d) { d.schemaVersion = 5; return d; };
   /* v4: the file form is compact (see compactProject); nothing to convert - older files simply have everything spelled out */
   MIGRATIONS[3] = function (d) { d.schemaVersion = 4; return d; };
 
@@ -1170,7 +1197,10 @@
     return d;
   }
   function expandProject(d) {
-    (d.maps || []).forEach(function (m) { if (m.location === undefined) m.location = ''; });
+    (d.maps || []).forEach(function (m) {
+      if (m.location === undefined) m.location = '';
+      if (m.kind === 'floor') { m.floor = m.floor || {}; m.floor.points = m.floor.points || []; m.floor.lines = m.floor.lines || []; m.floor.links = m.floor.links || []; }
+    });
     (d.groups || []).forEach(function (g) { if (g.description === undefined) g.description = ''; if (g.location === undefined) g.location = ''; if (g.parentGroupId === undefined) g.parentGroupId = null; });
     (d.objects || []).forEach(function (o) {
       if (o.location === undefined) o.location = ''; if (o.description === undefined) o.description = ''; if (o.containerId === undefined) o.containerId = null;
@@ -1227,7 +1257,7 @@
     findContainer: findContainer, groupOf: groupOf, parentOf: parentOf, containerChildren: containerChildren, descendants: descendants,
     addPlacement: addPlacement, placementOf: placementOf, placementGroup: placementGroup, movePlacement: movePlacement,
     growToFit: growToFit, mapsFor: mapsFor, addGroup: addGroup, addObject: addObject, setContainer: setContainer,
-    setPortCount: setPortCount, findPortGroup: findPortGroup, parsePortRange: parsePortRange, addPortGroup: addPortGroup, updatePortGroup: updatePortGroup, deletePortGroup: deletePortGroup, portGroupOf: portGroupOf, prunePortGroups: prunePortGroups, hasDeviceIp: hasDeviceIp, moveMap: moveMap, normalizeGhosts: normalizeGhosts, setLinkLabelOffset: setLinkLabelOffset, realMaps: realMaps, allMap: allMap, syncAllMap: syncAllMap, peerGroup: peerGroup, linkPortGroups: linkPortGroups, unlinkPortGroup: unlinkPortGroup, realPlacement: realPlacement, syncGhosts: syncGhosts, pseudoOf: pseudoOf, pseudoDevices: pseudoDevices, hasPortIp: hasPortIp, setDeviceIp: setDeviceIp, effectivePortIp: effectivePortIp, ipList: ipList, setPortIp: setPortIp, IP_ERROR: IP_ERROR, setDeviceKind: setDeviceKind, isTermination: isTermination, DEVICE_KINDS: DEVICE_KINDS, deviceKindInfo: deviceKindInfo, typeLabel: typeLabel, accessPorts: accessPorts, validSectionRows: validSectionRows, setUplinkPorts: setUplinkPorts, setSwitchLayout: setSwitchLayout, setFullWidth: setFullWidth, setSectionSize: setSectionSize, validSectionSizes: validSectionSizes, defaultSectionSize: defaultSectionSize, effectiveSectionSize: effectiveSectionSize, setRouterPorts: setRouterPorts, isValidIp: isValidIp, canConnectPatch: canConnectPatch, addPatchCable: addPatchCable,
+    setPortCount: setPortCount, findPortGroup: findPortGroup, parsePortRange: parsePortRange, addPortGroup: addPortGroup, updatePortGroup: updatePortGroup, deletePortGroup: deletePortGroup, portGroupOf: portGroupOf, prunePortGroups: prunePortGroups, hasDeviceIp: hasDeviceIp, isFloorMap: isFloorMap, equipmentMaps: equipmentMaps, floorMaps: floorMaps, addMap: addMap, moveMap: moveMap, normalizeGhosts: normalizeGhosts, setLinkLabelOffset: setLinkLabelOffset, realMaps: realMaps, allMap: allMap, syncAllMap: syncAllMap, peerGroup: peerGroup, linkPortGroups: linkPortGroups, unlinkPortGroup: unlinkPortGroup, realPlacement: realPlacement, syncGhosts: syncGhosts, pseudoOf: pseudoOf, pseudoDevices: pseudoDevices, hasPortIp: hasPortIp, setDeviceIp: setDeviceIp, effectivePortIp: effectivePortIp, ipList: ipList, setPortIp: setPortIp, IP_ERROR: IP_ERROR, setDeviceKind: setDeviceKind, isTermination: isTermination, DEVICE_KINDS: DEVICE_KINDS, deviceKindInfo: deviceKindInfo, typeLabel: typeLabel, accessPorts: accessPorts, validSectionRows: validSectionRows, setUplinkPorts: setUplinkPorts, setSwitchLayout: setSwitchLayout, setFullWidth: setFullWidth, setSectionSize: setSectionSize, validSectionSizes: validSectionSizes, defaultSectionSize: defaultSectionSize, effectiveSectionSize: effectiveSectionSize, setRouterPorts: setRouterPorts, isValidIp: isValidIp, canConnectPatch: canConnectPatch, addPatchCable: addPatchCable,
     updatePatchCable: updatePatchCable, deletePatchCable: deletePatchCable, addInternalMapping: addInternalMapping,
     removeInternalMapping: removeInternalMapping, autoMapPanel: autoMapPanel, rearPorts: rearPorts,
     sequentialPorts: sequentialPorts, addFixedLink: addFixedLink, updateLinkMeta: updateLinkMeta,

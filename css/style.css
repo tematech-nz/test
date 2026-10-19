@@ -210,3 +210,14 @@ body.on-all #editBanner { background: #546e7a; }
 .list-item.drop-after { box-shadow: 0 3px 0 0 #e65100; }
 
 .trace-net { display: flex; align-items: center; gap: 6px; margin: 6px 0; font-size: 13px; cursor: pointer; }
+
+#scaleBar { position: absolute; left: 12px; bottom: 12px; z-index: 5; font-size: 11px; color: #263238; background: rgba(255,255,255,.85); padding: 3px 6px; border-radius: 4px; pointer-events: none; }
+#scaleBar .bar { height: 6px; border: 2px solid #263238; border-top: 0; margin-bottom: 1px; }
+.fl-types { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px; }
+.fl-types .pk-tool.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+.fl-results { display: flex; flex-direction: column; gap: 3px; max-height: 45vh; overflow: auto; }
+.fl-pick { display: flex; justify-content: space-between; gap: 8px; text-align: left; padding: 6px 8px; }
+.fl-pick .sub { text-align: right; }
+body.on-floor #toolbar button.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+#emptyHint { pointer-events: none; }
+#emptyHint button { pointer-events: auto; }

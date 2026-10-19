@@ -27,7 +27,8 @@
   const onAll = () => !!curMap().auto;
   let forceView = false; // the details panel of a live copy is rendered read-only
   const isEdit = () => S.mode === 'edit' && !onAll() && !forceView; // content editing
-  const shownMaps = () => S.p.maps.filter((m) => !m.auto || M.realMaps(S.p).length > 1);
+  const shownMaps = () => S.p.maps.filter((m) => !m.auto || M.equipmentMaps(S.p).length > 1);
+  const firstMap = () => M.equipmentMaps(S.p)[0] || S.p.maps[0];
   const opts = (list, sel) => list.map((o) => '<option value="' + esc(o[0]) + '"' + (String(o[0]) === String(sel) ? ' selected' : '') + '>' + esc(o[1]) + '</option>').join('');
   const time = (d) => d.toTimeString().slice(0, 5);
   const slug = (s) => String(s || 'project').replace(/[^A-Za-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '') || 'project';
@@ -143,12 +144,13 @@
     if (!S.sel) return true;
     const idx = M.buildIndex(S.p), k = S.sel.kind, id = S.sel.id;
     if (k === 'pgroup') return !!M.findPortGroup(S.p, id);
+    if (k === 'fline' || k === 'fpoint' || k === 'flink') { const f = isFloor() ? floorOf() : null; return !!f && !!({ fline: FL.lineById(f, id), fpoint: FL.pt(f, id), flink: FL.linkById(f, id) }[k]); }
     const t = { group: idx.groups, object: idx.objects, port: idx.ports, cable: idx.cables, link: idx.links, wire: idx.wires }[k];
     return !!(t && t[id]);
   }
   function afterChange() {
     M.syncAllMap(S.p); M.syncGhosts(S.p);
-    if (!shownMaps().some((m) => m.id === S.mapId)) S.mapId = M.realMaps(S.p)[0].id;
+    if (!shownMaps().some((m) => m.id === S.mapId)) S.mapId = firstMap().id;
     if (!selExists()) S.sel = null;
     if (S.pgroup && !M.buildIndex(S.p).objects[S.pgroup.objId]) clearPgroup();
     if (S.trace) {
@@ -169,13 +171,14 @@
     const tf = 'translate(' + v.x + ' ' + v.y + ') scale(' + v.zoom + ')';
     $('vp').setAttribute('transform', tf);
     $('ghost').setAttribute('transform', tf);
+    floorViewChanged(v);
   }
   function stageSize() { const r = $('canvas').getBoundingClientRect(); return { w: r.width, h: r.height, left: r.left, top: r.top }; }
   function toMap(cx, cy) { const s = stageSize(), v = vpState(); return { x: (cx - s.left - v.x) / v.zoom, y: (cy - s.top - v.y) / v.zoom }; }
   function zoomAt(factor, cx, cy) {
     const v = vpState(), s = stageSize();
     const px = cx == null ? s.w / 2 : cx - s.left, py = cy == null ? s.h / 2 : cy - s.top;
-    const nz = Math.min(4, Math.max(0.1, v.zoom * factor)), f = nz / v.zoom;
+    const nz = isFloor() ? Math.min(8, Math.max(0.05, v.zoom * factor)) : Math.min(4, Math.max(0.1, v.zoom * factor)), f = nz / v.zoom;
     v.x = px - (px - v.x) * f; v.y = py - (py - v.y) * f; v.zoom = nz;
     applyVp(); scheduleSave(true);
   }
@@ -226,7 +229,7 @@
     closeLeft();
   }
   function switchMap(id, keepSel) {
-    S.mapId = id; clearPgroup(); if (!keepSel) { S.sel = null; }
+    S.mapId = id; clearPgroup(); floorReset(); if (!keepSel) { S.sel = null; }
     if (S.place) { S.place = null; $('ghostInner').innerHTML = ''; $('ghost').style.display = 'none'; }
     renderAll();
     const v = vpState();
@@ -367,6 +370,7 @@
   }
 
   function handleTap(target, ev) {
+    if (isFloor() && ev) { floorTap(ev); return; }
     if (S.place && ev) { placeHere(ev); return; }
     const tg = target.closest ? target.closest('[data-toggle]') : null;
     if (tg) { toggleCollapse(tg.dataset.pl, tg.dataset.toggle); return; }
@@ -450,6 +454,7 @@
         pinch = { d: Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y) };
         gesture = null; S.drag = null; return;
       }
+      if (isFloor() && floorPointerDown(e)) return;
       const lbl = isEdit() && !S.place && !S.tool && e.target.closest ? e.target.closest('[data-linklabel]') : null;
       if (lbl) { // drag a fixed link label out of the way (per map)
         const lk = S.p.fixedLinks.find((x) => x.id === lbl.dataset.linklabel);
@@ -474,6 +479,7 @@
     cv.addEventListener('pointerleave', () => { if (S.place) $('ghost').style.display = 'none'; });
     cv.addEventListener('pointermove', (e) => {
       if (S.drag && e.pointerType === 'mouse' && e.buttons === 0) { finishDrag(); return; } // the button was released elsewhere (e.g. after Alt+Tab)
+      if (isFloor() && !S.drag && !pointers.size) floorHover(e);
       if (S.place && !pointers.size) { moveGhost(e); return; }
       if (S.pgroup && isEdit() && !pointers.size) {
         const pe = e.target.closest ? e.target.closest('[data-kind="port"]') : null;
@@ -493,6 +499,7 @@
         let dx = pt.x - d.start.x, dy = pt.y - d.start.y;
         if (Math.abs(dx) + Math.abs(dy) < 2 && !d.moved) return;
         d.moved = true;
+        if (d.kind === 'fpoint' || d.kind === 'flink') { floorDragMove(d, pt); return; }
         if (d.kind === 'label') { M.setLinkLabelOffset(S.p, d.linkId, d.mapId, d.ox + dx, d.oy + dy); scheduleRender(); return; }
         if (d.kind === 'move') {
           const p0 = d.items[0], fc = M.findContainer(S.p, p0.q.refId);
@@ -524,6 +531,7 @@
       }
     };
     cv.addEventListener('dblclick', (e) => { // double-click a live copy: open the original on its own map
+      if (isFloor()) { const pt = toMap(e.clientX, e.clientY), hit = FL.hitTest(floorOf(), pt.x, pt.y, floorTolerance()); if (hit && hit.type === 'link') { const lk = FL.linkById(floorOf(), hit.id); if (lk) floorOpenItem(lk.refId); } return; }
       const g = e.target.closest ? e.target.closest('[data-ghost]') : null, el = e.target.closest ? e.target.closest('[data-kind]') : null;
       if (g && el && (el.dataset.kind === 'object' || el.dataset.kind === 'group' || el.dataset.kind === 'port')) { e.preventDefault(); openOriginal(el.dataset.kind, el.dataset.id); }
     });
@@ -535,10 +543,11 @@
   function finishDrag() {
     const d = S.drag; S.drag = null;
     const slot = S.drop; S.drop = null;
-    if (!d.moved) { if (d.kind === 'label') select({ kind: 'link', id: d.linkId }); return; }
-    S.undo.push({ label: d.kind === 'label' ? 'Move label' : (d.kind === 'move' ? 'Move' : 'Resize'), snap: d.snap }); if (S.undo.length > 100) S.undo.shift(); S.redo = [];
+    if (!d.moved) { if (d.kind === 'label') select({ kind: 'link', id: d.linkId }); else if (d.kind === 'fpoint') select({ kind: 'fpoint', id: d.id }); else if (d.kind === 'flink') select({ kind: 'flink', id: d.id }); return; }
+    S.undo.push({ label: d.kind === 'label' ? 'Move label' : (d.kind === 'fpoint' || d.kind === 'flink' ? 'Move on floor plan' : (d.kind === 'move' ? 'Move' : 'Resize')), snap: d.snap }); if (S.undo.length > 100) S.undo.shift(); S.redo = [];
     const gq = S.p.placements.find((x) => x.id === d.plId);
     if (d.kind === 'label') { /* only the label moved */ }
+    else if (d.kind === 'fpoint' || d.kind === 'flink') floorDragEnd(d);
     else if (gq && gq.ghost) { /* a ghost only has a position: no containers, racks or overlaps to sort out */ }
     else if (d.kind === 'move') {
       reassignContainer(d.plId, d);
@@ -572,7 +581,7 @@
   /* ---------------------------------------------------------------- rendering */
   function renderAll() {
     renderTop(); renderCanvas(); renderLeft(); renderRight(); renderToolbar();
-    document.body.className = 'mode-' + S.mode + (onAll() ? ' on-all' : '') + (S.view === 'graph' ? ' view-graph' : '') + (document.body.classList.contains('nav-hidden') ? ' nav-hidden' : '');
+    document.body.className = 'mode-' + S.mode + (onAll() ? ' on-all' : '') + (isFloor() ? ' on-floor' : '') + (S.view === 'graph' ? ' view-graph' : '') + (document.body.classList.contains('nav-hidden') ? ' nav-hidden' : '');
     renderGraph();
   }
   function renderGraph() {
@@ -589,8 +598,9 @@
   function renderTop() {
     $('projTitle').textContent = S.p.name;
     {
-      const ov = M.allMap(S.p), rs = M.realMaps(S.p), one = (m) => '<option value="' + esc(m.id) + '"' + (m.id === S.mapId ? ' selected' : '') + '>' + esc(m.name) + '</option>';
-      $('mapSelect').innerHTML = ov && rs.length > 1 ? one(ov) + '<optgroup label="Maps in the overview">' + rs.map(one).join('') + '</optgroup>' : rs.map(one).join('');
+      const ov = M.allMap(S.p), rs = M.equipmentMaps(S.p), fls = M.floorMaps(S.p), one = (m) => '<option value="' + esc(m.id) + '"' + (m.id === S.mapId ? ' selected' : '') + '>' + esc(m.name) + '</option>';
+      $('mapSelect').innerHTML = (ov && rs.length > 1 ? one(ov) + '<optgroup label="Maps in the overview">' + rs.map(one).join('') + '</optgroup>' : rs.map(one).join('')) +
+        (fls.length ? '<optgroup label="Floor plans">' + fls.map(one).join('') + '</optgroup>' : '');
     }
     $('btnMode').textContent = S.mode === 'edit' ? 'Done editing' : 'Edit';
     $('editBanner').textContent = onAll() ? 'OVERVIEW - ghost copies of every map. Drag them to arrange the overview; nothing here changes the equipment or cabling (edit things on their own maps).' : 'EDIT MODE - changes modify the infrastructure model. Moving things never changes connections.';
@@ -602,23 +612,30 @@
   }
   function renderCanvas() {
     const map = curMap();
-    const r = R.renderMap(S.p, map.id, {
+    const r = R.renderMap(S.p, map.id, Object.assign({
       mode: onAll() ? 'view' : S.mode, moveGhosts: S.mode === 'edit' && onAll(), selection: S.sel, highlight: S.trace && S.trace.highlight,
       pendingPortId: S.tool && S.tool.pending, collapsed: S.collapsed, drop: S.place && S.place.host ? { containerId: S.place.host } : S.drop, alerts: netAlertMap(), ringPorts: ringPorts(),
       groupPorts: S.pgroup ? S.pgroup.ids : null, preview: S.preview
-    });
+    }, floorRenderOpts()));
     S.geo = r;
     $('vp').innerHTML = r.content;
     applyVp();
-    const none = !S.p.placements.some((q) => q.mapId === map.id);
+    const none = isFloor() ? !(floorOf().lines.length || floorOf().links.length) : !S.p.placements.some((q) => q.mapId === map.id);
     const eh = $('emptyHint');
     eh.hidden = !none;
     if (none) {
-      eh.innerHTML = '<div><strong>This map is empty.</strong></div><div>' + (isEdit() ? 'Use the toolbar to add groups, racks and equipment.' : 'Tap "Edit" to start documenting, or load the demo project.') + '</div>' +
+      if (isFloor()) eh.innerHTML = '<div><strong>This floor plan is empty.</strong></div><div>' + (isEdit() || S.mode === 'edit' ? 'Pick Line or Rectangle in the toolbar and click on the plan to draw walls (lengths are real: 1 m is 1 m), then use + Add link... to place your racks, sockets and devices.' : 'Tap "Edit" to draw the floor plan.') + '</div>';
+      else eh.innerHTML = '<div><strong>This map is empty.</strong></div><div>' + (isEdit() ? 'Use the toolbar to add groups, racks and equipment.' : 'Tap "Edit" to start documenting, or load the demo project.') + '</div>' +
         (S.p.objects.length ? '' : '<button data-act="help">Quick start guide</button> <button data-act="demo">Load demo project</button>');
     }
     const th = $('toolHint');
-    if (S.tool && S.tool.type === 'patch') { th.hidden = false; th.textContent = S.tool.pending ? 'Tap the destination port (Esc to cancel)' : 'Patch cable: tap the first port (W or Esc to stop)'; }
+    if (floorEditing() && (FS.place || FS.draw || FS.rect || FS.tool !== 'select')) {
+      th.hidden = false;
+      th.textContent = FS.place ? 'Click to place ' + FS.place.name + ' - R rotates it - Esc cancels (Ctrl+click keeps placing)' :
+        FS.tool === 'line' ? (FS.draw ? 'Line: click the next point - or type its length in metres and press Enter - Shift = 15 degree angles - Esc/Enter finishes' : 'Line: click the first point (it snaps to points and lines)') :
+        FS.tool === 'rect' ? (FS.rect ? 'Rectangle: click the opposite corner (Esc cancels)' : 'Rectangle: click the first corner') : '';
+      th.hidden = !th.textContent;
+    } else if (S.tool && S.tool.type === 'patch') { th.hidden = false; th.textContent = S.tool.pending ? 'Tap the destination port (Esc to cancel)' : 'Patch cable: tap the first port (W or Esc to stop)'; }
     else if (S.place) { th.hidden = false; th.textContent = 'Click to place ' + (S.place.name || M.TYPE_LABELS[S.place.type] || 'item') + ' - hold Ctrl to place more copies (names count up), Esc to cancel'; }
     else if (S.pgroup) {
       th.hidden = false;
@@ -630,6 +647,7 @@
   }
   function renderToolbar() {
     const tb = $('toolbar');
+    if (isFloor()) { tb.innerHTML = floorEditing() ? floorToolbar() : ''; return; }
     if (!isEdit()) { tb.innerHTML = ''; return; }
     const pc = S.tool && S.tool.type === 'patch';
     tb.innerHTML =
@@ -656,15 +674,16 @@
     const mapRow = (m) => '<div class="list-item ' + (m.id === S.mapId ? 'active' : '') + '" data-act="goto" data-kind="map" data-id="' + esc(m.id) + '">' + (grips && !m.auto ? '<span class="map-grip" data-mapgrip="' + esc(m.id) + '" title="Drag to change the order of the maps"></span>' : '') + '<div class="grow">' + esc(m.name) +
       (m.location ? '<div class="sub">' + esc(m.location) + '</div>' : '') + '</div>' +
       (isEdit() && !m.auto ? '<button data-act="editMap" data-id="' + esc(m.id) + '" style="padding:0 6px">Edit</button>' : '') + '</div>';
-    const ovMap = M.allMap(S.p), reals = M.realMaps(S.p);
+    const ovMap = M.allMap(S.p), reals = M.equipmentMaps(S.p), floors = M.floorMaps(S.p);
     // with an overview the maps sit in a box under its "lid": the overview is the header, the maps are what it combines
     $('mapList').innerHTML = '<h3>Maps' + (isEdit() ? ' <button data-act="newMap" style="float:right;padding:0 6px">+ Add</button>' : '') + '</h3>' +
       (ovMap && reals.length > 1
-        ? '<div class="map-lid' + (ovMap.id === S.mapId ? ' active' : '') + '" data-act="goto" data-kind="map" data-id="' + esc(ovMap.id) + '" title="Every map together (overview)"><div class="grow"><b>' + esc(ovMap.name) + '</b><div class="sub">Every map together (overview)</div></div></div><div class="map-box">' + reals.map(mapRow).join('') + '</div>'
-        : reals.map(mapRow).join(''));
+        ? '<div class="map-lid' + (ovMap.id === S.mapId ? ' active' : '') + '" data-act="goto" data-kind="map" data-id="' + esc(ovMap.id) + '" title="Every map together (overview)"><div class="grow"><b>' + esc(ovMap.name) + '</b><div class="sub">Every map together (overview)</div></div></div><div class="map-box map-rows">' + reals.map(mapRow).join('') + '</div>'
+        : '<div class="map-rows">' + reals.map(mapRow).join('') + '</div>') +
+      (floors.length ? '<h3 style="margin-top:8px">Floor plans</h3><div class="map-rows">' + floors.map(mapRow).join('') + '</div>' : '');
 
     const idx = M.buildIndex(S.p), mid = curMap().id;
-    const onMap = (id) => !!M.placementOf(S.p, mid, id);
+    const onMap = (id) => isFloor() ? !!FL.linkOf(floorOf(), id) : !!M.placementOf(S.p, mid, id);
     // the equipment list shows what is on THIS map (plus anything not placed on any map yet, so it can be found and added);
     // containers stay when something inside them is shown; "show all" brings back the equipment of other maps
     const unplaced = (kind, id) => !M.mapsFor(S.p, kind, id).length;
@@ -773,7 +792,7 @@
       pane.innerHTML = '<h3>Nothing selected</h3><div class="sub">Tap an object, port, cable or fixed link on the map to see details. Use the search box to find a port, cable or wire by label or ID.</div>' +
         '<div class="btn-row">' + btn('help', 'Help') + '</div>';
     } else {
-      const d = { group: detGroup, object: detObject, port: detPort, cable: detCable, link: detLink, wire: detWire, pgroup: detPGroup }[S.sel.kind];
+      const d = { group: detGroup, object: detObject, port: detPort, cable: detCable, link: detLink, wire: detWire, pgroup: detPGroup, fline: detFloorLine, fpoint: detFloorPoint, flink: detFloorLink }[S.sel.kind];
       forceView = !!S.selGhost;
       pane.innerHTML = (S.selGhost && (S.sel.kind === 'object' || S.sel.kind === 'group') ? '<div class="msg-box">Live copy of an item on another map: shown read-only. <a class="lnk" data-act="openOriginal" data-kind="' + S.sel.kind + '" data-id="' + esc(S.sel.id) + '">Open the original to edit it</a> (or double-click the copy).</div>' : '') + (!S.selGhost && onAll() && (S.sel.kind === 'object' || S.sel.kind === 'group') ? '<div class="msg-box">Overview copy: shown read-only here. Edit it on its own map: ' + mapsLine(S.sel.kind, S.sel.id) + '</div>' : '') + d(S.sel.id);
     }
@@ -808,7 +827,7 @@
     let h = '<h3>Group</h3>' + inp('Name', 'name', g.name) + inp('Location', 'location', g.location) + inp('Description', 'description', g.description);
     h += isEdit() ? fld('Inside', '<select data-f="container">' + opts(containerOptions('group', null, id), g.parentGroupId || '') + '</select>') :
       fld('Inside', g.parentGroupId ? esc(idx.groups[g.parentGroupId].name) : '-');
-    h += fld('On maps', mapsLine('group', id));
+    h += fld('On maps', mapsLine('group', id)) + floorRefsLine(id);
     h += '<h3>Contents (' + kids.length + ')</h3>' + (kids.map((k) => '<div class="list-item" data-act="goto" data-kind="' + k.kind + '" data-id="' + esc(k.id) + '">' + esc((k.kind === 'group' ? idx.groups[k.id] : idx.objects[k.id]).name) + '</div>').join('') || '<div class="sub">Empty. Groups only organise equipment; they never connect ports.</div>');
     if (isEdit()) h += '<div class="btn-row">' + placeButtons(id, 'group') + btn('duplicate', 'Copy / duplicate', 'data-kind="group" data-id="' + esc(id) + '"') + btn('moveToMap', 'Move to another map...', 'data-kind="group" data-id="' + esc(id) + '"') + btn('deleteSel', 'Delete group...', '', 'danger') + '</div>';
     return h;
@@ -861,7 +880,7 @@
     }
     const par = o.containerId ? M.findContainer(S.p, o.containerId) : null;
     h += isEdit() ? fld('Inside', '<select data-f="container">' + opts(containerOptions('object', o.type, id), o.containerId || '') + '</select>') : fld('Inside', par ? lnk(par.kind, par.id, par.item.name) : '-');
-    h += fld('On maps', mapsLine('object', id)) + fld('ID', '<span class="sub">' + esc(o.id) + '</span>');
+    h += fld('On maps', mapsLine('object', id)) + floorRefsLine(id) + fld('ID', '<span class="sub">' + esc(o.id) + '</span>');
     if (o.type === 'rack') {
       const kids = M.containerChildren(S.p, id);
       h += '<h3>Contents (' + kids.length + ')</h3>' + (kids.map((k) => '<div class="list-item" data-act="goto" data-kind="object" data-id="' + esc(k.id) + '">' + esc(idx.objects[k.id].name) + '</div>').join('') || '<div class="sub">Empty rack.</div>');
@@ -1107,6 +1126,7 @@
         else if (spec.onClick) spec.onClick(e, ctx);
       };
       dlg.onchange = (e) => { if (spec.onChange) spec.onChange(e, ctx); };
+      dlg.oninput = (e) => { if (spec.onInput) spec.onInput(e, ctx); };
       dlg.onmouseover = (e) => { if (spec.onHover) spec.onHover(e, ctx); };
       dlg.onmouseout = (e) => { if (spec.onHover) spec.onHover(e, ctx, true); };
       dlg.oncancel = () => resolve(null);
@@ -1298,6 +1318,292 @@
     commit('Remove from map', (p) => { p.placements = p.placements.filter((q) => !(q.mapId === mid && gone[q.refId])); });
     renderAll();
   }
+  /* ---------------------------------------------------------------- floor plans (map kind 'floor'; geometry in js/floor.js) */
+  const FL = NM.floor;
+  const isFloor = () => M.isFloorMap(curMap());
+  const floorOf = () => FL.ensure(curMap());
+  const FS = S.floor = { tool: 'select', kind: 'wall', snap: 10, labels: true, draw: null, rect: null, place: null, hover: null, typed: '', lastZoom: null };
+  const floorEditing = () => isFloor() && S.mode === 'edit';
+  function floorRenderOpts() {
+    if (!isFloor()) return {};
+    const z = vpState().zoom, h = FS.hover, active = floorEditing();
+    return {
+      zoom: z, labels: FS.labels,
+      floorDraw: active && FS.draw && h ? { a: FS.draw.a, to: h, kind: FS.kind, typed: FS.typed } : null,
+      floorRect: active && FS.rect && h ? { x0: FS.rect.a.x, y0: FS.rect.a.y, x1: h.x, y1: h.y, kind: FS.kind } : null,
+      floorPlace: active && FS.place && h ? { x: h.x, y: h.y, w: FS.place.w, d: FS.place.d, rot: FS.place.rot, name: FS.place.name } : null,
+      floorSnap: active && h && (FS.draw || FS.rect || FS.place) ? h : null
+    };
+  }
+  /* zoom changed: labels and handles are sized in screen pixels, so a floor plan redraws; also the scale bar */
+  function floorViewChanged(v) {
+    const bar = $('scaleBar'); if (!bar) return;
+    if (!isFloor()) { bar.hidden = true; return; }
+    bar.hidden = false;
+    const ns = FL.niceScale(v.zoom);
+    bar.style.width = Math.round(ns.px) + 'px';
+    bar.querySelector('span').textContent = (ns.cm >= 100 ? ns.cm / 100 + ' m' : ns.cm + ' cm');
+    if (FS.lastZoom !== v.zoom) { FS.lastZoom = v.zoom; scheduleRender(); }
+  }
+  function floorReset() { FS.draw = null; FS.rect = null; FS.place = null; FS.hover = null; FS.typed = ''; }
+  function floorTolerance() { return 10 / vpState().zoom; }
+  /* where a click lands: on an existing point, on a line (which will be split there), or on the snap grid; Shift keeps 15-degree angles */
+  function floorSnapPoint(pt, o) {
+    o = o || {};
+    const f = floorOf(), tol = floorTolerance();
+    if (o.shift && o.from) {
+      const dx = pt.x - o.from.x, dy = pt.y - o.from.y, len = Math.hypot(dx, dy), ang = Math.round(Math.atan2(dy, dx) / (Math.PI / 12)) * (Math.PI / 12);
+      const l2 = FS.snap ? Math.round(len / FS.snap) * FS.snap : Math.round(len);
+      return { x: Math.round(o.from.x + Math.cos(ang) * l2), y: Math.round(o.from.y + Math.sin(ang) * l2), type: 'angle' };
+    }
+    let best = null;
+    f.points.forEach((q) => { if (o.exclude === q.id) return; const d = Math.hypot(q.x - pt.x, q.y - pt.y); if (d <= tol && (!best || d < best.d)) best = { x: q.x, y: q.y, type: 'point', d: d }; });
+    if (best) return best;
+    f.lines.forEach((l) => {
+      if (o.exclude && (l.a === o.exclude || l.b === o.exclude)) return;
+      const a = FL.pt(f, l.a), b = FL.pt(f, l.b); if (!a || !b) return;
+      const sg = FL.toSegment(pt.x, pt.y, a.x, a.y, b.x, b.y);
+      if (sg.d <= tol && sg.t > 0 && sg.t < 1 && (!best || sg.d < best.d)) best = { x: Math.round(sg.x), y: Math.round(sg.y), type: 'line', d: sg.d };
+    });
+    if (best) return best;
+    const g = FS.snap;
+    return { x: g ? Math.round(pt.x / g) * g : Math.round(pt.x), y: g ? Math.round(pt.y / g) * g : Math.round(pt.y), type: 'grid' };
+  }
+  /* run an edit on this floor plan as one undo step */
+  function floorEdit(label, fn) {
+    const id = curMap().id;
+    return commit(label, (p) => fn(FL.ensure(p.maps.find((m) => m.id === id)), p));
+  }
+  function floorSetTool(tool, kind) {
+    FS.draw = null; FS.rect = null; FS.hover = null; FS.typed = ''; if (tool !== 'link') FS.place = null;
+    FS.tool = tool; if (kind) FS.kind = kind;
+    renderAll();
+  }
+  function floorHover(e) {
+    if (!floorEditing() || !(FS.draw || FS.rect || FS.place)) return;
+    const pt = toMap(e.clientX, e.clientY), from = FS.draw ? FS.draw.a : (FS.rect ? FS.rect.a : null);
+    FS.hover = floorSnapPoint(pt, { from: from, shift: e.shiftKey });
+    scheduleRender();
+  }
+  /* pointer down in edit mode with the select tool on a point or a link: start dragging it (anything else pans) */
+  function floorPointerDown(e) {
+    if (!floorEditing() || FS.tool !== 'select' || FS.place) return false;
+    const f = floorOf(), pt = toMap(e.clientX, e.clientY), hit = FL.hitTest(f, pt.x, pt.y, floorTolerance());
+    if (!hit || (hit.type !== 'point' && hit.type !== 'link')) return false;
+    const base = { start: pt, snap: JSON.stringify(S.p), moved: false, items: [], mapId: curMap().id };
+    if (hit.type === 'point') { const q = FL.pt(f, hit.id); S.drag = Object.assign(base, { kind: 'fpoint', id: hit.id, ox: q.x, oy: q.y }); }
+    else { const lk = FL.linkById(f, hit.id); S.drag = Object.assign(base, { kind: 'flink', id: hit.id, ox: lk.x, oy: lk.y }); }
+    return true;
+  }
+  function floorDragMove(d, pt) {
+    const f = floorOf(), dx = pt.x - d.start.x, dy = pt.y - d.start.y;
+    if (d.kind === 'fpoint') {
+      const sp = floorSnapPoint({ x: d.ox + dx, y: d.oy + dy }, { exclude: d.id });
+      const q = FL.pt(f, d.id); if (q) { q.x = sp.x; q.y = sp.y; }
+    } else {
+      const lk = FL.linkById(f, d.id), g = FS.snap || 1;
+      if (lk) { lk.x = Math.round((d.ox + dx) / g) * g; lk.y = Math.round((d.oy + dy) / g) * g; }
+    }
+    scheduleRender();
+  }
+  function floorDragEnd(d) { // a moved point joins / splits / crosses like drawn lines do
+    if (d.kind === 'fpoint') { const id = curMap().id; const f = FL.ensure(S.p.maps.find((m) => m.id === id)); const newId = FL.settleAfterMove(f, d.id); if (newId !== d.id && S.sel && S.sel.id === d.id) S.sel = { kind: 'fpoint', id: newId }; }
+  }
+  function floorSelect(hit) {
+    if (!hit) { S.sel = null; closeRight(); renderAll(); return; }
+    select({ kind: hit.type === 'point' ? 'fpoint' : (hit.type === 'link' ? 'flink' : 'fline'), id: hit.id });
+  }
+  /* a click on the floor plan (also what a finger tap does) */
+  function floorTap(ev) {
+    const pt = toMap(ev.clientX, ev.clientY), f = floorOf();
+    if (!floorEditing()) { // view mode: links and lines can be looked at
+      const hit = FL.hitTest(f, pt.x, pt.y, floorTolerance());
+      floorSelect(hit && hit.type !== 'point' ? hit : null); return;
+    }
+    if (FS.place) {
+      const sp = floorSnapPoint(pt, {}), pl = FS.place;
+      const lk = floorEdit('Add link', (ff) => FL.addLink(ff, { kind: pl.kind, refId: pl.refId, x: sp.x, y: sp.y, rot: pl.rot, w: pl.w, d: pl.d }));
+      if (lk && lk !== true) { if (!(ev.ctrlKey || ev.metaKey)) { FS.place = null; FS.hover = null; } S.sel = { kind: 'flink', id: lk.id }; showTab('details'); renderAll(); }
+      return;
+    }
+    if (FS.tool === 'line') {
+      const sp = floorSnapPoint(pt, { from: FS.draw ? FS.draw.a : null, shift: ev.shiftKey });
+      if (!FS.draw) { FS.draw = { a: sp }; FS.hover = sp; FS.typed = ''; renderAll(); return; }
+      if (sp.x === FS.draw.a.x && sp.y === FS.draw.a.y) return;
+      const a = FS.draw.a;
+      floorEdit('Draw line', (ff) => FL.addLine(ff, a.x, a.y, sp.x, sp.y, FS.kind));
+      FS.draw = { a: sp }; FS.typed = ''; renderCanvas(); return;
+    }
+    if (FS.tool === 'rect') {
+      const sp = floorSnapPoint(pt, {});
+      if (!FS.rect) { FS.rect = { a: sp }; FS.hover = sp; renderAll(); return; }
+      const a = FS.rect.a; FS.rect = null;
+      const made = floorEdit('Draw rectangle', (ff) => FL.addRect(ff, a.x, a.y, sp.x, sp.y, FS.kind));
+      if (made && made.length === 0) toast('Nothing to draw: the rectangle is flat or already there', true);
+      renderAll(); return;
+    }
+    floorSelect(FL.hitTest(f, pt.x, pt.y, floorTolerance()));
+  }
+  /* keys on a floor plan: Esc, Enter, a typed length (metres), Delete, and the tool letters V L R */
+  function floorKey(e) {
+    if (!isFloor() || e.ctrlKey || e.metaKey || e.altKey) return false;
+    const k = e.key;
+    if (k === 'Escape') {
+      if (FS.typed) { FS.typed = ''; renderCanvas(); return true; }
+      if (FS.draw || FS.rect || FS.place) { floorReset(); renderAll(); return true; }
+      return false;
+    }
+    if (!floorEditing()) return false;
+    if (FS.draw && FS.tool === 'line') {
+      if (/^[0-9.,]$/.test(k)) { FS.typed = (FS.typed + (k === ',' ? '.' : k)).slice(0, 8); renderCanvas(); return true; }
+      if (k === 'Backspace' && FS.typed) { FS.typed = FS.typed.slice(0, -1); renderCanvas(); return true; }
+      if (k === 'Enter') {
+        if (!FS.typed) { FS.draw = null; FS.hover = null; renderAll(); return true; }
+        const cm = Math.round(parseFloat(FS.typed) * 100), a = FS.draw.a, h = FS.hover || { x: a.x + 100, y: a.y };
+        if (!(cm >= 1)) { toast('Type a length in metres, e.g. 3.2', true); return true; }
+        const len = Math.hypot(h.x - a.x, h.y - a.y) || 1, end = { x: Math.round(a.x + (h.x - a.x) * cm / len), y: Math.round(a.y + (h.y - a.y) * cm / len) };
+        floorEdit('Draw line', (ff) => FL.addLine(ff, a.x, a.y, end.x, end.y, FS.kind));
+        FS.draw = { a: end }; FS.typed = ''; FS.hover = end; renderCanvas(); return true;
+      }
+    }
+    if (FS.place && (k === 'r' || k === 'R')) { FS.place.rot = (FS.place.rot + 90) % 360; renderCanvas(); return true; }
+    if (k === 'Delete' || (k === 'Backspace' && !FS.draw && S.sel)) { floorDeleteSelection(); return true; }
+    if (k === 'v' || k === 'V') { floorSetTool('select'); return true; }
+    if (k === 'l' || k === 'L') { floorSetTool('line'); return true; }
+    if (k === 'r' || k === 'R') { floorSetTool('rect'); return true; }
+    if (k === 'w' || k === 'W') return true; // (W is the patch cable tool on equipment maps)
+    return false;
+  }
+  function floorDeleteSelection() {
+    const sel = S.sel; if (!sel || !floorEditing()) return;
+    if (sel.kind === 'fline') { S.sel = null; floorEdit('Delete line', (f) => FL.deleteLine(f, sel.id)); }
+    else if (sel.kind === 'flink') { S.sel = null; floorEdit('Remove link', (f) => FL.removeLink(f, sel.id)); }
+    else if (sel.kind === 'fpoint') toast('Delete the lines that meet at a point to remove it', true);
+    renderAll();
+  }
+  /* "Add link": search and filter the items on the equipment maps, then place the symbol on the plan */
+  async function floorAddLink() {
+    if (!floorEditing()) return;
+    const f = floorOf(), st = { q: '', type: 'all' };
+    const types = [['all', 'Everything'], ['group', 'Groups'], ['rack', 'Racks'], ['socket', 'Wall sockets'], ['generic', 'Generic equipment'], ['other', 'Other equipment']];
+    const items = [];
+    S.p.groups.forEach((g) => { if (!FL.linkOf(f, g.id)) items.push({ kind: 'group', id: g.id, name: g.name, type: 'group', sub: 'Group' + (g.location ? ' - ' + g.location : ''), hay: [g.name, g.location, g.description].join(' ').toLowerCase() }); });
+    S.p.objects.forEach((o) => {
+      if (FL.linkOf(f, o.id)) return;
+      const maps = M.mapsFor(S.p, 'object', o.id).map((m) => (S.p.maps.find((x) => x.id === m) || {}).name).filter(Boolean);
+      items.push({ kind: 'object', id: o.id, name: o.name, type: o.type, sub: M.typeLabel(o) + (maps.length ? ' - on ' + maps.join(', ') : ' - not on a map') + (o.location ? ' - ' + o.location : ''), hay: [o.name, o.location, o.description, M.typeLabel(o)].join(' ').toLowerCase() });
+    });
+    const ofType = (it, t) => {
+      if (t === 'group') return it.kind === 'group';
+      if (t === 'rack' || t === 'socket' || t === 'generic') return it.type === t;
+      if (t === 'other') return it.kind !== 'group' && ['rack', 'socket', 'generic'].indexOf(it.type) < 0;
+      return true;
+    };
+    const textOk = (it) => !st.q || it.hay.indexOf(st.q.toLowerCase()) >= 0;
+    const match = (it) => ofType(it, st.type) && textOk(it);
+    const results = () => {
+      const m = items.filter(match);
+      return (m.slice(0, 80).map((it) => '<button class="fl-pick" data-btn="pick:' + esc(it.kind + ':' + it.id) + '"><b>' + esc(it.name) + '</b><span class="sub">' + esc(it.sub) + '</span></button>').join('') || '<div class="sub">Nothing matches' + (items.length ? '' : ' (everything is already linked here)') + '.</div>') + (m.length > 80 ? '<div class="sub">' + (m.length - 80) + ' more - narrow the search.</div>' : '');
+    };
+    const v = await openDialog({
+      title: 'Add link to this floor plan',
+      render: () => ({
+        body: '<div class="sub">What do you want to place on the plan? Pick an item from your equipment maps; it keeps living there and this plan shows where it physically is.</div>' +
+          '<input type="search" data-s="q" placeholder="Search by name, location, description..." value="' + esc(st.q) + '" style="width:100%;margin:8px 0" autocomplete="off">' +
+          '<div class="fl-types">' + types.map((t) => '<button class="pk-tool' + (st.type === t[0] ? ' on' : '') + '" data-type="' + t[0] + '">' + esc(t[1]) + ' (' + items.filter((it) => ofType(it, t[0]) && textOk(it)).length + ')</button>').join('') + '</div>' +
+          '<div class="fl-results">' + results() + '</div>',
+        buttons: [{ key: 'no', label: 'Cancel' }]
+      }),
+      onInput: (e, c) => { if (e.target.dataset.s === 'q') { st.q = e.target.value; c.root.querySelector('.fl-results').innerHTML = results(); } },
+      onClick: (e, c) => {
+        const b = e.target.closest('[data-type]'); if (!b) return;
+        st.type = b.dataset.type; c.draw(); const inp = c.root.querySelector('input[data-s="q"]'); if (inp) { inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length); }
+      },
+      onButton: (k, c) => c.close(k.indexOf('pick:') === 0 ? k.slice(5) : null),
+      after: (c) => { const inp = c.root.querySelector('input[data-s="q"]'); if (inp) inp.focus(); }
+    });
+    if (!v) return;
+    const sep = v.indexOf(':'), kind = v.slice(0, sep), id = v.slice(sep + 1), c = M.findContainer(S.p, id);
+    if (!c) return;
+    const fp = FL.footprintFor(kind, kind === 'object' ? c.item.type : null);
+    FS.tool = 'select'; FS.draw = null; FS.rect = null; FS.hover = null;
+    FS.place = { kind: kind, refId: id, name: c.item.name, w: fp.w, d: fp.d, rot: 0 };
+    renderAll();
+    toast('Click on the plan to place ' + c.item.name + ' - R rotates it, Esc cancels (Ctrl+click places and keeps going)');
+  }
+  /* open the real item of a link on the equipment map where it lives */
+  function floorOpenItem(refId) {
+    const c = M.findContainer(S.p, refId);
+    if (!c) { toast('That item no longer exists', true); return; }
+    if (!M.mapsFor(S.p, c.kind, refId).length) { toast(c.item.name + ' is not on any equipment map yet', true); return; }
+    goTo(c.kind, refId);
+  }
+  function floorFieldChange(el) {
+    const id = el.dataset.fid, what = el.dataset.ff, v = el.value;
+    const fn = {
+      kind: (f) => FL.setLineKind(f, id, v),
+      len: (f) => { const cm = Math.round(parseFloat(String(v).replace(',', '.')) * 100); FL.setLineLength(f, id, cm); },
+      angle: (f) => FL.setLineAngle(f, id, parseFloat(String(v).replace(',', '.'))),
+      px: (f) => { const q = FL.pt(f, id); FL.movePoint(f, id, parseFloat(v), q.y); },
+      py: (f) => { const q = FL.pt(f, id); FL.movePoint(f, id, q.x, parseFloat(v)); },
+      lw: (f) => { const l = FL.linkById(f, id); if (!(parseFloat(v) >= 1)) throw new Error('The footprint must be at least 1 cm'); l.w = Math.round(parseFloat(v)); },
+      ld: (f) => { const l = FL.linkById(f, id); if (!(parseFloat(v) >= 1)) throw new Error('The footprint must be at least 1 cm'); l.d = Math.round(parseFloat(v)); },
+      lrot: (f) => { const l = FL.linkById(f, id); const r = parseFloat(String(v).replace(',', '.')); if (!isFinite(r)) throw new Error('Rotation must be a number'); l.rot = ((Math.round(r) % 360) + 360) % 360; }
+    }[what];
+    if (!fn) return;
+    floorEdit('Edit floor plan', (f) => fn(f));
+    renderAll();
+  }
+  /* details panels */
+  function floorHeaderNote() { return isEdit() ? '' : ''; }
+  function detFloorLine(id) {
+    const f = floorOf(), l = FL.lineById(f, id);
+    if (!l) return '<h3>Line</h3><div class="sub">This line no longer exists.</div>';
+    const edit = floorEditing(), locked = FL.lineLocked(f, id), len = FL.lineLength(f, l);
+    let h = '<h3>Line</h3>';
+    h += fld('Type', edit ? '<select data-ff="kind" data-fid="' + esc(id) + '">' + opts(FL.KINDS.map((k) => [k[0], k[1]]), l.kind) + '</select>' : esc((FL.KINDS.find((k) => k[0] === l.kind) || [0, l.kind])[1]));
+    h += fld('Length (m)', edit ? '<input type="text" data-ff="len" data-fid="' + esc(id) + '" value="' + (len / 100).toFixed(2) + '"' + (locked ? ' disabled' : '') + ' style="width:100%">' : (len / 100).toFixed(2) + ' m');
+    h += fld('Angle (deg)', edit ? '<input type="text" data-ff="angle" data-fid="' + esc(id) + '" value="' + FL.lineAngle(f, l) + '"' + (locked ? ' disabled' : '') + ' style="width:100%">' : FL.lineAngle(f, l) + '');
+    if (edit && locked) h += '<div class="sub">Can\'t change the length: it is defined by the connected lines (both ends are connected). Move a point to reshape, or delete a neighbouring line.</div>';
+    else if (edit) h += '<div class="sub">The free end moves; lines attached to it follow. 0 = right, 90 = down.</div>';
+    if (edit) h += '<div class="btn-row">' + btn('floorDelete', 'Delete line', '', 'danger') + '</div>';
+    return h;
+  }
+  function detFloorPoint(id) {
+    const f = floorOf(), q = FL.pt(f, id);
+    if (!q) return '<h3>Point</h3><div class="sub">This point no longer exists.</div>';
+    const edit = floorEditing();
+    return '<h3>Point</h3>' + fld('X (cm)', edit ? '<input type="text" data-ff="px" data-fid="' + esc(id) + '" value="' + q.x + '" style="width:100%">' : q.x) +
+      fld('Y (cm)', edit ? '<input type="text" data-ff="py" data-fid="' + esc(id) + '" value="' + q.y + '" style="width:100%">' : q.y) + fld('Lines', FL.degree(f, id)) +
+      '<div class="sub">A point joins the lines that meet there. Drag it to reshape the plan; the lines stay joined and are re-split where they cross.</div>';
+  }
+  function detFloorLink(id) {
+    const f = floorOf(), lk = FL.linkById(f, id);
+    if (!lk) return '<h3>Link</h3><div class="sub">This link no longer exists.</div>';
+    const c = M.findContainer(S.p, lk.refId), edit = floorEditing();
+    let h = '<h3>Link on the floor plan</h3>' + fld('Item', c ? lnk(c.kind, c.item.id, c.item.name) : '<span class="sev-warning">missing</span>') + fld('Type', c ? esc(c.kind === 'group' ? 'Group' : M.typeLabel(c.item)) : '-');
+    h += fld('Width (cm)', edit ? '<input type="text" data-ff="lw" data-fid="' + esc(id) + '" value="' + lk.w + '" style="width:100%">' : lk.w) + fld('Depth (cm)', edit ? '<input type="text" data-ff="ld" data-fid="' + esc(id) + '" value="' + lk.d + '" style="width:100%">' : lk.d);
+    h += fld('Rotation (deg)', edit ? '<input type="text" data-ff="lrot" data-fid="' + esc(id) + '" value="' + lk.rot + '" style="width:100%">' : lk.rot);
+    h += '<div class="sub">The thick edge is the front. The real item lives on the equipment maps - this is only where it stands.</div>';
+    h += '<div class="btn-row">' + btn('floorOpen', 'Open the item', 'data-id="' + esc(lk.refId) + '"', 'primary') + (edit ? btn('floorDelete', 'Remove link', '', 'danger') : '') + '</div>';
+    return h;
+  }
+  /* "On floor plans" line for an item's details */
+  function floorRefsLine(id) {
+    const refs = [];
+    M.floorMaps(S.p).forEach((m) => { const lk = FL.linkOf(FL.ensure(m), id); if (lk) refs.push('<a class="lnk" data-act="goFloor" data-map="' + esc(m.id) + '" data-link="' + esc(lk.id) + '">' + esc(m.name) + '</a>'); });
+    return refs.length ? fld('On floor plans', refs.join(', ')) : '';
+  }
+  function floorToolbar() {
+    const t = (id, label, extra) => '<button data-floortool="' + id + '" class="' + (FS.tool === id && !FS.place ? 'active' : '') + '" title="' + esc(extra) + '">' + label + '</button>';
+    return t('select', 'Select (V)', 'Select and drag points and links; click a line to edit it') + t('line', 'Line (L)', 'Click to start, click again for each next point; type a length in metres and press Enter; Esc/Enter finishes') +
+      t('rect', 'Rectangle (R)', 'Click two opposite corners: four lines that share their corner points') +
+      '<select data-floorkind title="What the lines you draw are">' + opts(FL.KINDS.map((k) => [k[0], k[1]]), FS.kind) + '</select><span class="sep"></span>' +
+      '<button data-act="floorAddLink" title="Place a to-scale symbol for a rack, wall socket, device or group from your equipment maps">+ Add link...</button><span class="sep"></span>' +
+      '<label class="trace-net" title="Snap clicks to this grid (points and lines always snap first; hold Shift for 15 degree angles)">Snap <select data-floorsnap>' + opts([['0', 'off'], ['5', '5 cm'], ['10', '10 cm'], ['25', '25 cm'], ['50', '50 cm']], String(FS.snap)) + '</select></label>' +
+      '<label class="trace-net"><input type="checkbox" data-floorlabels' + (FS.labels ? ' checked' : '') + '> Lengths</label>';
+  }
+
   async function deleteSelection() {
     const sel = S.sel; if (!sel) return;
     if (sel.kind === 'cable') {
@@ -1577,7 +1883,8 @@
   }
 
   async function mapForm(existing) {
-    const v = await formDlg(existing ? 'Edit map' : 'New map', [{ k: 'name', label: 'Name', v: existing ? existing.name : 'Map ' + (M.realMaps(S.p).length + 1) }, { k: 'location', label: 'Location', v: existing ? existing.location : '' }], 'Save');
+    const v = await formDlg(existing ? 'Edit map' : 'New map', [{ k: 'name', label: 'Name', v: existing ? existing.name : 'Map ' + (M.realMaps(S.p).length + 1) }, { k: 'location', label: 'Location', v: existing ? existing.location : '' }].concat(existing ? [] : [
+      { k: 'kind', label: 'Type', type: 'select', opts: [['equipment', 'Equipment map (racks, panels, switches, cables)'], ['floor', 'Floor plan (walls, doors, windows, to-scale links to your equipment)']], v: 'equipment', hint: 'A floor plan is drawn in real centimetres (1 m is always 1 m) and links to equipment that lives on the equipment maps.' }]), 'Save');
     if (!v || !v.name) return;
     if (existing) {
       const kill = await openDialog({ title: 'Map: ' + existing.name, render: () => ({ body: '<p>Save the new name, or delete this map? Deleting a map removes only its layout; equipment and connections stay in the project.</p>', buttons: [{ key: 'cancel', label: 'Cancel' }, { key: 'del', label: 'Delete map', cls: 'danger' }, { key: 'save', label: 'Save', cls: 'primary' }] }), onButton: (k, c) => c.close(k) });
@@ -1586,9 +1893,9 @@
         commit('Delete map', (p) => { p.maps = p.maps.filter((m) => m.id !== existing.id); p.placements = p.placements.filter((q) => q.mapId !== existing.id); });
       } else if (kill === 'save') commit('Edit map', (p) => { const m = p.maps.find((x) => x.id === existing.id); m.name = v.name; m.location = v.location; });
     } else {
-      const id = M.uid('map');
-      commit('Add map', (p) => { p.maps.push({ id: id, name: v.name, location: v.location, viewport: { x: 0, y: 0, zoom: 1 } }); });
-      switchMap(id);
+      let id = null;
+      commit('Add map', (p) => { const m = M.addMap(p, { name: v.name, location: v.location, kind: v.kind === 'floor' ? 'floor' : 'equipment' }); if (m.kind === 'floor') m.viewport.zoom = 0.5; id = m.id; });
+      if (id) switchMap(id);
     }
   }
 
@@ -1616,7 +1923,7 @@
       });
       return;
     }
-    const others = M.realMaps(S.p).filter((m) => m.id !== from);
+    const others = M.equipmentMaps(S.p).filter((m) => m.id !== from);
     const st = { dest: others.length ? others[0].id : '__new', name: '' };
     const v = await openDialog({
       title: 'Move ' + c.item.name + ' to another map',
@@ -1816,7 +2123,7 @@
     const fixed = B.normalizeSizes(p), aligned = B.alignToGrid(p);
     if (fixed) setTimeout(() => toast('Adjusted ' + fixed + ' item(s) (too small to read, or not lined up with their rack)', false), 100);
     else if (aligned) setTimeout(() => toast('Aligned ' + aligned + ' item(s) to the grid (older project)', false), 100);
-    S.rev++; markDirty(false); S.p = p; S.mapId = p.maps[0].id; S.sel = null; S.trace = null; S.tool = null; S.undo = []; S.redo = []; S.issues = []; S.showIssues = false;
+    S.rev++; markDirty(false); S.p = p; S.mapId = firstMap().id; S.sel = null; S.trace = null; S.tool = null; S.undo = []; S.redo = []; S.issues = []; S.showIssues = false;
     saveNow(); renderAll();
     if (p.placements.some((q) => q.mapId === S.mapId)) fitMap();
   }
@@ -1900,7 +2207,7 @@
   /* ---------------------------------------------------------------- wiring up */
   function setMode(mode) {
     if (S.mode === mode) return;
-    S.mode = mode; S.tool = null; S.drag = null; clearPgroup(); cancelPlace();
+    S.mode = mode; S.tool = null; S.drag = null; clearPgroup(); cancelPlace(); floorReset();
     if (mode === 'view') saveNow();
     renderAll();
     toast(mode === 'edit' ? 'Edit mode on' : 'View mode - saved, read-only');
@@ -1938,7 +2245,8 @@
       if (!grip || S.mode !== 'edit') return;
       e.preventDefault(); e.stopPropagation();
       const list = $('mapList'), id = grip.dataset.mapgrip;
-      const rows = () => Array.from(list.querySelectorAll('.list-item')).filter((r) => r.querySelector('[data-mapgrip]'));
+      const holder = grip.closest('.list-item').parentElement; // maps are reordered within their own list: equipment maps or floor plans
+      const rows = () => Array.from(holder.querySelectorAll('.list-item')).filter((r) => r.querySelector('[data-mapgrip]'));
       const row0 = grip.closest('.list-item'); row0.classList.add('dragging');
       let to = rows().indexOf(row0);
       const mark = (i) => { rows().forEach((r, k) => { r.classList.toggle('drop-before', k === i && i <= rows().indexOf(row0) && k !== rows().indexOf(row0)); r.classList.toggle('drop-after', k === i && i > rows().indexOf(row0)); }); };
@@ -1959,17 +2267,21 @@
     $('fileInput').onchange = (e) => { const f = e.target.files[0]; e.target.value = ''; if (f) importFile(f); };
     $('toolbar').addEventListener('change', (e) => {
       const f = e.target.dataset.f;
+      if (e.target.hasAttribute('data-floorkind')) { FS.kind = e.target.value; renderToolbar(); return; }
+      if (e.target.hasAttribute('data-floorsnap')) { FS.snap = parseInt(e.target.value, 10) || 0; return; }
+      if (e.target.hasAttribute('data-floorlabels')) { FS.labels = e.target.checked; renderCanvas(); return; }
       if (f === 'toolPreset') { if (e.target.value === 'custom') S.customColorFor = '__tool'; else { S.customColorFor = null; S.cableColor = e.target.value; } renderToolbar(); }
       else if (f === 'toolColor') { S.cableColor = e.target.value; S.customColorFor = null; renderToolbar(); }
     });
     $('toolbar').onclick = (e) => {
       const a = e.target.closest('button'); if (!a) return;
-      if (a.dataset.add) createItem(a.dataset.add);
+      if (a.dataset.floortool) floorSetTool(a.dataset.floortool);
+      else if (a.dataset.add) createItem(a.dataset.add);
       else if (a.dataset.act === 'patchTool') setTool(S.tool && S.tool.type === 'patch' ? null : { type: 'patch', pending: null, cableType: 'Cat6' });
       else if (a.dataset.act === 'newLink') newLink();
       else if (a.dataset.act === 'addMapItems') addExisting();
     };
-    document.addEventListener('change', (e) => { if (e.target.dataset && e.target.dataset.f && isEdit() && !e.target.closest('dialog') && !e.target.closest('#toolbar')) onFieldChange(e.target); });
+    document.addEventListener('change', (e) => { if (e.target.dataset && e.target.dataset.ff && !e.target.closest('dialog') && !e.target.closest('#toolbar')) { floorFieldChange(e.target); return; } if (e.target.dataset && e.target.dataset.f && isEdit() && !e.target.closest('dialog') && !e.target.closest('#toolbar')) onFieldChange(e.target); });
     document.addEventListener('click', (e) => {
       const a = e.target.closest('[data-act]'); if (!a || a.closest('dialog')) return;
       const d = a.dataset;
@@ -1979,6 +2291,10 @@
         case 'trace': startTrace(d.kind, d.id); break;
         case 'clearTrace': clearTrace(); break;
         case 'fitTrace': fitTrace(); break;
+        case 'floorAddLink': floorAddLink(); break;
+        case 'floorDelete': floorDeleteSelection(); break;
+        case 'floorOpen': floorOpenItem(d.id); break;
+        case 'goFloor': { switchMap(d.map, true); select({ kind: 'flink', id: d.link }); break; }
         case 'listAll': S.listAll = !S.listAll; renderLeft(); break;
         case 'traceNet': S.traceNet = !!a.checked; applyTraceNetwork(); renderAll(); showTab('trace'); break;
         case 'seeOnFullMap': seeOnFullMap(); break;
@@ -2057,6 +2373,7 @@
     document.addEventListener('keydown', (e) => {
       if ($('dlg').open) return;
       const typing = /INPUT|SELECT|TEXTAREA/.test((e.target.tagName || ''));
+      if (!typing && floorKey(e)) { e.preventDefault(); return; }
       if (e.key === 'Escape') { if (S.place) cancelPlace(); else if (S.pgroup) { clearPgroup(); renderAll(); } else if (S.tool) cancelTool(); else if (S.trace) clearTrace(); else if (S.sel) { S.sel = null; renderAll(); } }
       else if (isEdit() && !typing && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); }
       else if (isEdit() && !typing && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') { e.preventDefault(); redo(); }
@@ -2084,7 +2401,7 @@
     S.p = loadSaved() || M.createProject('Untitled project');
     M.syncAllMap(S.p);
     if (B.normalizeSizes(S.p) | B.alignToGrid(S.p)) saveNow();
-    S.mapId = S.p.maps[0].id;
+    S.mapId = firstMap().id;
     loadCollapsed();
     bindUi(); bindCanvas();
     renderAll();

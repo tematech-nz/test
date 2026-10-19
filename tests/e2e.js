@@ -1458,6 +1458,36 @@ const ok = (m) => console.log('  ok   ' + m);
     for (let i = 0; i < 5; i++) await page.click('#btnUndo');
   });
 
+  await step('floor plan: draw, constrain, link a rack, view mode', async () => {
+    const fid = await page.evaluate(() => { const A = NetMap.app; let id; A.commit('Add floor', (p) => { const mm = NetMap.model.addMap(p, { name: 'E2E Plan', kind: 'floor' }); mm.viewport = { x: 60, y: 100, zoom: 0.4 }; id = mm.id; }); return id; });
+    await page.selectOption('#mapSelect', fid); await page.waitForTimeout(150);
+    assert.ok(await page.isVisible('[data-floortool="rect"]'), 'floor toolbar shown');
+    const org = await page.evaluate(() => { const v = NetMap.app.S.p.maps.find((m) => m.id === NetMap.app.S.mapId).viewport; const r = document.getElementById('canvas').getBoundingClientRect(); return { x: r.left + v.x, y: r.top + v.y, z: v.zoom }; });
+    const click = async (cm) => { const x = org.x + cm[0] * org.z, y = org.y + cm[1] * org.z; await page.mouse.move(x, y); await page.mouse.click(x, y); };
+    const counts = () => page.evaluate(() => { const f = NetMap.floor.ensure(NetMap.app.S.p.maps.find((m) => m.id === NetMap.app.S.mapId)); return [f.points.length, f.lines.length, f.links.length]; });
+    await page.click('[data-floortool="rect"]'); await click([100, 100]); await click([700, 500]);
+    assert.deepStrictEqual(await counts(), [4, 4, 0]);
+    await page.click('[data-floortool="line"]'); await click([100, 300]); await click([700, 300]); await page.keyboard.press('Escape');
+    const c2 = await counts(); assert.deepStrictEqual(c2, [6, 7, 0], 'crossing splits the walls ' + JSON.stringify(c2));
+    await page.click('[data-floortool="select"]'); await click([400, 100]);
+    assert.ok(/Can't change the length/.test(await page.innerText('#detailsPane')), 'both ends connected -> locked');
+    await click([400, 300]);
+    const rk = await page.evaluate(() => NetMap.app.S.p.objects.find((o) => o.type === 'rack').id);
+    await page.click('[data-act="floorAddLink"]');
+    await page.fill('#dlg input[data-s="q"]', 'zzzz-no-match'); assert.ok(/Nothing matches/.test(await page.innerText('#dlg .fl-results')));
+    await page.fill('#dlg input[data-s="q"]', ''); await page.click('#dlg [data-type="rack"]');
+    await page.click('#dlg [data-btn="pick:object:' + rk + '"]');
+    await click([300, 200]);
+    assert.deepStrictEqual(await counts(), [6, 7, 1]);
+    await page.evaluate(() => { const A = NetMap.app; A.S.p.maps.forEach((m) => { if (m.kind !== 'floor') return; }); });
+    assert.ok(await page.evaluate(() => NetMap.model.validateProject(NetMap.app.S.p).filter((i) => i.level === 'error').length === 0), 'valid project');
+    await page.click('#btnMode'); await page.waitForTimeout(100);
+    assert.ok(!(await page.isVisible('[data-floortool="rect"]')), 'read-only in view mode');
+    await page.click('#btnMode'); await page.waitForTimeout(100);
+    await page.evaluate((id) => { NetMap.app.commit('rm', (p) => { p.maps = p.maps.filter((m) => m.id !== id); }); NetMap.app.S.mapId = NetMap.model.firstMap ? NetMap.app.S.p.maps[0].id : NetMap.app.S.p.maps[0].id; }, fid);
+    await page.selectOption('#mapSelect', await page.evaluate(() => NetMap.app.S.p.maps[0].id)); await page.waitForTimeout(100);
+  });
+
   await step('autosave survives a refresh', async () => {
     await page.click('#btnMode'); // back to view mode flushes the save
     const name = await page.evaluate(() => NetMap.app.S.p.name);
@@ -1475,7 +1505,7 @@ const ok = (m) => console.log('  ok   ' + m);
     const [dl] = await Promise.all([page.waitForEvent('download'), page.click('#dlg button[data-btn="json"]')]);
     const file = await dl.path();
     const text = fs.readFileSync(file, 'utf8');
-    assert.ok(text.indexOf('\r') < 0 && text.indexOf('"schemaVersion": 4') > 0);
+    assert.ok(text.indexOf('\r') < 0 && text.indexOf('"schemaVersion": 5') > 0);
     await page.evaluate(() => NetMap.app.api.loadProject(NetMap.model.createProject('blank')));
     await page.click('#btnFile'); await page.click('#dlg button[data-btn="import"]').catch(() => {});
     await page.keyboard.press('Escape');

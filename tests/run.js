@@ -1,7 +1,7 @@
 'use strict';
 /* Dependency-free test runner: node tests/run.js */
 const assert = require('assert');
-require('../js/model.js'); require('../js/layout.js'); require('../js/trace.js');
+require('../js/model.js'); require('../js/floor.js'); require('../js/layout.js'); require('../js/trace.js');
 require('../js/render.js'); require('../js/exporters.js'); require('../js/builder.js'); require('../js/topology.js'); require('../js/graphview.js');
 const NM = globalThis.NetMap;
 const M = NM.model, T = NM.trace, B = NM.builder, R = NM.render, X = NM.exporters;
@@ -153,7 +153,7 @@ test('13. JSON export/import keeps IDs and records', () => {
 test('compact file form: straight panels as a flag, empty optional fields left out, exact round trip, old files still open', () => {
   const p = B.buildDemoProject();
   const full = JSON.stringify(p, null, 2), text = M.exportProject(p), c = JSON.parse(text);
-  assert.strictEqual(c.schemaVersion, 4);
+  assert.strictEqual(c.schemaVersion, M.SCHEMA_VERSION);
   assert.ok(text.length < full.length * 0.75, 'much smaller: ' + text.length + ' vs ' + full.length);
   assert.ok(c.objects.filter(o => o.type === 'patchpanel').every(o => o.straight === true), 'straight panels carry a flag');
   assert.strictEqual(c.internalMappings.length, 0, 'straight mappings are not listed');
@@ -1534,6 +1534,116 @@ test('show all links in this network: switches flood it, port isolation limits i
   const gotPc = netCables(p, cd2.id);
   assert.ok(gotPc.indexOf(cd1.id) >= 0 && gotPc.indexOf(cd3.id) >= 0 && gotPc.indexOf(link.id) < 0, 'a LAN does not cross the router into the WAN side');
 });
+console.log('Floor plans');
+test('floor geometry: lines meet at points, crossings and T-junctions split lines, nothing overlaps', () => {
+  const F = NM.floor, m = { floor: null }, f = F.ensure(m);
+  const counts = () => [f.points.length, f.lines.length];
+  F.addRect(f, 0, 0, 400, 300, 'wall');
+  assert.deepStrictEqual(counts(), [4, 4], 'a rectangle is four lines sharing four corner points');
+  F.addLine(f, 0, 150, 400, 150, 'wall'); // ends on the left and right walls: two T-junctions split them
+  assert.deepStrictEqual(counts(), [6, 7]);
+  F.addLine(f, 200, -100, 200, 400, 'wall'); // crosses the top wall, the middle line and the bottom wall
+  assert.deepStrictEqual(counts(), [11, 14]);
+  F.addLine(f, 0, 0, 400, 0, 'door'); // lies on the top wall: nothing is added
+  assert.deepStrictEqual(counts(), [11, 14], 'no overlapping duplicate');
+  F.addLine(f, 0, 0, 400, 300, 'wall'); // a diagonal through the middle point
+  assert.deepStrictEqual(counts(), [11, 16], 'diagonals are fine and split at the existing point');
+  // every line has two distinct ends that exist, and no two lines join the same points
+  const seen = {};
+  f.lines.forEach(l => { assert.ok(F.pt(f, l.a) && F.pt(f, l.b) && l.a !== l.b); const k = [l.a, l.b].sort().join('|'); assert.ok(!seen[k], 'duplicate line'); seen[k] = 1; });
+  // a rectangle drawn with an edge on an existing wall only splits it and adds the other three sides
+  const m2 = { floor: null }, g = F.ensure(m2);
+  F.addLine(g, 0, 0, 1000, 0, 'wall');
+  F.addRect(g, 200, 0, 600, 300, 'furniture');
+  assert.deepStrictEqual([g.points.length, g.lines.length], [6, 6], 'wall split in three at the corners; sides added, top edge reused');
+  assert.strictEqual(g.lines.filter(l => l.kind === 'furniture').length, 3, 'the shared edge stays a wall');
+  // a rectangle corner on a line, and a point snapped within 1 cm
+  const p1 = F.addPoint(g, 200, 1), p2 = F.addPoint(g, 200, 0);
+  assert.strictEqual(p1.id, p2.id, 'within 1 cm is the same point');
+  // delete: only that line, and points nobody uses any more disappear
+  const lone = F.addLine(g, 2000, 2000, 2100, 2000, 'wall')[0];
+  assert.strictEqual(g.points.length, 8);
+  F.deleteLine(g, lone.id);
+  assert.strictEqual(g.points.length, 6); assert.strictEqual(g.lines.length, 6);
+  assert.deepStrictEqual(F.addRect(g, 0, 0, 0, 100, 'wall'), [], 'a flat rectangle is ignored');
+});
+test('floor lengths: a free end follows the typed length; a line fixed at both ends is locked; units are centimetres', () => {
+  const F = NM.floor, f = F.ensure({ floor: null });
+  const l = F.addLine(f, 0, 0, 300, 400, 'wall')[0];
+  assert.strictEqual(F.lineLength(f, l), 500); assert.strictEqual(F.fmtLen(500), '5.00 m'); assert.strictEqual(F.fmtLen(45), '0.45 m');
+  assert.strictEqual(F.lineLocked(f, l.id), false);
+  F.setLineLength(f, l.id, 250); // the free second end moves along the line
+  assert.strictEqual(F.lineLength(f, l), 250); assert.deepStrictEqual([F.pt(f, l.a).x, F.pt(f, l.a).y], [0, 0]);
+  assert.deepStrictEqual([F.pt(f, l.b).x, F.pt(f, l.b).y], [150, 200]);
+  F.setLineAngle(f, l.id, 0); assert.strictEqual(F.lineAngle(f, l), 0); assert.strictEqual(F.lineLength(f, l), 250);
+  // join the end to another line: it is then connected at both ends only when both ends meet something
+  F.addLine(f, 250, 0, 250, 300, 'wall'); // touches l's end (250, 0)
+  assert.strictEqual(F.lineLocked(f, l.id), false, 'one end still free (the start)');
+  F.addLine(f, 0, 0, 0, 300, 'wall'); // meets the start
+  assert.strictEqual(F.lineLocked(f, l.id), true);
+  assert.throws(() => F.setLineLength(f, l.id, 100), /defined by the connected lines/);
+  assert.throws(() => F.setLineAngle(f, l.id, 10), /defined by the connected lines/);
+  const wall = F.lineById(f, f.lines[f.lines.length - 1].id); // the new left wall has a free end
+  assert.strictEqual(F.lineLocked(f, wall.id), false);
+  F.setLineLength(f, wall.id, 200);
+  assert.strictEqual(F.lineLength(f, wall), 200);
+  assert.throws(() => F.setLineLength(f, wall.id, 0), /between 1 cm/);
+  F.movePoint(f, l.a, 10, 10); assert.deepStrictEqual([F.pt(f, l.a).x, F.pt(f, l.a).y], [10, 10]);
+  assert.strictEqual(F.niceScale(0.5).cm, 200, 'scale bar picks a round length');
+});
+test('floor: moving a point joins what it lands on and splits what it now crosses', () => {
+  const F = NM.floor, f = F.ensure({ floor: null });
+  F.addRect(f, 0, 0, 400, 300, 'wall');
+  const stub = F.addLine(f, 100, 100, 200, 100, 'wall')[0]; // floating line inside the room
+  // drag its end onto the top wall: it joins (T-junction, wall split)
+  F.movePoint(f, stub.b, 200, 0);
+  assert.strictEqual(F.degree(f, stub.b), 3, 'the end sits on the top wall, which was split there');
+  assert.strictEqual(f.lines.length, 4 + 1 + 1);
+  // drag the other end onto a corner: it merges with the corner point
+  const corner = f.points.find(p => p.x === 400 && p.y === 300);
+  const before = f.points.length;
+  F.movePoint(f, stub.a, 400, 300);
+  assert.strictEqual(f.points.length, before - 1); assert.ok(F.degree(f, corner.id) === 3);
+  // a free line dragged across a wall is split where it crosses
+  const f2 = F.ensure({ floor: null });
+  F.addLine(f2, 0, 0, 0, 400, 'wall'); const free = F.addLine(f2, 100, 100, 200, 100, 'wall')[0];
+  const n = f2.lines.length;
+  F.movePoint(f2, free.b, -100, 100);
+  assert.strictEqual(f2.lines.length, n + 2, 'the moved line and the wall are both split at the crossing');
+  // lengthening a free line into a wall also splits
+  const f3 = F.ensure({ floor: null });
+  F.addLine(f3, 300, -50, 300, 50, 'wall'); const l3 = F.addLine(f3, 0, 0, 100, 0, 'wall')[0];
+  F.setLineLength(f3, l3.id, 500);
+  assert.ok(F.degree(f3, f3.points.find(p => p.x === 300 && p.y === 0).id) === 4, 'crosses the wall at (300, 0)');
+});
+test('floor links: one per item, footprints, hit testing, removed when the item goes; floor maps stay out of the overview', () => {
+  const F = NM.floor, p = M.createProject('fl');
+  const fm = M.addMap(p, { name: 'Server room plan', kind: 'floor' }), f = F.ensure(fm);
+  assert.ok(M.isFloorMap(fm) && M.floorMaps(p).length === 1 && M.equipmentMaps(p).length === 1);
+  const rack = M.addObject(p, { type: 'rack', name: 'Rack 1' }), ws = M.addObject(p, { type: 'socket', name: 'WS', portCount: 1 }), grp = M.addGroup(p, { name: 'Room' });
+  const fp = F.footprintFor('object', 'rack'); assert.deepStrictEqual(fp, { w: 60, d: 100 });
+  const lk = F.addLink(f, { kind: 'object', refId: rack.id, x: 200, y: 200, rot: 90, w: fp.w, d: fp.d });
+  assert.throws(() => F.addLink(f, { kind: 'object', refId: rack.id, x: 0, y: 0, w: 10, d: 10 }), /already linked/);
+  F.addLink(f, { kind: 'object', refId: ws.id, x: 400, y: 400, w: 12, d: 12 }); F.addLink(f, Object.assign({ kind: 'group', refId: grp.id, x: 0, y: 0 }, F.footprintFor('group')));
+  // rotated 90 degrees: the 60 x 100 footprint is 100 wide on screen
+  assert.deepStrictEqual(F.hitTest(f, 245, 200, 5), { type: 'link', id: lk.id }); assert.strictEqual(F.hitTest(f, 200, 245, 5), null);
+  F.addLine(f, 0, 600, 100, 600, 'wall'); const near = F.hitTest(f, 50, 603, 5); assert.strictEqual(near.type, 'line');
+  assert.strictEqual(F.hitTest(f, 0, 600, 5).type, 'point', 'points win over lines');
+  // the overview never includes floor maps (two equipment maps are still needed)
+  assert.strictEqual(M.syncAllMap(p), false);
+  const b2 = M.addMap(p, { name: 'Second' });
+  B.addObjectPlaced(p, p.maps[0].id, { type: 'generic', name: 'X', portCount: 1 }, 40, 40); M.syncAllMap(p);
+  assert.ok(M.allMap(p) && !p.placements.some(q => q.mapId === fm.id), 'overview exists once there are two equipment maps; no floor ghosts');
+  // moveMap keeps floor plans in their own group
+  const fm2 = M.addMap(p, { name: 'Plan 2', kind: 'floor' });
+  M.moveMap(p, fm2.id, 0); assert.deepStrictEqual(M.floorMaps(p).map(m => m.name), ['Plan 2', 'Server room plan']);
+  assert.deepStrictEqual(M.equipmentMaps(p).map(m => m.name).slice(-1), ['Second']);
+  assert.strictEqual(p.maps[p.maps.length - 1].auto, 'all');
+  // deleting the item removes its link
+  M.deleteContainerOrObject(p, 'object', ws.id, 'delete');
+  assert.ok(!F.linkOf(f, ws.id) && F.linkOf(f, rack.id));
+  assert.strictEqual(M.importProject(M.exportProject(p)).project.maps.find(m => m.id === fm.id).floor.links.length, 2, 'survives export / import');
+});
 test('moveMap reorders the ordinary maps; the overview map stays at the end and keeps working', () => {
   const p = M.createProject('mm'), m1 = p.maps[0].id, mk = (n) => { const id = M.uid('map'); p.maps.push({ id: id, name: n, location: '', viewport: { x: 0, y: 0, zoom: 1 } }); return id; };
   const b = mk('B'), c = mk('C');
@@ -1782,6 +1892,18 @@ test('placeNewAt puts the item at the cursor and files it into the container und
   const again = B.placeNewAt(p, mid, 'object', { type: 'switch', name: 'Again', portCount: 8 }, 2010, 610);
   assert.deepStrictEqual(overlapPairs(p), []);
   assert.ok(again.placement);
+});
+
+test('floor plan data survives compact/expand and validates', () => {
+  const p = NM.model.createProject('F');
+  const m = NM.model.addMap(p, { name: 'Plan', kind: 'floor' });
+  const f = NM.floor.ensure(m);
+  NM.floor.addRect(f, 0, 0, 400, 300, 'wall');
+  const q = NM.model.expandProject(JSON.parse(NM.model.serializeProject(p)));
+  const mq = q.maps.find((x) => x.kind === 'floor');
+  assert.strictEqual(mq.floor.lines.length, 4);
+  assert.strictEqual(mq.floor.points.length, 4);
+  assert.ok(!NM.model.validateProject(q).some((i) => i.level === 'error'));
 });
 
 console.log('\n' + passed + ' passed, ' + failed + ' failed');
