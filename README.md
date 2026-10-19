@@ -214,7 +214,10 @@ A second kind of map (New map -> Type: Floor plan, listed under "Floor plans") f
 - **New-version notice**: every build has a version stamp (a short hash of the sources: `js/version.js` is what this page runs,
   `version.json` is what the server has). When the page is served over http(s) it reads `version.json` every minute (and when you
   return to the tab). If it differs, the header shows **New version available** and a banner asks you to export your project and
-  reload with **F5** or **Ctrl+R**. Nothing is ever reloaded for you. Opened from disk (`file://`) there is nothing to poll, so no notice.
+  reload with **F5** or **Ctrl+R**. Nothing is ever reloaded for you.
+  **A downloaded copy opened from disk (`file://`)** has no server of its own, so it reads `version.json` from the repository instead
+  (`REPO_VERSION_URL` in `js/app.js`; needs an internet connection and stays silent when offline). If the repository has a different
+  version, the banner says to **download the new version from the repository** and links to it. Nothing is changed automatically.
 - **Stamp the version** whenever you change source files before publishing: `npm run stamp` (`npm test` does it first), or enable
   the optional hook once with `git config core.hooksPath .githooks`. `node tools/version.js --check` fails when the stamp is stale.
   `npm run serve` always reports the current files' version, so local edits are noticed immediately.

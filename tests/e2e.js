@@ -16,6 +16,9 @@ const ok = (m) => console.log('  ok   ' + m);
   const exe = fs.existsSync('/opt/pw-browsers/chromium') ? undefined : undefined;
   const browser = await chromium.launch({ executablePath: exe });
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, acceptDownloads: true });
+  // a copy opened from disk asks the repository for the published version: answer it locally (default: same version as this checkout)
+  let repoVersion = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'version.json'), 'utf8')).version;
+  await ctx.route('https://raw.githubusercontent.com/**', (r) => r.fulfill({ status: 200, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify({ version: repoVersion }) }));
   const page = await ctx.newPage();
   const errors = [];
   const dialogs = []; // beforeunload prompts etc: record and accept so reloads in the tests proceed
@@ -1601,7 +1604,7 @@ const ok = (m) => console.log('  ok   ' + m);
     await hover([600, 205]);
     await page.keyboard.down('Control'); await page.waitForTimeout(80);
     assert.strictEqual(await page.evaluate(() => NetMap.app.S.floor.hover.type), 'grid', 'pressing Ctrl bypasses the snap at once, without moving the mouse');
-    await page.keyboard.up('Control'); await page.waitForTimeout(80);
+    await page.keyboard.up('Control'); await page.waitForTimeout(200);
     assert.strictEqual(await page.evaluate(() => NetMap.app.S.floor.hover.type), 'angle', 'releasing it brings the snap back');
     // ending on an existing line (no point there): keep the angle and finish where the ray meets the line
     await page.keyboard.press('Escape');
@@ -1778,6 +1781,22 @@ const ok = (m) => console.log('  ok   ' + m);
     assert.ok(await page.locator('#tracePane .trace-line').count() >= 1);
     await page.evaluate(() => NetMap.app.api.loadProject(NetMap.builder.buildDemoProject()));
     await page.waitForSelector('#vp [data-kind="object"]');
+  });
+
+  await step('local copy (file:): asks the repository for the version and says to download the new one', async () => {
+    assert.ok(await page.evaluate(() => location.protocol === 'file:'), 'the suite runs from disk');
+    assert.ok(/downloaded copy/.test(await page.getAttribute('#verInfo', 'title')), 'header tooltip says it is a local copy');
+    assert.ok(!(await page.isVisible('#updateBar')), 'same version: no banner');
+    repoVersion = 'aaaaaaaaaa';
+    await page.evaluate(() => NetMap.app.api.checkVersion());
+    await page.waitForSelector('#updateBar:not([hidden])');
+    const txt = await page.innerText('#updateBar');
+    assert.ok(/download the new version from the repository/i.test(txt), txt);
+    assert.ok(!/reload with/i.test(txt), 'no reload advice for a local copy');
+    assert.ok((await page.getAttribute('#updateBar a', 'href')).indexOf('github.com') > 0, 'link to the repository');
+    repoVersion = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'version.json'), 'utf8')).version;
+    await page.evaluate(() => { NetMap.app.S.newVersion = null; NetMap.app.api.checkVersion(); });
+    await page.click('#updateBar button[data-upd="hide"]').catch(() => {});
   });
 
   await step('autosave survives a refresh', async () => {

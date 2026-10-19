@@ -2737,28 +2737,36 @@
   function renderUpdate() {
     const cur = NM.version || 'dev', stale = !!S.newVersion;
     $('verInfo').textContent = 'v' + cur;
+    $('verInfo').title = isLocalCopy() ? 'Version of the code in this page. This is a downloaded copy opened from disk (not served by a web server): updates come from the repository' : 'Version of the code running in this page';
     $('btnUpdate').hidden = !stale;
     const bar = $('updateBar');
     bar.hidden = !stale || S.updateHidden;
     if (stale && !S.updateHidden) {
-      bar.innerHTML = '<span class="msg"><b>A new version of NetMap is available</b> (this page runs v' + esc(cur) + ', latest v' + esc(S.newVersion) + '). ' +
+      if (isLocalCopy()) bar.innerHTML = '<span class="msg"><b>A different version of NetMap is published in the repository</b> (this local copy is v' + esc(cur) + ', the repository has v' + esc(S.newVersion) + '). ' +
+        'Please download the new version from the repository' + (S.fileDirty ? ' - first <b>Export JSON</b>, you have changes that were not exported' : '') + '. Nothing is changed automatically.</span>' +
+        '<a class="btn primary" href="' + REPO_URL + '" target="_blank" rel="noopener">Open the repository</a>' + (S.fileDirty ? '<button data-upd="export">Export JSON now</button>' : '') + '<button data-upd="hide">Remind me later</button>';
+      else bar.innerHTML = '<span class="msg"><b>A new version of NetMap is available</b> (this page runs v' + esc(cur) + ', latest v' + esc(S.newVersion) + '). ' +
         'Save your work first - ' + (S.fileDirty ? 'you have changes that were not exported - ' : '') + 'use <b>Export JSON</b> - then reload with <b>F5</b> or <b>Ctrl+R</b>. Nothing is reloaded automatically.</span>' +
         '<button data-upd="export" class="primary">Export JSON now</button><button data-upd="hide">Remind me later</button>';
     }
   }
+  /* where the published version lives: a copy opened from disk (file:) has no server of its own to ask, so it asks the repository */
+  const REPO_URL = 'https://github.com/tematech-nz/test';
+  const REPO_VERSION_URL = 'https://raw.githubusercontent.com/tematech-nz/test/main/version.json';
+  const isLocalCopy = () => location.protocol === 'file:';
   async function checkVersion() {
-    if (!NM.version || location.protocol === 'file:') return null; // opened from disk (no server to ask) or without version info
+    if (!NM.version) return null; // built without version info
     try {
-      const r = await fetch('version.json?t=' + Date.now(), { cache: 'no-store' });
+      const r = await fetch(isLocalCopy() ? REPO_VERSION_URL + '?t=' + Date.now() : 'version.json?t=' + Date.now(), { cache: 'no-store' });
       if (!r.ok) return null;
       const v = (await r.json()).version;
       if (v && v !== NM.version && v !== S.newVersion) {
         S.newVersion = v; S.updateHidden = false;
-        toast('A new version of NetMap is available - export your project, then reload (F5)', true);
+        toast(isLocalCopy() ? 'A different version is published in the repository - please download the new version from the repository' : 'A new version of NetMap is available - export your project, then reload (F5)', true);
       }
       renderUpdate();
       return v;
-    } catch (e) { return null; } // offline, file:// or no version.json
+    } catch (e) { return null; } // offline, or no version.json
   }
   document.addEventListener('click', (e) => {
     const b = e.target.closest && e.target.closest('[data-upd]');
