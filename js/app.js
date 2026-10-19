@@ -25,7 +25,8 @@
   const curMap = () => S.p.maps.find((m) => m.id === S.mapId) || S.p.maps[0];
   /* the automatic "All items" overview map: ghost copies only - items can be rearranged there but never edited */
   const onAll = () => !!curMap().auto;
-  const isEdit = () => S.mode === 'edit' && !onAll(); // content editing
+  let forceView = false; // the details panel of a live copy is rendered read-only
+  const isEdit = () => S.mode === 'edit' && !onAll() && !forceView; // content editing
   const shownMaps = () => S.p.maps.filter((m) => !m.auto || M.realMaps(S.p).length > 1);
   const opts = (list, sel) => list.map((o) => '<option value="' + esc(o[0]) + '"' + (String(o[0]) === String(sel) ? ' selected' : '') + '>' + esc(o[1]) + '</option>').join('');
   const time = (d) => d.toTimeString().slice(0, 5);
@@ -234,7 +235,7 @@
 
   /* ---------------------------------------------------------------- selection and tools */
   function select(sel) {
-    S.sel = sel; renderAll();
+    S.sel = sel; S.selGhost = false; renderAll();
     if (sel) { showTab('details'); openRight(); }
   }
   function setTool(t) { S.tool = t; renderAll(); }
@@ -369,10 +370,14 @@
     const tg = target.closest ? target.closest('[data-toggle]') : null;
     if (tg) { toggleCollapse(tg.dataset.pl, tg.dataset.toggle); return; }
     const el = target.closest ? target.closest('[data-kind]') : null;
-    if (el && target.closest('[data-ghost]') && !onAll()) { // a ghost copy is not editable here: take me to the real thing
-      if (S.tool || S.pgroup) { toast('That is a ghost copy: edit it on its own map', true); return; }
-      const gid = el.dataset.id, gk = el.dataset.kind, oid = gk === 'port' ? (M.buildIndex(S.p).portObj[gid] || {}).id : gid, real = oid && M.realPlacement(S.p, oid);
-      if (real) { goTo(M.findContainer(S.p, oid).kind, oid, real.mapId); toast('Ghost copy: showing the original on ' + (S.p.maps.find((m) => m.id === real.mapId) || {}).name); return; }
+    if (el && target.closest('[data-ghost]')) { // a live copy is not editable here: a tap shows it read-only, a double-click opens the original
+      if (S.tool || S.pgroup) { toast('That is a live copy: edit it on its own map (double-click it to go there)', true); return; }
+      if (el.dataset.kind === 'object' || el.dataset.kind === 'group' || el.dataset.kind === 'port') {
+        const oid0 = el.dataset.kind === 'port' ? (M.buildIndex(S.p).portObj[el.dataset.id] || {}).id : el.dataset.id;
+        select({ kind: el.dataset.kind === 'group' ? 'group' : 'object', id: oid0 }); S.selGhost = true; renderRight();
+        toast('Live copy - double-click to open the original and edit it there');
+        return;
+      }
     }
     if (isEdit() && !S.tool && ev && (ev.ctrlKey || ev.metaKey) && el && el.dataset.kind === 'port') { pickGroupPort(el.dataset.id, ev.shiftKey); return; }
     if (S.pgroup) {
@@ -517,6 +522,10 @@
         if (!g.moved) handleTap(g.target, e); else scheduleSave(true);
       }
     };
+    cv.addEventListener('dblclick', (e) => { // double-click a live copy: open the original on its own map
+      const g = e.target.closest ? e.target.closest('[data-ghost]') : null, el = e.target.closest ? e.target.closest('[data-kind]') : null;
+      if (g && el && (el.dataset.kind === 'object' || el.dataset.kind === 'group' || el.dataset.kind === 'port')) { e.preventDefault(); openOriginal(el.dataset.kind, el.dataset.id); }
+    });
     cv.addEventListener('pointerup', up);
     cv.addEventListener('pointercancel', (e) => { pointers.delete(e.pointerId); gesture = null; pinch = null; S.drop = null; if (S.drag) { S.p = JSON.parse(S.drag.snap); S.drag = null; renderAll(); } });
     cv.addEventListener('wheel', (e) => { e.preventDefault(); zoomAt(e.deltaY < 0 ? 1.12 : 1 / 1.12, e.clientX, e.clientY); }, { passive: false });
@@ -744,8 +753,10 @@
         '<div class="btn-row">' + btn('help', 'Help') + '</div>';
     } else {
       const d = { group: detGroup, object: detObject, port: detPort, cable: detCable, link: detLink, wire: detWire, pgroup: detPGroup }[S.sel.kind];
-      pane.innerHTML = (onAll() && (S.sel.kind === 'object' || S.sel.kind === 'group') ? '<div class="msg-box">Overview copy: shown read-only here. Edit it on its own map: ' + mapsLine(S.sel.kind, S.sel.id) + '</div>' : '') + d(S.sel.id);
+      forceView = !!S.selGhost;
+      pane.innerHTML = (S.selGhost && (S.sel.kind === 'object' || S.sel.kind === 'group') ? '<div class="msg-box">Live copy of an item on another map: shown read-only. <a class="lnk" data-act="openOriginal" data-kind="' + S.sel.kind + '" data-id="' + esc(S.sel.id) + '">Open the original to edit it</a> (or double-click the copy).</div>' : '') + (!S.selGhost && onAll() && (S.sel.kind === 'object' || S.sel.kind === 'group') ? '<div class="msg-box">Overview copy: shown read-only here. Edit it on its own map: ' + mapsLine(S.sel.kind, S.sel.id) + '</div>' : '') + d(S.sel.id);
     }
+    forceView = false;
     renderTracePane();
     $('tabTrace').textContent = S.trace ? 'Trace *' : 'Trace';
   }
@@ -1225,6 +1236,14 @@
     }
   }
 
+  /* open the editable original of an item that is shown here as a live copy */
+  function openOriginal(kind, id) {
+    const oid = kind === 'port' ? (M.buildIndex(S.p).portObj[id] || {}).id : id, real = oid && M.realPlacement(S.p, oid);
+    if (!real) { toast('The original is not on any map', true); return; }
+    const k = M.findContainer(S.p, oid).kind;
+    goTo(k, oid, real.mapId);
+    toast('Original on ' + (S.p.maps.find((m) => m.id === real.mapId) || {}).name);
+  }
   /* hide an item (and, for a group or rack, everything shown inside it) from the current map only; nothing is deleted from the project */
   function removeFromThisMap(id) {
     const mid = curMap().id, gone = {}; gone[id] = true;
@@ -1245,6 +1264,7 @@
       return;
     }
     if (sel.kind !== 'group' && sel.kind !== 'object') return;
+    if (S.selGhost) { S.sel = null; S.selGhost = false; removeFromThisMap(sel.id); return; } // a live copy: only the copy goes
     const c = M.findContainer(S.p, sel.id), kids = M.containerChildren(S.p, sel.id);
     // shown on several maps: deleting it here must not silently delete it everywhere
     const onMaps = M.mapsFor(S.p, sel.kind, sel.id);
@@ -1840,7 +1860,7 @@
   }
 
   function bindUi() {
-    $('btnMode').onclick = () => setMode(isEdit() ? 'view' : 'edit');
+    $('btnMode').onclick = () => setMode(S.mode === 'edit' ? 'view' : 'edit');
     $('btnHistory').onclick = historyDlg; $('btnUndo').onclick = undo; $('btnRedo').onclick = redo;
     $('btnFile').onclick = fileMenu;
     $('btnAlerts').onclick = runValidate;
@@ -1915,6 +1935,7 @@
           break;
         }
         case 'resetLabel': commit('Reset label position', (p) => M.setLinkLabelOffset(p, d.id, curMap().id, 0, 0)); break;
+        case 'openOriginal': openOriginal(d.kind, d.id); break;
         case 'moveToMap': moveToMap(d.kind, d.id); break;
         case 'unlinkPGroup': commit('Unlink port groups', (p) => M.unlinkPortGroup(p, d.id)); break;
         case 'deletePGroup': { const f = M.findPortGroup(S.p, d.id), oid = f && f.obj.id; commit('Delete port group', (p) => M.deletePortGroup(p, d.id)); if (oid) { S.sel = { kind: 'object', id: oid }; renderAll(); } break; }

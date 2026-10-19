@@ -1500,6 +1500,27 @@ test('All items overview map: appears with 2+ maps, ghosts of everything, positi
   p.maps = p.maps.filter(m => m.id !== m2); p.placements = p.placements.filter(q => q.mapId !== m2);
   assert.strictEqual(M.syncAllMap(p), false); assert.strictEqual(M.realMaps(p).length, 1);
 });
+test('only one editable placement per item: duplicates in old files become live copies, placeItem makes a ghost on a second map', () => {
+  const p = M.createProject('one'), m1 = p.maps[0].id;
+  const m2 = M.uid('map'); p.maps.push({ id: m2, name: 'Second', location: '', viewport: { x: 0, y: 0, zoom: 1 } });
+  const grp = B.addGroupPlaced(p, m1, { name: 'voyager' }, 40, 40);
+  const sw = B.addObjectPlaced(p, m1, { type: 'switch', name: 'Sw', portCount: 8, containerId: grp.id }, 60, 100);
+  // an old file: the same group and its contents placed again, as real (editable) placements, on map 2
+  [grp.id, sw.id].forEach((id) => { const q = M.placementOf(p, m1, id); p.placements.push({ id: M.uid('pl'), mapId: m2, refType: id === grp.id ? 'group' : 'object', refId: id, x: q.x + 100, y: q.y + 100, w: q.w, h: q.h }); });
+  assert.strictEqual(p.placements.filter(q => q.refId === sw.id && !q.ghost).length, 2);
+  const r = M.importProject(JSON.stringify(p));
+  const real = (id) => r.project.placements.filter(q => q.refId === id && !q.ghost);
+  assert.strictEqual(real(grp.id).length, 1); assert.strictEqual(real(sw.id).length, 1);
+  assert.strictEqual(real(grp.id)[0].mapId, m1, 'the first map keeps the editable one');
+  assert.ok(r.project.placements.some(q => q.mapId === m2 && q.refId === grp.id && q.ghost) && r.project.placements.some(q => q.mapId === m2 && q.refId === sw.id && q.ghost));
+  // deleting the live copy from map 2 leaves the item alone on map 1
+  const rp = r.project; rp.placements = rp.placements.filter(q => !(q.mapId === m2 && (q.refId === grp.id || q.refId === sw.id)));
+  assert.ok(M.placementOf(rp, m1, grp.id) && !M.placementOf(rp, m1, grp.id).ghost);
+  // showing an item on a second map (placeItem) gives a ghost, never a second real placement
+  const solo = B.addObjectPlaced(p, m1, { type: 'generic', name: 'Solo', portCount: 1 }, 400, 40);
+  const pl2 = B.placeItem(p, m2, 'object', solo.id, 40, 40, false);
+  assert.ok(pl2.ghost); assert.strictEqual(p.placements.filter(q => q.refId === solo.id && !q.ghost).length, 1);
+});
 test('linked port groups: two ends, own names, peer info in the tooltip, unlink on delete, not copied', () => {
   const p = M.createProject('lg'), m1 = p.maps[0].id;
   const m2 = M.uid('map'); p.maps.push({ id: m2, name: 'Floor 2', location: '', viewport: { x: 0, y: 0, zoom: 1 } });

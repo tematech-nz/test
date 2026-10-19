@@ -218,6 +218,22 @@
     syncGhosts(p);
     return changed;
   }
+  /*
+   * One editable placement per item: an item that sits on several ordinary maps keeps its real placement on the first of them (in map
+   * order) and is a ghost (live copy) everywhere else. Older files could hold several real placements of the same item.
+   * Returns how many placements were turned into ghosts.
+   */
+  function normalizeGhosts(p) {
+    var order = {}, n = 0, seen = {};
+    p.maps.forEach(function (m, i) { order[m.id] = i; });
+    var real = p.placements.filter(function (pl) { return !pl.ghost && p.maps.some(function (m) { return m.id === pl.mapId && !m.auto; }); });
+    real.sort(function (a, b) { return (order[a.mapId] - order[b.mapId]); });
+    real.forEach(function (pl) {
+      if (!seen[pl.refId]) { seen[pl.refId] = true; return; }
+      pl.ghost = true; n++;
+    });
+    return n;
+  }
   function syncGhosts(p) {
     p.placements.forEach(function (pl) {
       if (!pl.ghost) return;
@@ -1174,6 +1190,7 @@
     if (v > SCHEMA_VERSION) throw new Error('File uses schema version ' + v + ', newer than this app (' + SCHEMA_VERSION + ')');
     while (v < SCHEMA_VERSION) { d = MIGRATIONS[v](d); v = d.schemaVersion; }
     expandProject(d);
+    normalizeGhosts(d);
     if (!d.id) d.id = uid('prj');
     if (!d.maps.length) d.maps.push({ id: uid('map'), name: 'Main map', location: '', viewport: { x: 0, y: 0, zoom: 1 } });
     d.maps.forEach(function (m) { m.viewport = m.viewport || { x: 0, y: 0, zoom: 1 }; });
@@ -1201,7 +1218,7 @@
     findContainer: findContainer, groupOf: groupOf, parentOf: parentOf, containerChildren: containerChildren, descendants: descendants,
     addPlacement: addPlacement, placementOf: placementOf, placementGroup: placementGroup, movePlacement: movePlacement,
     growToFit: growToFit, mapsFor: mapsFor, addGroup: addGroup, addObject: addObject, setContainer: setContainer,
-    setPortCount: setPortCount, findPortGroup: findPortGroup, parsePortRange: parsePortRange, addPortGroup: addPortGroup, updatePortGroup: updatePortGroup, deletePortGroup: deletePortGroup, portGroupOf: portGroupOf, prunePortGroups: prunePortGroups, hasDeviceIp: hasDeviceIp, setLinkLabelOffset: setLinkLabelOffset, realMaps: realMaps, allMap: allMap, syncAllMap: syncAllMap, peerGroup: peerGroup, linkPortGroups: linkPortGroups, unlinkPortGroup: unlinkPortGroup, realPlacement: realPlacement, syncGhosts: syncGhosts, pseudoOf: pseudoOf, pseudoDevices: pseudoDevices, hasPortIp: hasPortIp, setDeviceIp: setDeviceIp, effectivePortIp: effectivePortIp, ipList: ipList, setPortIp: setPortIp, IP_ERROR: IP_ERROR, setDeviceKind: setDeviceKind, isTermination: isTermination, DEVICE_KINDS: DEVICE_KINDS, deviceKindInfo: deviceKindInfo, typeLabel: typeLabel, accessPorts: accessPorts, validSectionRows: validSectionRows, setUplinkPorts: setUplinkPorts, setSwitchLayout: setSwitchLayout, setFullWidth: setFullWidth, setSectionSize: setSectionSize, validSectionSizes: validSectionSizes, defaultSectionSize: defaultSectionSize, effectiveSectionSize: effectiveSectionSize, setRouterPorts: setRouterPorts, isValidIp: isValidIp, canConnectPatch: canConnectPatch, addPatchCable: addPatchCable,
+    setPortCount: setPortCount, findPortGroup: findPortGroup, parsePortRange: parsePortRange, addPortGroup: addPortGroup, updatePortGroup: updatePortGroup, deletePortGroup: deletePortGroup, portGroupOf: portGroupOf, prunePortGroups: prunePortGroups, hasDeviceIp: hasDeviceIp, normalizeGhosts: normalizeGhosts, setLinkLabelOffset: setLinkLabelOffset, realMaps: realMaps, allMap: allMap, syncAllMap: syncAllMap, peerGroup: peerGroup, linkPortGroups: linkPortGroups, unlinkPortGroup: unlinkPortGroup, realPlacement: realPlacement, syncGhosts: syncGhosts, pseudoOf: pseudoOf, pseudoDevices: pseudoDevices, hasPortIp: hasPortIp, setDeviceIp: setDeviceIp, effectivePortIp: effectivePortIp, ipList: ipList, setPortIp: setPortIp, IP_ERROR: IP_ERROR, setDeviceKind: setDeviceKind, isTermination: isTermination, DEVICE_KINDS: DEVICE_KINDS, deviceKindInfo: deviceKindInfo, typeLabel: typeLabel, accessPorts: accessPorts, validSectionRows: validSectionRows, setUplinkPorts: setUplinkPorts, setSwitchLayout: setSwitchLayout, setFullWidth: setFullWidth, setSectionSize: setSectionSize, validSectionSizes: validSectionSizes, defaultSectionSize: defaultSectionSize, effectiveSectionSize: effectiveSectionSize, setRouterPorts: setRouterPorts, isValidIp: isValidIp, canConnectPatch: canConnectPatch, addPatchCable: addPatchCable,
     updatePatchCable: updatePatchCable, deletePatchCable: deletePatchCable, addInternalMapping: addInternalMapping,
     removeInternalMapping: removeInternalMapping, autoMapPanel: autoMapPanel, rearPorts: rearPorts,
     sequentialPorts: sequentialPorts, addFixedLink: addFixedLink, updateLinkMeta: updateLinkMeta,

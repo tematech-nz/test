@@ -173,6 +173,9 @@
     if (existing) return existing;
     var c = M.findContainer(p, id);
     if (!c) throw new Error('Item not found');
+    // only one editable placement exists: showing an item on a second map makes a live (ghost) copy
+    var realElsewhere = M.realPlacement(p, id);
+    if (realElsewhere && !(p.maps.find(function (m) { return m.id === realElsewhere.mapId; }) || {}).auto) return addGhost(p, mapId, kind, id, x == null ? 40 : x, y == null ? 40 : y, !!withContents);
     var size = sizeOf(p, kind, id);
     var contId = kind === 'group' ? c.item.parentGroupId : c.item.containerId;
     var cp = contId ? M.placementOf(p, mapId, contId) : null;
