@@ -213,22 +213,28 @@
   }
 
   /* navigate: switch to a map where the target lives, select it, centre on it */
+  /* leaving trace mode: the highlight goes and the right pane goes back to the details */
+  function dropTrace() { if (S.trace) { S.trace = null; showTab('details'); } }
   function goTo(kind, id, mapId, keepTab) {
     let maps = M.mapsFor(S.p, kind, id);
-    if (kind === 'map') { switchMap(id); return; }
+    if (S.view === 'graph') setView('map'); // picking anything from the lists leaves the graph
+    if (!keepTab) dropTrace(); // ...and leaves a trace, unless this is a step inside the trace panel
+    if (kind === 'map') { switchMap(id, false, keepTab); return; }
     if (mapId && maps.indexOf(mapId) >= 0) maps = [mapId]; // a map was asked for (e.g. "open the original", a map link): go there even from the overview
     else if ((kind === 'object' || kind === 'group') && onAll() && M.placementOf(S.p, S.mapId, id)) maps = [S.mapId]; // already in the overview
     else if (maps.indexOf(S.mapId) >= 0) maps = [S.mapId];
     if (!maps.length) toast('This item is not placed on any map yet', true);
-    else if (maps[0] !== S.mapId) switchMap(maps[0], true);
-    select({ kind: kind, id: id });
+    else if (maps[0] !== S.mapId) switchMap(maps[0], true, keepTab);
+    select({ kind: kind, id: id }, keepTab);
     if (keepTab) showTab('trace');
     renderCanvas();
     const rc = maps.length ? rectOfTarget(kind, id) : null;
     if (rc) focusRect(rc);
     closeLeft();
   }
-  function switchMap(id, keepSel) {
+  function switchMap(id, keepSel, keepTrace) {
+    if (S.view === 'graph') setView('map'); // choosing a map leaves the graph
+    if (!keepTrace) dropTrace(); // and a trace (a trace that follows its route to another map passes keepTrace)
     S.mapId = id; clearPgroup(); floorReset(); S.multi = []; if (!keepSel) { S.sel = null; }
     if (S.place) { S.place = null; $('ghostInner').innerHTML = ''; $('ghost').style.display = 'none'; }
     renderAll();
@@ -307,7 +313,9 @@
     S.sel = null; S.multi = [];
     commit('Delete ' + list.length + ' items', apply);
   }
-  function select(sel) {
+  function select(sel, keepTrace) {
+    // selecting anything other than what is traced ends the trace (a click inside the trace panel keeps it)
+    if (S.trace && !keepTrace && !(sel && S.trace.target && S.trace.target.kind === sel.kind && S.trace.target.id === sel.id)) dropTrace();
     S.sel = sel; S.selGhost = false; S.multi = []; renderAll();
     if (sel) { showTab('details'); openRight(); }
   }
@@ -518,7 +526,7 @@
       else go();
       return;
     }
-    if (!el) { S.sel = null; S.multi = []; closeRight(); renderAll(); return; }
+    if (!el) { S.sel = null; S.multi = []; dropTrace(); closeRight(); renderAll(); return; }
     if (kind === 'pgroup' && !(ev && ev.shiftKey)) { // a linked group whose other end is on another map: go there (Shift+click selects this end instead)
       const q = M.peerGroup(S.p, id);
       if (q && !M.placementOf(S.p, S.mapId, q.obj.id)) {
@@ -1205,11 +1213,11 @@
     const ov = M.allMap(S.p);
     if (!ov || !S.trace) return;
     S.prevMapId = S.mapId;
-    switchMap(ov.id, true); showTab('trace'); openRight(); fitTrace();
+    switchMap(ov.id, true, true); showTab('trace'); openRight(); fitTrace();
   }
   function backFromFullMap() {
     const id = S.prevMapId; S.prevMapId = null;
-    if (id && S.p.maps.some((m) => m.id === id)) { switchMap(id, true); showTab('trace'); fitTrace(); }
+    if (id && S.p.maps.some((m) => m.id === id)) { switchMap(id, true, true); showTab('trace'); fitTrace(); }
   }
   function fitTrace() {
     if (!S.trace) return;
@@ -2547,7 +2555,7 @@
       if (n) { S.view = 'map'; renderAll(); goTo('object', n.dataset.gnode); }
       else if (l) {
         const g = NM.topology.buildGraph(S.p, { viaInternet: S.graph.via }), lk = g.links.find((x) => x.id === l.dataset.gedge);
-        if (lk) { S.view = 'map'; renderAll(); startTrace('port', lk.paths[0].aPortId); goTo('port', lk.paths[0].aPortId); }
+        if (lk) { S.view = 'map'; renderAll(); startTrace('port', lk.paths[0].aPortId); goTo('port', lk.paths[0].aPortId, undefined, true); }
       }
     });
     $('btnMenu').onclick = () => { if (isNarrow()) openLeft(); else setNavHidden(!document.body.classList.contains('nav-hidden')); };
@@ -2618,7 +2626,7 @@
       const a = e.target.closest('[data-act]'); if (!a || a.closest('dialog')) return;
       const d = a.dataset;
       switch (d.act) {
-        case 'select': select({ kind: d.kind, id: d.id }); break;
+        case 'select': select({ kind: d.kind, id: d.id }, !!a.closest('#tracePane')); break;
         case 'goto': goTo(d.kind, d.id, d.map, !!a.closest('#tracePane')); break;
         case 'trace': startTrace(d.kind, d.id); break;
         case 'clearTrace': clearTrace(); break;

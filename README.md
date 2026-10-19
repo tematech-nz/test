@@ -95,6 +95,8 @@ Try it: File -> Load demo project: two rooms with a fixed link between racks, a 
   Graph's From / To lists then offer **Internet - all ISPs** (shown when there are two or more Internet objects). *From* it you get everything the Internet can reach
   through the ISPs that have a public IP (the others give outbound access only, and the view says so); *To* it you get how a device gets out through any ISP.
   The From / To lists are sorted A to Z.
+- **Leaving a view or a trace**: in the Graph, picking any map, floor plan or equipment entry (navigation list or the map selector) switches back to the map. A trace ends when you
+  click another element or free space, switch map, open something from the lists, or press Esc; clicking a step inside the trace panel keeps it.
 - **Graph** (header button): collapses patch cables, patch panels and fixed links into device-to-device links and shows
   the interconnection graph from a chosen device (default: INTERNET). With "To" empty you get the reachability tree
   (what can be reached, via which cables, how many hops, what is unreachable). Pick a target device to list every

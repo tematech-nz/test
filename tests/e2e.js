@@ -1928,6 +1928,48 @@ const ok = (m) => console.log('  ok   ' + m);
     await page.waitForSelector('#vp [data-kind="object"]');
   });
 
+  await step('graph leaves on any map / entry pick; trace leaves on another element, free space, map switch or Esc', async () => {
+    await page.evaluate(() => NetMap.app.api.loadProject(NetMap.builder.buildShowcaseProject()));
+    if (await page.evaluate(() => NetMap.app.S.mode === 'edit')) await page.click('#btnMode');
+    const view = () => page.evaluate(() => NetMap.app.S.view), trace = () => page.evaluate(() => !!NetMap.app.S.trace);
+    const mapName = () => page.evaluate(() => NetMap.app.S.p.maps.find((m) => m.id === NetMap.app.S.mapId).name);
+    const ids = await page.evaluate(() => { const S = NetMap.app.S; return { floor: NetMap.model.floorMaps(S.p)[0].id, eq: S.p.maps[1].id, sw: S.p.objects.find((o) => o.name === 'Switch A').ports.find((x) => x.label === '12').id }; });
+    // graph: the map list, the header selector, a floor plan row and an equipment row all leave it
+    const toGraph = async () => { if ((await view()) !== 'graph') await page.click('#btnGraph'); await page.waitForSelector('#graphView select[data-g="from"]'); };
+    await toGraph(); await page.selectOption('#mapSelect', ids.eq); await page.waitForTimeout(100);
+    assert.strictEqual(await view(), 'map', 'header map selector leaves the graph'); assert.strictEqual(await mapName(), 'Office');
+    await toGraph();
+    await page.locator('#mapList .list-item', { hasText: 'Server room plan' }).first().click({ force: true }); await page.waitForTimeout(150);
+    assert.strictEqual(await view(), 'map', 'a floor plan row leaves the graph'); assert.strictEqual(await mapName(), 'Server room plan');
+    await toGraph(); await page.locator('#mapList .list-item', { hasText: 'Server room' }).first().click({ force: true }); await page.waitForTimeout(150);
+    assert.strictEqual(await view(), 'map');
+    await toGraph(); await page.locator('#objectList .list-item', { hasText: 'Switch A' }).first().click({ force: true }); await page.waitForTimeout(150);
+    assert.strictEqual(await view(), 'map', 'an equipment row leaves the graph');
+    // trace: Esc
+    await page.evaluate((id) => { NetMap.app.api.select({ kind: 'port', id }); NetMap.app.api.startTrace('port', id); }, ids.sw); await page.waitForTimeout(100);
+    assert.ok(await trace()); await page.keyboard.press('Escape'); assert.ok(!(await trace()), 'Esc leaves the trace');
+    // trace: another element
+    await page.evaluate((id) => NetMap.app.api.startTrace('port', id), ids.sw); await page.waitForTimeout(100);
+    assert.ok(await trace());
+    const rackB = await page.evaluate(() => NetMap.app.S.p.objects.find((o) => o.name === 'Rack A').id);
+    const bb = await page.locator('#vp rect[data-kind="object"][data-id="' + rackB + '"]').boundingBox();
+    await page.mouse.click(bb.x + 6, bb.y + bb.height - 6); await page.waitForTimeout(100);
+    assert.ok(!(await trace()), 'clicking another element leaves the trace');
+    // trace: free space
+    await page.evaluate((id) => NetMap.app.api.startTrace('port', id), ids.sw); await page.waitForTimeout(100);
+    await page.mouse.click(300, 760); await page.waitForTimeout(100);
+    assert.ok(!(await trace()), 'free space leaves the trace');
+    // trace: a step inside the trace panel keeps it
+    await page.evaluate((id) => NetMap.app.api.startTrace('port', id), ids.sw); await page.waitForTimeout(100);
+    await page.locator('#tracePane .trace-line').nth(1).click(); await page.waitForTimeout(100);
+    assert.ok(await trace(), 'clicking a step in the trace panel keeps the trace');
+    // trace: switching map
+    await page.selectOption('#mapSelect', ids.eq); await page.waitForTimeout(100);
+    assert.ok(!(await trace()), 'switching map leaves the trace');
+    await page.evaluate(() => NetMap.app.api.loadProject(NetMap.builder.buildDemoProject()));
+    await page.waitForSelector('#vp [data-kind="object"]');
+  });
+
   await step('autosave survives a refresh', async () => {
     await page.click('#btnMode'); // back to view mode flushes the save
     const name = await page.evaluate(() => NetMap.app.S.p.name);
