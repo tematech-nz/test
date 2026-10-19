@@ -125,6 +125,10 @@ Try it: File -> Load demo project (two rooms, a fixed link between racks, a wall
 - **All items overview**: once a project has two or more maps, an automatic map "All items" appears (not before). It shows a ghost copy of every
   item from every map, each map laid out as its own block, with the cables and fixed links between them drawn. In edit mode the ghosts can be
   dragged to arrange the overview (their positions only); nothing about the equipment can be edited there (details are read-only, no toolbar).
+- **Delete vs remove from map**: deleting an item that is shown on more than one map asks whether to **remove it from this map only** (it and its
+  connections stay on the other maps; a group or rack is removed together with what is shown inside it) or delete it everywhere.
+- **Fixed link labels** can be dragged out of the way in edit mode (per map; a dashed leader line shows where the label belongs, "Reset label
+  position" in the link's panel puts it back). Labels are always drawn on top of equipment, so they never hide behind it.
 - **Quick start**: File > Quick start / help (shown once automatically on the first visit with an empty project) explains the workflow,
   including that a fixed link can join panels on different maps, plus keyboard shortcuts.
 - **New fixed link** shows the real rear ports of both panels: occupied ports are greyed out and cannot be picked, port groups are shown

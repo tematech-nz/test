@@ -270,6 +270,52 @@ const ok = (m) => console.log('  ok   ' + m);
     for (let i = 0; i < 3; i++) await page.click('#btnUndo');
   });
 
+  await step('a fixed link label can be dragged out of the way and reset', async () => {
+    const lid = await page.evaluate(() => { const A = NetMap.app; const l = A.S.p.fixedLinks.find((x) => NetMap.model.placementOf(A.S.p, A.S.mapId, x.aObjectId) || NetMap.model.placementOf(A.S.p, A.S.mapId, x.bObjectId)); A.S.sel = null; return l && l.id; });
+    if (!lid) return;
+    await page.evaluate(() => document.getElementById('zoomFit').click());
+    const box = await page.locator('#vp [data-linklabel="' + lid + '"]').first().boundingBox();
+    if (!box) return;
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2); await page.mouse.down();
+    await page.mouse.move(box.x + box.width / 2 + 60, box.y + box.height / 2 + 40, { steps: 5 }); await page.mouse.up();
+    await page.waitForTimeout(150);
+    const off = await page.evaluate((i) => { const A = NetMap.app; const l = A.S.p.fixedLinks.find((x) => x.id === i); return l.labelAt && l.labelAt[A.S.mapId]; }, lid);
+    assert.ok(off && Math.abs(off[0]) + Math.abs(off[1]) > 10, 'label offset stored: ' + JSON.stringify(off));
+    await page.evaluate((i) => NetMap.app.api.select({ kind: 'link', id: i }), lid);
+    await page.waitForTimeout(100);
+    assert.ok(await page.isVisible('#detailsPane button[data-act="resetLabel"]'));
+    await page.click('#detailsPane button[data-act="resetLabel"]');
+    assert.strictEqual(await page.evaluate((i) => NetMap.app.S.p.fixedLinks.find((x) => x.id === i).labelAt, lid), undefined);
+    await page.click('#btnUndo'); await page.click('#btnUndo');
+  });
+
+  await step('deleting an item that is shown on two maps offers "this map only" and keeps it on the other map', async () => {
+    const ids = await page.evaluate(() => {
+      const A = NetMap.app, B = NetMap.builder, M = NetMap.model, out = { m1: A.S.mapId };
+      A.commit('two-map setup', (p) => {
+        const m2 = { id: M.uid('map'), name: 'Del map', location: '', viewport: { x: 0, y: 0, zoom: 1 } }; p.maps.push(m2); out.m2 = m2.id;
+        const g = B.addGroupPlaced(p, A.S.mapId, { name: 'TwoMapGroup' }, 8000, 40);
+        const sw = B.addObjectPlaced(p, A.S.mapId, { type: 'switch', name: 'TwoMapSw', portCount: 4, containerId: g.id }, 8020, 100);
+        out.g = g.id; out.sw = sw.id;
+        B.placeItem(p, m2.id, 'group', g.id, 40, 40, true); // a second, editable placement on the other map (older style)
+      });
+      return out;
+    });
+    await page.selectOption('#mapSelect', ids.m2); await page.waitForTimeout(150);
+    await page.evaluate((i) => { NetMap.app.api.select({ kind: 'group', id: i.g }); }, ids);
+    await page.waitForTimeout(100);
+    await page.click('#detailsPane button[data-act="deleteSel"]');
+    await page.waitForSelector('#dlg .dh');
+    const txt = await page.innerText('#dlg');
+    assert.ok(/2 maps/.test(txt) && /this map only/i.test(txt), txt.slice(0, 160));
+    await page.click('#dlg button[data-btn="here"]');
+    await page.waitForTimeout(150);
+    const st = await page.evaluate((i) => { const S = NetMap.app.S, M = NetMap.model; return { group: !!S.p.groups.find((g) => g.id === i.g), sw: !!S.p.objects.find((o) => o.id === i.sw), here: !!M.placementOf(S.p, i.m2, i.g), hereSw: !!M.placementOf(S.p, i.m2, i.sw), there: !!M.placementOf(S.p, i.m1, i.g) }; }, ids);
+    assert.deepStrictEqual(st, { group: true, sw: true, here: false, hereSw: false, there: true });
+    await page.selectOption('#mapSelect', ids.m1); await page.waitForTimeout(100);
+    await page.click('#btnUndo'); await page.click('#btnUndo');
+  });
+
   await step('hidden navigation stays hidden when clicking the map or changing mode', async () => {
     await page.click('#btnMenu');
     assert.ok(!(await page.isVisible('#left')));

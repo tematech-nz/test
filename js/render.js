@@ -41,7 +41,7 @@
     var pls = p.placements.filter(function (x) { return x.mapId === mapId; });
     var byRef = {};
     var portGeo = {}; // portId -> absolute rect
-    var parts = [], cableParts = [], bounds = null;
+    var parts = [], cableParts = [], labelParts = [], bounds = null;
 
     function grow(x, y, w, h) {
       if (!bounds) bounds = { x0: x, y0: y, x1: x + w, y1: y + h };
@@ -286,9 +286,16 @@
       if (isHi) o += '<path d="' + d + '" stroke="' + HI + '" stroke-width="11" fill="none" opacity="0.7" pointer-events="none"/>';
       o += '<path d="' + d + '" stroke="' + (isSel ? SEL : '#37474f') + '" stroke-width="6" fill="none" stroke-linecap="round" pointer-events="none"/>';
       o += '<path d="' + d + '" stroke="#ffffff" stroke-width="1.6" stroke-dasharray="7 5" fill="none" pointer-events="none"/>';
-      var tw = label.length * 5.8 + 8;
-      o += '<rect x="' + num(mx - tw / 2) + '" y="' + num(my - 9) + '" width="' + num(tw) + '" height="13" rx="3" fill="#fff" stroke="#37474f" stroke-width="0.8" pointer-events="none"/>' +
-        '<text x="' + num(mx) + '" y="' + num(my + 1) + '" font-size="10" text-anchor="middle" fill="#222" font-family="sans-serif" pointer-events="none">' + esc(label) + '</text></g>';
+      var lab = '', tw = label.length * 5.8 + 8, lo = (l.labelAt && l.labelAt[mapId]) || [0, 0], movable = editing && !exporting;
+      if (lo[0] || lo[1]) { // dragged by hand: leader line from the default spot to the moved label
+        lab += '<path d="M' + num(mx) + ' ' + num(my - 3) + 'L' + num(mx + lo[0]) + ' ' + num(my + lo[1] - 3) + '" stroke="#37474f" stroke-width="1" stroke-dasharray="3 2" fill="none" pointer-events="none"/>';
+        mx += lo[0]; my += lo[1];
+        grow(mx - tw / 2, my - 10, tw, 16);
+      }
+      lab += '<rect' + (movable ? ' data-linklabel="' + esc(l.id) + '" style="cursor:move"' : '') + ' x="' + num(mx - tw / 2) + '" y="' + num(my - 9) + '" width="' + num(tw) + '" height="13" rx="3" fill="#fff" stroke="' + (movable ? '#1565c0' : '#37474f') + '" stroke-width="' + (movable ? 1.2 : 0.8) + '"' + (movable ? '' : ' pointer-events="none"') + '/>' +
+        '<text x="' + num(mx) + '" y="' + num(my + 1) + '" font-size="10" text-anchor="middle" fill="#222" font-family="sans-serif" pointer-events="none">' + esc(label) + '</text>';
+      o += '</g>'; // the link itself may hide behind unrelated containers, its label never does
+      labelParts.push('<g data-kind="link" data-id="' + esc(l.id) + '"' + (dim ? ' opacity="0.15"' : '') + '>' + lab + '</g>');
       cableParts.push(o);
     });
 
@@ -347,7 +354,7 @@
         '<path d="M' + num(lx) + ' ' + num(ly + 6) + 'h40" stroke="#1f77b4" stroke-width="2.2"/><text x="' + num(lx + 46) + '" y="' + num(ly + 10) + '" font-size="10" font-family="sans-serif">Patch cable</text>' +
         '<path d="M' + num(lx + 130) + ' ' + num(ly + 6) + 'h40" stroke="#37474f" stroke-width="6"/><path d="M' + num(lx + 130) + ' ' + num(ly + 6) + 'h40" stroke="#fff" stroke-width="1.6" stroke-dasharray="7 5"/><text x="' + num(lx + 176) + '" y="' + num(ly + 10) + '" font-size="10" font-family="sans-serif">Fixed link (installed)</text>';
     }
-    return { content: parts.join('') + cableParts.join('') + legend, bounds: b, portGeo: portGeo };
+    return { content: parts.join('') + cableParts.join('') + labelParts.join('') + legend, bounds: b, portGeo: portGeo };
   }
 
   function svgDocument(p, mapId) {

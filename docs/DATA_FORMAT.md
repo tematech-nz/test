@@ -30,7 +30,7 @@ compact files open identically (`compactProject()` / `expandProject()` in `js/mo
                     "portType"?, "speed"?, "media"? } ] } ],
   "placements": [ { "id", "mapId", "refType": "group"|"object", "refId", "x", "y", "w", "h", "ghost"? } ],
   "patchCables":[ { "id", "name", "aPortId", "bPortId", "cableType", "color", "length", "status" } ],
-  "fixedLinks": [ { "id", "name", "aObjectId", "bObjectId", "cableType", "length", "route", "status",
+  "fixedLinks": [ { "id", "name", "aObjectId", "bObjectId", "cableType", "length", "route", "status", "labelAt"?,
                     "wires": [ { "id", "number", "aPortId": id|null, "bPortId": id|null, "status" } ] } ],
   "internalMappings": [ { "id", "objectId", "aPortId", "bPortId" } ]
 }
@@ -53,6 +53,7 @@ compact files open identically (`compactProject()` / `expandProject()` in `js/mo
 - Generic devices and switches may carry `ipAddress` (devices: used for a single-port device, per-port `ip` otherwise; switches: the
   management / web interface address). A segment is a set of devices joined by switches; routers and generic devices never bridge.
 - Router ports may carry `networkColor` (hex), the default colour for patch cables extending from them.
+- A fixed link may carry `labelAt: { "<mapId>": [dx, dy] }`: its label was dragged by that offset (map units) on that map.
 - Any equipment with ports may carry `portGroups`: `[{ "id", "name", "color", "portIds": [...] }]` (a port is in at most one
   group; visual/organisational). A group of a switch, router or generic device may also carry `deviceKind` (a device type id such as
   `camera`): a **pseudo-device** - the ports are occupied by that many unmodelled devices; the topology graph shows one endpoint

@@ -444,6 +444,11 @@
         pinch = { d: Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y) };
         gesture = null; S.drag = null; return;
       }
+      const lbl = isEdit() && !S.place && !S.tool && e.target.closest ? e.target.closest('[data-linklabel]') : null;
+      if (lbl) { // drag a fixed link label out of the way (per map)
+        const lk = S.p.fixedLinks.find((x) => x.id === lbl.dataset.linklabel);
+        if (lk) { S.drag = { kind: 'label', linkId: lk.id, mapId: curMap().id, start: toMap(e.clientX, e.clientY), snap: JSON.stringify(S.p), ox: ((lk.labelAt && lk.labelAt[curMap().id]) || [0, 0])[0], oy: ((lk.labelAt && lk.labelAt[curMap().id]) || [0, 0])[1], moved: false, items: [] }; return; }
+      }
       const h = (isEdit() || (S.mode === 'edit' && onAll())) && !S.place && e.target.closest ? e.target.closest('[data-handle]') : null;
       if (h && h.dataset.handle === 'unghost') {
         const gq = S.p.placements.find((x) => x.id === h.dataset.pl);
@@ -482,6 +487,7 @@
         let dx = pt.x - d.start.x, dy = pt.y - d.start.y;
         if (Math.abs(dx) + Math.abs(dy) < 2 && !d.moved) return;
         d.moved = true;
+        if (d.kind === 'label') { M.setLinkLabelOffset(S.p, d.linkId, d.mapId, d.ox + dx, d.oy + dy); scheduleRender(); return; }
         if (d.kind === 'move') {
           const p0 = d.items[0], fc = M.findContainer(S.p, p0.q.refId);
           dx = snap(p0.ox + dx) - p0.ox; dy = snap(p0.oy + dy) - p0.oy;
@@ -519,10 +525,11 @@
   function finishDrag() {
     const d = S.drag; S.drag = null;
     const slot = S.drop; S.drop = null;
-    if (!d.moved) return;
-    S.undo.push({ label: d.kind === 'move' ? 'Move' : 'Resize', snap: d.snap }); if (S.undo.length > 100) S.undo.shift(); S.redo = [];
+    if (!d.moved) { if (d.kind === 'label') select({ kind: 'link', id: d.linkId }); return; }
+    S.undo.push({ label: d.kind === 'label' ? 'Move label' : (d.kind === 'move' ? 'Move' : 'Resize'), snap: d.snap }); if (S.undo.length > 100) S.undo.shift(); S.redo = [];
     const gq = S.p.placements.find((x) => x.id === d.plId);
-    if (gq && gq.ghost) { /* a ghost only has a position: no containers, racks or overlaps to sort out */ }
+    if (d.kind === 'label') { /* only the label moved */ }
+    else if (gq && gq.ghost) { /* a ghost only has a position: no containers, racks or overlaps to sort out */ }
     else if (d.kind === 'move') {
       reassignContainer(d.plId, d);
       const q = S.p.placements.find((x) => x.id === d.plId), c = q && M.findContainer(S.p, q.refId);
@@ -961,7 +968,8 @@
     h += isEdit() ? fld('Status', '<select data-f="status">' + opts(M.LINK_STATUS.map((s) => [s, s]), l.status) + '</select>') : fld('Status', esc(l.status));
     h += fld('On maps', mapsLine('link', id));
     h += '<div class="btn-row">' + btn('trace', 'Trace all wires', 'data-kind="link" data-id="' + esc(id) + '"', 'primary');
-    if (isEdit()) h += btn('editWiring', 'Edit installed wiring...') + btn('deleteSel', 'Delete link...', '', 'danger');
+    if (isEdit()) h += btn('editWiring', 'Edit installed wiring...') + (l.labelAt && l.labelAt[curMap().id] ? btn('resetLabel', 'Reset label position', 'data-id="' + esc(id) + '"') : '') + btn('deleteSel', 'Delete link...', '', 'danger');
+    if (isEdit()) h += '<div class="sub">Tip: drag the link\'s label on the map to move it out of the way (per map).</div>';
     h += '</div><h3>Wires</h3><table class="t"><tr><th>#</th><th>A port</th><th>B port</th><th>Status</th><th></th></tr>' +
       l.wires.map((w) => '<tr><td>' + lnk('wire', w.id, w.number) + '</td><td>' + esc(w.aPortId ? idx.ports[w.aPortId].label : '-') + '</td><td>' + esc(w.bPortId ? idx.ports[w.bPortId].label : '-') + '</td><td>' +
         (isEdit() ? '<select data-f="wstatus" data-t="' + esc(w.id) + '">' + opts(M.WIRE_STATUS.map((s) => [s, s]), w.status) + '</select>' : esc(w.status)) + '</td><td><button data-act="trace" data-kind="wire" data-id="' + esc(w.id) + '">Trace</button></td></tr>').join('') + '</table>';
@@ -1217,6 +1225,13 @@
     }
   }
 
+  /* hide an item (and, for a group or rack, everything shown inside it) from the current map only; nothing is deleted from the project */
+  function removeFromThisMap(id) {
+    const mid = curMap().id, gone = {}; gone[id] = true;
+    M.descendants(S.p, id).forEach((d) => { gone[d.id] = true; });
+    commit('Remove from map', (p) => { p.placements = p.placements.filter((q) => !(q.mapId === mid && gone[q.refId])); });
+    renderAll();
+  }
   async function deleteSelection() {
     const sel = S.sel; if (!sel) return;
     if (sel.kind === 'cable') {
@@ -1231,6 +1246,20 @@
     }
     if (sel.kind !== 'group' && sel.kind !== 'object') return;
     const c = M.findContainer(S.p, sel.id), kids = M.containerChildren(S.p, sel.id);
+    // shown on several maps: deleting it here must not silently delete it everywhere
+    const onMaps = M.mapsFor(S.p, sel.kind, sel.id);
+    if (onMaps.length > 1 && onMaps.indexOf(S.mapId) >= 0) {
+      const names = onMaps.map((m) => (S.p.maps.find((x) => x.id === m) || {}).name).filter(Boolean);
+      const where = await openDialog({
+        title: 'Delete ' + c.item.name,
+        render: () => ({
+          body: '<p><b>' + esc(c.item.name) + '</b> is shown on ' + onMaps.length + ' maps (' + esc(names.join(', ')) + ').</p><p>Remove it from <b>this map only</b> (it and its connections stay on the other maps), or <b>delete it everywhere</b>?</p>',
+          buttons: [{ key: 'no', label: 'Cancel' }, { key: 'here', label: 'Remove from this map only', cls: 'primary' }, { key: 'all', label: 'Delete everywhere...', cls: 'danger' }]
+        }), onButton: (k, cx) => cx.close(k)
+      });
+      if (!where || where === 'no') return;
+      if (where === 'here') { S.sel = null; removeFromThisMap(sel.id); return; }
+    }
     let mode = 'delete';
     if (kids.length) {
       const choice = await openDialog({
@@ -1860,7 +1889,7 @@
         case 'clearTrace': clearTrace(); break;
         case 'fitTrace': fitTrace(); break;
         case 'addToMap': commit('Add to map', (p) => { const pos = viewCentre(); B.placeItem(p, curMap().id, d.kind, d.id, pos.x, pos.y, true); }); break;
-        case 'removeFromMap': commit('Remove from map', (p) => { p.placements = p.placements.filter((q) => !(q.mapId === curMap().id && q.refId === d.id)); }); break;
+        case 'removeFromMap': removeFromThisMap(d.id); break;
         case 'deleteSel': deleteSelection(); break;
         case 'duplicate': if (copySelection(d.kind, d.id, true)) pasteStart(); break;
         case 'deleteCable': { S.sel = { kind: 'cable', id: d.id }; deleteSelection(); break; }
@@ -1885,6 +1914,7 @@
           if (g && g !== true) { S.sel = { kind: 'pgroup', id: g.id }; renderAll(); }
           break;
         }
+        case 'resetLabel': commit('Reset label position', (p) => M.setLinkLabelOffset(p, d.id, curMap().id, 0, 0)); break;
         case 'moveToMap': moveToMap(d.kind, d.id); break;
         case 'unlinkPGroup': commit('Unlink port groups', (p) => M.unlinkPortGroup(p, d.id)); break;
         case 'deletePGroup': { const f = M.findPortGroup(S.p, d.id), oid = f && f.obj.id; commit('Delete port group', (p) => M.deletePortGroup(p, d.id)); if (oid) { S.sel = { kind: 'object', id: oid }; renderAll(); } break; }

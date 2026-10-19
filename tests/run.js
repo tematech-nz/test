@@ -176,6 +176,23 @@ test('compact file form: straight panels as a flag, empty optional fields left o
   const o3 = M.importProject(JSON.stringify(v3));
   assert.strictEqual(o3.migratedFrom, 3); assert.strictEqual(o3.project.internalMappings.length, p.internalMappings.length);
 });
+test('fixed link labels can be moved per map; offsets render with a leader line, survive export/import, reset clears them', () => {
+  const p = M.createProject('lab'), m1 = p.maps[0].id;
+  const a = B.addObjectPlaced(p, m1, { type: 'patchpanel', name: 'A', portCount: 8, straight: true }, 40, 40);
+  const b = B.addObjectPlaced(p, m1, { type: 'patchpanel', name: 'B', portCount: 8, straight: true }, 40, 300);
+  const link = M.addFixedLink(p, { aObjectId: a.id, bObjectId: b.id, wireCount: 2, mapping: 'sequential' });
+  const svgDefault = R.renderMap(p, m1, { mode: 'edit' }).content;
+  assert.ok(svgDefault.indexOf('data-linklabel="' + link.id + '"') > 0, 'label has a drag handle in edit mode');
+  assert.ok(R.renderMap(p, m1, { mode: 'view' }).content.indexOf('data-linklabel') < 0 && R.svgDocument(p, m1).indexOf('data-linklabel') < 0, 'no handle in view mode or exports');
+  const x0 = +/data-linklabel="[^"]*"[^>]* x="([-\d.]+)"/.exec(svgDefault)[1];
+  M.setLinkLabelOffset(p, link.id, m1, 120, 40);
+  const svg = R.renderMap(p, m1, { mode: 'edit' }).content;
+  assert.strictEqual(+/data-linklabel="[^"]*"[^>]* x="([-\d.]+)"/.exec(svg)[1], x0 + 120);
+  assert.ok(svg.indexOf('stroke-dasharray="3 2"') > 0, 'leader line to the default spot');
+  assert.deepStrictEqual(M.importProject(M.exportProject(p)).project.fixedLinks[0].labelAt[m1], [120, 40]);
+  M.setLinkLabelOffset(p, link.id, m1, 0, 0);
+  assert.strictEqual(p.fixedLinks[0].labelAt, undefined, 'reset removes it');
+});
 test('compact form keeps non-straight and partial mappings explicit', () => {
   const p = M.createProject('x');
   const pp = M.addObject(p, { type: 'patchpanel', name: 'Partial', portCount: 4, straight: false });
