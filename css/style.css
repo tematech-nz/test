@@ -208,3 +208,5 @@ body.on-all #editBanner { background: #546e7a; }
 .list-item.dragging { opacity: .55; background: #fff3c4; }
 .list-item.drop-before { box-shadow: 0 -3px 0 0 #e65100; }
 .list-item.drop-after { box-shadow: 0 3px 0 0 #e65100; }
+
+.trace-net { display: flex; align-items: center; gap: 6px; margin: 6px 0; font-size: 13px; cursor: pointer; }

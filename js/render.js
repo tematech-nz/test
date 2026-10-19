@@ -284,7 +284,7 @@
         }
       });
       o += '<path d="' + d + '" stroke="transparent" stroke-width="16" fill="none" data-kind="link" data-id="' + esc(l.id) + '"/>';
-      if (isHi) o += '<path d="' + d + '" stroke="' + HI + '" stroke-width="11" fill="none" opacity="0.7" pointer-events="none"/>';
+      if (isHi) o += '<path d="' + d + '" stroke="' + HI + '" stroke-width="11" fill="none" opacity="' + (hl.soft && hl.soft[l.id] ? '0.32' : '0.7') + '" pointer-events="none"/>';
       o += '<path d="' + d + '" stroke="' + (isSel ? SEL : '#37474f') + '" stroke-width="6" fill="none" stroke-linecap="round" pointer-events="none"/>';
       o += '<path d="' + d + '" stroke="#ffffff" stroke-width="1.6" stroke-dasharray="7 5" fill="none" pointer-events="none"/>';
       var lab = '', tw = label.length * 5.8 + 8, lo = (l.labelAt && l.labelAt[mapId]) || [0, 0], movable = editing && !exporting;
@@ -322,7 +322,7 @@
       }
       var o = '<g data-kind="cable" data-id="' + esc(c.id) + '"' + (dim ? ' opacity="0.12"' : '') + '>';
       o += '<path d="' + d + '" stroke="transparent" stroke-width="12" fill="none" data-kind="cable" data-id="' + esc(c.id) + '"/>';
-      if (isHi) o += '<path d="' + d + '" stroke="' + HI + '" stroke-width="8" fill="none" opacity="0.7" pointer-events="none"/>';
+      if (isHi) o += '<path d="' + d + '" stroke="' + HI + '" stroke-width="8" fill="none" opacity="' + (hl.soft && hl.soft[c.id] ? '0.32' : '0.7') + '" pointer-events="none"/>'; // network-only members are softer than the route itself
       o += '<path d="' + d + '" stroke="#37474f" stroke-width="' + (isSel ? 5.5 : 4) + '" fill="none" stroke-linecap="round" opacity="0.55" pointer-events="none"/>'; // outline keeps white/yellow cables visible
       o += '<path d="' + d + '" stroke="' + (isSel ? SEL : esc(c.color)) + '" stroke-width="' + (isSel ? 3.5 : 2.4) + '" fill="none" stroke-linecap="round" pointer-events="none"/>';
       if (exporting || isSel || isHi || !(a && b)) {

@@ -132,6 +132,11 @@ Try it: File -> Load demo project (two rooms, a fixed link between racks, a wall
   (or its red x) removes just the copy.
 - **See on full map**: while a trace is shown on an ordinary map, the trace panel has a **See on full map** button that opens the All items overview with the whole route highlighted (and a **Back to <map>** button there).
 - **Map order**: in edit mode every map in the map list has a dotted grab handle on its left; drag it up or down to change the order (an orange line shows where it will land). The "All items" lid always stays on top.
+- **Show all links in this network** (checkbox in the trace panel): besides the route, highlights - more softly - everything else in the same network as
+  the ends of the trace. A switch carries the network to all its ports and connections; with **port isolation** an access port only reaches the
+  uplinks and what lies beyond them (selecting the uplink side shows everything). Routers end a network: tracing a cable between one router's LAN
+  and another's **WAN** shows everything on the **downstream router's LAN**, and a LAN never leaks across a router into the WAN side. It works across maps
+  (open the overview with "See on full map" to see it all).
 - **Delete vs remove from map**: deleting an item that is shown on more than one map asks whether to **remove it from this map only** (it and its
   connections stay on the other maps; a group or rack is removed together with what is shown inside it) or delete it everywhere.
 - **Fixed link labels** can be dragged out of the way in edit mode (per map; a dashed leader line shows where the label belongs, "Reset label

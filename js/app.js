@@ -156,6 +156,7 @@
       const idx = M.buildIndex(S.p);
       const ok = { port: idx.ports, cable: idx.cables, link: idx.links, wire: idx.wires }[t.kind];
       S.trace = ok && ok[t.id] ? T.traceTarget(S.p, t) : null;
+      applyTraceNetwork();
     }
     S.issues = S.showIssues ? allIssues() : S.issues;
     renderAll();
@@ -745,6 +746,7 @@
     addToMap: 'Show this item on the current map (the same record, not a copy)',
     removeFromMap: 'Hide this item from the current map only; the equipment and its connections stay in the project',
     startPatchFrom: 'Start one patch cable at this port (hotkey W): click the other port on the map; the new cable then stays selected so you can set its colour',
+    traceNet: 'Also highlight everything else in the same network as the ends of this trace (softer than the route). A switch carries the network to all its ports - except port isolation, where an access port only reaches the uplinks and what lies beyond. Routers end a network; behind a router WAN port it shows the LAN side of that router.',
     clearTrace: 'Remove the trace highlight and return to the normal map',
     seeOnFullMap: 'Open the All items overview (every map together) with the whole route highlighted',
     backFromFullMap: 'Return to the map you came from; the trace stays',
@@ -1010,7 +1012,20 @@
   function startTrace(kind, id) {
     S.trace = T.traceTarget(S.p, { kind: kind, id: id });
     if (!S.trace.traces.length) { S.trace = null; toast('Nothing to trace: no mapped terminations', true); return; }
+    applyTraceNetwork();
     showTab('trace'); openRight(); renderAll(); showTab('trace');
+  }
+  /* "Show all links in this network": add the rest of the network of the trace's ends to the highlight (softer than the route itself) */
+  function applyTraceNetwork() {
+    const tr = S.trace; if (!tr) return;
+    tr.base = tr.base || tr.highlight;
+    if (!S.traceNet) { tr.highlight = tr.base; return; }
+    const nh = T.highlightSets(S.p, NM.topology.networkTraces(S.p, tr.traces)), merged = { objects: {}, ports: {}, cables: {}, links: {}, wires: {}, soft: {} };
+    ['objects', 'ports', 'cables', 'links', 'wires'].forEach((k) => {
+      Object.keys(tr.base[k]).forEach((id) => { merged[k][id] = true; });
+      Object.keys(nh[k]).forEach((id) => { merged[k][id] = true; if (!tr.base[k][id] && k !== 'objects') merged.soft[id] = true; });
+    });
+    tr.highlight = merged;
   }
   function clearTrace() { S.trace = null; renderAll(); showTab('details'); }
   function renderTracePane() {
@@ -1021,6 +1036,7 @@
     const title = t.kind === 'port' ? M.portName(S.p, t.id, idx) : t.kind === 'cable' ? idx.cables[t.id].name : t.kind === 'link' ? idx.links[t.id].name + ' (all wires)' : M.wireName(idx.wireLink[t.id], idx.wires[t.id]);
     let h = '<h3>Trace: ' + esc(title) + '</h3><div class="btn-row">' + btn('clearTrace', 'Clear trace', '', 'primary') + btn('fitTrace', 'Fit to path') +
       (M.allMap(S.p) && M.realMaps(S.p).length > 1 ? (onAll() ? (S.prevMapId && S.p.maps.some((m) => m.id === S.prevMapId) ? btn('backFromFullMap', 'Back to ' + S.p.maps.find((m) => m.id === S.prevMapId).name) : '') : btn('seeOnFullMap', 'See on full map')) : '') + '</div>';
+    h += '<label class="trace-net" title="' + esc(TIPS.traceNet) + '"><input type="checkbox" data-act="traceNet"' + (S.traceNet ? ' checked' : '') + '> Show all links in this network</label>';
     const many = S.trace.traces.length > 1;
     S.trace.traces.forEach((tr, i) => {
       const lines = T.describe(S.p, tr);
@@ -1955,6 +1971,7 @@
         case 'trace': startTrace(d.kind, d.id); break;
         case 'clearTrace': clearTrace(); break;
         case 'fitTrace': fitTrace(); break;
+        case 'traceNet': S.traceNet = !!a.checked; applyTraceNetwork(); renderAll(); showTab('trace'); break;
         case 'seeOnFullMap': seeOnFullMap(); break;
         case 'backFromFullMap': backFromFullMap(); break;
         case 'addToMap': commit('Add to map', (p) => { const pos = viewCentre(); B.placeItem(p, curMap().id, d.kind, d.id, pos.x, pos.y, true); }); break;

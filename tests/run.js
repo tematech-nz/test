@@ -1500,6 +1500,40 @@ test('All items overview map: appears with 2+ maps, ghosts of everything, positi
   p.maps = p.maps.filter(m => m.id !== m2); p.placements = p.placements.filter(q => q.mapId !== m2);
   assert.strictEqual(M.syncAllMap(p), false); assert.strictEqual(M.realMaps(p).length, 1);
 });
+test('show all links in this network: switches flood it, port isolation limits it, a router WAN port leads to the downstream LAN', () => {
+  const TP = NM.topology, TR = NM.trace;
+  const mk = (p, t, n, o) => M.addObject(p, Object.assign({ type: t, name: n }, o));
+  const cable = (p, a, b) => M.addPatchCable(p, { aPortId: a, bPortId: b });
+  const names = (p, ids) => ids.map((id) => p.patchCables.find((c) => c.id === id).name).sort();
+  const netCables = (p, cableId) => { const h = TR.highlightSets(p, TP.networkTraces(p, TR.traceTarget(p, { kind: 'cable', id: cableId }).traces)); return Object.keys(h.cables); };
+  // 1. a plain switch: every connection on it is in the network
+  let p = M.createProject('n1');
+  let sw = mk(p, 'switch', 'SW', { portCount: 8 }), rt = mk(p, 'router', 'R', { wanPorts: 1, lanPorts: 2 });
+  const pcs = [1, 2, 3].map((i) => mk(p, 'generic', 'PC' + i, { portCount: 1 }));
+  const cr = cable(p, rt.ports.find(x => x.role === 'lan').id, sw.ports[7].id), cs = pcs.map((pc, i) => cable(p, pc.ports[0].id, sw.ports[i].id));
+  assert.deepStrictEqual(netCables(p, cs[0].id).sort(), [cr.id, cs[0].id, cs[1].id, cs[2].id].sort(), 'all ports/cables of a non-isolated switch');
+  // 2. port isolation: an access port reaches only the uplink side
+  p = M.createProject('n2');
+  sw = mk(p, 'switch', 'SW', { portCount: 8, uplinkPorts: 1, portIsolation: true }); rt = mk(p, 'router', 'R', { wanPorts: 1, lanPorts: 2 });
+  const acc = sw.ports.filter(x => x.role !== 'uplink'), up = sw.ports.find(x => x.role === 'uplink');
+  const q = [1, 2].map((i) => mk(p, 'generic', 'Q' + i, { portCount: 1 }));
+  const cu = cable(p, rt.ports.find(x => x.role === 'lan').id, up.id), ca = q.map((pc, i) => cable(p, pc.ports[0].id, acc[i].id));
+  assert.deepStrictEqual(netCables(p, ca[0].id).sort(), [ca[0].id, cu.id].sort(), 'an isolated access port: itself, the uplink and what lies beyond - not the other access port');
+  assert.deepStrictEqual(netCables(p, cu.id).sort(), [cu.id, ca[0].id, ca[1].id].sort(), 'the uplink side sees everything on the switch');
+  // 3. LAN of one router into the WAN of another: the downstream LAN is the network
+  p = M.createProject('n3');
+  const up1 = mk(p, 'router', 'Up', { wanPorts: 1, lanPorts: 2 }), down = mk(p, 'router', 'Down', { wanPorts: 1, lanPorts: 2 });
+  const upPc = mk(p, 'generic', 'UpPC', { portCount: 1 }), dPc = mk(p, 'generic', 'DownPC', { portCount: 1 }), dsw = mk(p, 'switch', 'DownSW', { portCount: 4 }), dPc2 = mk(p, 'generic', 'DownPC2', { portCount: 1 });
+  const lan = (r, i) => r.ports.filter(x => x.role === 'lan')[i].id;
+  const link = cable(p, lan(up1, 0), down.ports.find(x => x.role === 'wan').id), cUp = cable(p, upPc.ports[0].id, lan(up1, 1));
+  const cd1 = cable(p, lan(down, 0), dsw.ports[0].id), cd2 = cable(p, dPc.ports[0].id, dsw.ports[1].id), cd3 = cable(p, dPc2.ports[0].id, dsw.ports[2].id);
+  const got = netCables(p, link.id);
+  assert.ok([link.id, cd1.id, cd2.id, cd3.id].every((id) => got.indexOf(id) >= 0), 'the downstream router LAN is highlighted: ' + names(p, got));
+  assert.ok(got.indexOf(cUp.id) < 0, 'the upstream LAN is not');
+  // an end device alone: its own network only
+  const gotPc = netCables(p, cd2.id);
+  assert.ok(gotPc.indexOf(cd1.id) >= 0 && gotPc.indexOf(cd3.id) >= 0 && gotPc.indexOf(link.id) < 0, 'a LAN does not cross the router into the WAN side');
+});
 test('moveMap reorders the ordinary maps; the overview map stays at the end and keeps working', () => {
   const p = M.createProject('mm'), m1 = p.maps[0].id, mk = (n) => { const id = M.uid('map'); p.maps.push({ id: id, name: n, location: '', viewport: { x: 0, y: 0, zoom: 1 } }); return id; };
   const b = mk('B'), c = mk('C');

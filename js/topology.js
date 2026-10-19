@@ -158,6 +158,50 @@
   }
 
   /*
+   * "Show all links in this network": the connections that share a network with the ends of a trace, as a list of physical traces
+   * (feed them to trace.highlightSets). A network is the Layer-2 domain of an end port: switches flood it (port isolation honoured:
+   * from an access port of an isolated switch only its uplinks and what lies beyond them), routers, devices and the Internet end it
+   * (their own link is part of it, nothing behind them). A router's WAN port leads downstream: the network behind a WAN port is the
+   * LAN side of that router, so tracing a cable between one router's LAN and another's WAN shows everything on the downstream LAN.
+   */
+  function networkTraces(p, traces, graph) {
+    graph = graph || buildGraph(p, {});
+    var idx = M.buildIndex(p), linkOfPort = {}, out = [], seen = {};
+    graph.links.forEach(function (l) { l.paths.forEach(function (e) { linkOfPort[e.aPortId] = l; linkOfPort[e.bPortId] = l; }); });
+    function addLink(l) { if (seen[l.id]) return; seen[l.id] = true; l.paths.forEach(function (e) { out.push(e.trace); }); }
+    function flood(startNode, inLink) {
+      var done = {}, queue = [{ n: startNode, l: inLink }];
+      while (queue.length) {
+        var c = queue.shift(), key = c.n + '|' + (c.l ? c.l.id : '');
+        if (done[key]) continue; done[key] = true;
+        var node = graph.nodes[c.n];
+        if (!node || node.type !== 'switch') continue; // only switches carry the network further
+        (graph.adj[c.n] || []).forEach(function (a) {
+          if (a.link === c.l || !canPass(graph, c.n, c.l, a.link, '')) return;
+          addLink(a.link); queue.push({ n: a.to, l: a.link });
+        });
+      }
+    }
+    function domainOf(portId) {
+      var o = idx.portObj[portId], l = linkOfPort[portId];
+      if (!o || !l) return;
+      addLink(l);
+      if (o.type === 'switch') flood(o.id, l);
+      else { var far = l.a === o.id ? l.b : l.a; flood(far, l); }
+    }
+    traces.forEach(function (tr) {
+      tr.path.forEach(function (s) {
+        if (s.type !== 'port') return;
+        var o = idx.portObj[s.id], pt = idx.ports[s.id];
+        if (!o || !graph.nodes[o.id]) return; // passive panel ports are in the middle of the route, not its ends
+        if (o.type === 'router' && pt.role === 'wan') o.ports.forEach(function (q) { if (q.role === 'lan' && linkOfPort[q.id]) domainOf(q.id); });
+        else domainOf(s.id);
+      });
+    });
+    return out;
+  }
+
+  /*
    * Route optimisation: a physical route between two devices passes through panels and sockets (device > panel > panel > panel >
    * device). When two non-adjacent ones on that route are also joined directly by a fixed link that still has free wires
    * (spare or unused), the route could skip the panels in between. Returns one suggestion per route, biggest saving first.
@@ -372,6 +416,6 @@
     return out;
   }
 
-  NM.topology = { segments: segments, networkIssues: networkIssues, effectiveIp: effectiveIp, networkColorFor: networkColorFor, routeShortcuts: routeShortcuts, networkCables: networkCables, canPass: canPass, buildGraph: buildGraph, reachTree: reachTree, allPaths: allPaths, subnetOf: subnetOf, PASSIVE: PASSIVE, TERMINAL: TERMINAL };
+  NM.topology = { segments: segments, networkIssues: networkIssues, effectiveIp: effectiveIp, networkColorFor: networkColorFor, networkTraces: networkTraces, routeShortcuts: routeShortcuts, networkCables: networkCables, canPass: canPass, buildGraph: buildGraph, reachTree: reachTree, allPaths: allPaths, subnetOf: subnetOf, PASSIVE: PASSIVE, TERMINAL: TERMINAL };
   if (typeof module !== 'undefined' && module.exports) module.exports = NM.topology;
 })(typeof window !== 'undefined' ? window : globalThis);

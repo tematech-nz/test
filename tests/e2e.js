@@ -365,6 +365,31 @@ const ok = (m) => console.log('  ok   ' + m);
     await page.click('#btnUndo'); await page.click('#btnUndo');
   });
 
+  await step('trace: "Show all links in this network" highlights the rest of the network, softer than the route', async () => {
+    const ids = await page.evaluate(() => {
+      const A = NetMap.app, B = NetMap.builder, M = NetMap.model, out = {};
+      A.commit('net setup', (p) => {
+        const mid = A.S.mapId;
+        const sw = B.addObjectPlaced(p, mid, { type: 'switch', name: 'NET-SW', portCount: 8 }, 9000, 40);
+        const pcs = [0, 1, 2].map((i) => B.addObjectPlaced(p, mid, { type: 'generic', name: 'NET-PC' + i, portCount: 1 }, 9000 + i * 160, 260));
+        out.cables = pcs.map((pc, i) => M.addPatchCable(p, { aPortId: pc.ports[0].id, bPortId: sw.ports[i].id }).id);
+      });
+      return out;
+    });
+    await page.evaluate((i) => NetMap.app.api.startTrace('cable', i.cables[0]), ids);
+    await page.waitForTimeout(150);
+    const count = () => page.evaluate(() => { const h = NetMap.app.S.trace.highlight; return { cables: Object.keys(h.cables).length, soft: Object.keys(h.cables).filter((id) => h.soft && h.soft[id]).length }; });
+    assert.deepStrictEqual(await count(), { cables: 1, soft: 0 }, 'just the route to begin with');
+    await page.click('#tracePane input[data-act="traceNet"]');
+    await page.waitForTimeout(150);
+    assert.deepStrictEqual(await count(), { cables: 3, soft: 2 }, 'the other two cables on the switch join, softly');
+    assert.ok(await page.isChecked('#tracePane input[data-act="traceNet"]'), 'checkbox stays on');
+    await page.click('#tracePane input[data-act="traceNet"]');
+    assert.deepStrictEqual(await count(), { cables: 1, soft: 0 });
+    await page.evaluate(() => document.querySelector('#tracePane button[data-act="clearTrace"]').click());
+    await page.click('#btnUndo');
+  });
+
   await step('hidden navigation stays hidden when clicking the map or changing mode', async () => {
     await page.click('#btnMenu');
     assert.ok(!(await page.isVisible('#left')));
