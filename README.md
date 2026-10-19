@@ -1,8 +1,8 @@
 # NetMap
 
-Offline, backend-less documentation tool for physical network cabling: groups, racks, patch panels,
-switches, wall sockets, fixed multi-wire links, individual patch cables, and end-to-end path tracing across maps.
-It documents cabling; it does not discover or monitor live networks.
+Offline, backend-less physical network mapping tool: document groups, racks, patch panels, switches, wall sockets,
+fixed multi-wire links and individual patch cables, trace any connection end to end across maps, and draw to-scale floor
+plans with your equipment linked in. It documents cabling; it does not discover or monitor live networks.
 
 ## Install and start
 

@@ -1,7 +1,7 @@
 {
   "name": "netmap",
   "version": "1.0.0",
-  "description": "Offline physical network cabling documentation and tracing tool",
+  "description": "Offline, backend-less physical network mapping tool: racks, patch panels, cables, end-to-end tracing and floor plans",
   "private": true,
   "scripts": {
     "stamp": "node tools/version.js",
