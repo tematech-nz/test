@@ -13,8 +13,7 @@
   var EPS = 1; // cm
   var KINDS = [['wall', 'Wall'], ['door', 'Door'], ['window', 'Window'], ['furniture', 'Furniture (box)']];
   function newId(prefix) {
-    if (NM.model && NM.model.uid) return NM.model.uid(prefix);
-    return prefix + '_' + Math.random().toString(16).slice(2, 18);
+    return NM.uuid.make(prefix);
   }
   function validKind(k) { return KINDS.some(function (x) { return x[0] === k; }); }
 

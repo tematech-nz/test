@@ -23,15 +23,9 @@
 
   function now() { return new Date().toISOString(); }
 
-  function uid(prefix) {
-    var s = '';
-    if (typeof crypto !== 'undefined' && crypto.randomUUID) {
-      s = crypto.randomUUID().replace(/-/g, '').slice(0, 16);
-    } else {
-      for (var i = 0; i < 16; i++) s += Math.floor(Math.random() * 16).toString(16);
-    }
-    return prefix + '_' + s;
-  }
+  /* ids come from js/uuid.js only (collision-checked, one instance) */
+  if (!NM.uuid && typeof require === 'function') require('./uuid.js');
+  function uid(prefix) { return NM.uuid.make(prefix); }
 
   function pad3(n) { var s = String(n); while (s.length < 3) s = '0' + s; return s; }
   function clone(o) { return JSON.parse(JSON.stringify(o)); }
@@ -1228,6 +1222,7 @@
     var d = clone(data), v = d.schemaVersion || 0, from = v;
     if (v > SCHEMA_VERSION) throw new Error('File uses schema version ' + v + ', newer than this app (' + SCHEMA_VERSION + ')');
     while (v < SCHEMA_VERSION) { d = MIGRATIONS[v](d); v = d.schemaVersion; }
+    NM.uuid.seed(d); // new ids must never collide with anything in the file
     expandProject(d);
     normalizeGhosts(d);
     if (!d.id) d.id = uid('prj');

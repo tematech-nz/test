@@ -1488,6 +1488,37 @@ const ok = (m) => console.log('  ok   ' + m);
     await page.selectOption('#mapSelect', await page.evaluate(() => NetMap.app.S.p.maps[0].id)); await page.waitForTimeout(100);
   });
 
+  await step('floor plan: tracing image - add, transparency, scale to size line, not saved', async () => {
+    const fid = await page.evaluate(() => { let id; NetMap.app.commit('Add floor', (p) => { const mm = NetMap.model.addMap(p, { name: 'E2E Trace', kind: 'floor' }); mm.viewport = { x: 60, y: 120, zoom: 0.4 }; id = mm.id; }); return id; });
+    await page.selectOption('#mapSelect', fid); await page.waitForTimeout(150);
+    const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==', 'base64');
+    await page.setInputFiles('#bgInput', { name: 'room.png', mimeType: 'image/png', buffer: png });
+    await page.waitForSelector('#vp image');
+    const wid = () => page.evaluate(() => parseFloat(document.querySelector('#vp image').getAttribute('width')));
+    const w0 = await wid();
+    assert.ok(w0 > 100);
+    await page.evaluate(() => { const r = document.querySelector('[data-floorbgop]'); r.value = '20'; r.dispatchEvent(new Event('input', { bubbles: true })); });
+    assert.strictEqual(await page.evaluate(() => document.querySelector('#vp image').getAttribute('opacity')), '0.2');
+    const org = await page.evaluate(() => { const v = NetMap.app.S.p.maps.find((m) => m.id === NetMap.app.S.mapId).viewport; const r = document.getElementById('canvas').getBoundingClientRect(); return { x: r.left + v.x, y: r.top + v.y, z: v.zoom }; });
+    const click = async (cm) => { const x = org.x + cm[0] * org.z, y = org.y + cm[1] * org.z; await page.mouse.move(x, y); await page.mouse.click(x, y); };
+    await page.click('[data-floortool="calib"]'); await click([300, 300]); await click([800, 300]); // 500 cm on screen
+    await page.fill('#dlg input[name="len"]', '10'); await page.click('#dlg button[data-btn="ok"]'); await page.waitForTimeout(100);
+    const w1 = await wid();
+    assert.ok(Math.abs(w1 / w0 - 2) < 0.01, 'image doubled: ' + w0 + ' -> ' + w1);
+    assert.ok(!JSON.stringify(await page.evaluate(() => NetMap.app.S.p)).includes('blob:'), 'image is not in the project');
+    // dropping an image works too
+    await page.click('[data-act="floorBgRemove"]'); assert.strictEqual(await page.locator('#vp image').count(), 0);
+    await page.evaluate(async (b64) => {
+      const bin = atob(b64), u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+      const dt = new DataTransfer(); dt.items.add(new File([u], 'd.png', { type: 'image/png' }));
+      document.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }));
+    }, 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==');
+    await page.waitForSelector('#vp image');
+    await page.click('[data-floortool="select"]');
+    await page.evaluate((id) => { NetMap.app.commit('rm', (p) => { p.maps = p.maps.filter((m) => m.id !== id); }); }, fid);
+    await page.selectOption('#mapSelect', await page.evaluate(() => NetMap.app.S.p.maps[0].id)); await page.waitForTimeout(100);
+  });
+
   await step('autosave survives a refresh', async () => {
     await page.click('#btnMode'); // back to view mode flushes the save
     const name = await page.evaluate(() => NetMap.app.S.p.name);

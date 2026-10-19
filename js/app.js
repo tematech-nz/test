@@ -499,7 +499,7 @@
         let dx = pt.x - d.start.x, dy = pt.y - d.start.y;
         if (Math.abs(dx) + Math.abs(dy) < 2 && !d.moved) return;
         d.moved = true;
-        if (d.kind === 'fpoint' || d.kind === 'flink') { floorDragMove(d, pt); return; }
+        if (d.kind === 'fpoint' || d.kind === 'flink' || d.kind === 'fbg') { floorDragMove(d, pt); return; }
         if (d.kind === 'label') { M.setLinkLabelOffset(S.p, d.linkId, d.mapId, d.ox + dx, d.oy + dy); scheduleRender(); return; }
         if (d.kind === 'move') {
           const p0 = d.items[0], fc = M.findContainer(S.p, p0.q.refId);
@@ -543,6 +543,7 @@
   function finishDrag() {
     const d = S.drag; S.drag = null;
     const slot = S.drop; S.drop = null;
+    if (d.kind === 'fbg') return; // the tracing image is not part of the project: no undo step
     if (!d.moved) { if (d.kind === 'label') select({ kind: 'link', id: d.linkId }); else if (d.kind === 'fpoint') select({ kind: 'fpoint', id: d.id }); else if (d.kind === 'flink') select({ kind: 'flink', id: d.id }); return; }
     S.undo.push({ label: d.kind === 'label' ? 'Move label' : (d.kind === 'fpoint' || d.kind === 'flink' ? 'Move on floor plan' : (d.kind === 'move' ? 'Move' : 'Resize')), snap: d.snap }); if (S.undo.length > 100) S.undo.shift(); S.redo = [];
     const gq = S.p.placements.find((x) => x.id === d.plId);
@@ -631,7 +632,7 @@
     const th = $('toolHint');
     if (floorEditing() && (FS.place || FS.draw || FS.rect || FS.tool !== 'select')) {
       th.hidden = false;
-      th.textContent = FS.place ? 'Click to place ' + FS.place.name + ' - R rotates it - Esc cancels (Ctrl+click keeps placing)' :
+      th.textContent = FS.tool === 'calib' ? (FS.calib ? 'Click the other end of the known length (Esc cancels)' : 'Scale to size line: click one end of something on the image with a known length (zoom in for accuracy)') : FS.tool === 'bgmove' ? 'Drag to move the tracing image' : FS.place ? 'Click to place ' + FS.place.name + ' - R rotates it - Esc cancels (Ctrl+click keeps placing)' :
         FS.tool === 'line' ? (FS.draw ? 'Line: click the next point - or type its length in metres and press Enter - Shift = 15 degree angles - Esc/Enter finishes' : 'Line: click the first point (it snaps to points and lines)') :
         FS.tool === 'rect' ? (FS.rect ? 'Rectangle: click the opposite corner (Esc cancels)' : 'Rectangle: click the first corner') : '';
       th.hidden = !th.textContent;
@@ -1322,17 +1323,23 @@
   const FL = NM.floor;
   const isFloor = () => M.isFloorMap(curMap());
   const floorOf = () => FL.ensure(curMap());
-  const FS = S.floor = { tool: 'select', kind: 'wall', snap: 10, labels: true, draw: null, rect: null, place: null, hover: null, typed: '', lastZoom: null };
+  const FS = S.floor = { tool: 'select', kind: 'wall', snap: 10, labels: true, draw: null, rect: null, place: null, hover: null, typed: '', lastZoom: null, calib: null };
+  /* tracing image per floor map: lives only in this page (never in the project, a backup or an export); gone on reload.
+     x,y = top-left corner in cm, scale = cm per image pixel */
+  const BG = {};
+  const floorBg = () => (isFloor() ? BG[curMap().id] || null : null);
   const floorEditing = () => isFloor() && S.mode === 'edit';
   function floorRenderOpts() {
     if (!isFloor()) return {};
-    const z = vpState().zoom, h = FS.hover, active = floorEditing();
+    const z = vpState().zoom, h = FS.hover, active = floorEditing(), bg = floorBg();
     return {
       zoom: z, labels: FS.labels,
       floorDraw: active && FS.draw && h ? { a: FS.draw.a, to: h, kind: FS.kind, typed: FS.typed } : null,
       floorRect: active && FS.rect && h ? { x0: FS.rect.a.x, y0: FS.rect.a.y, x1: h.x, y1: h.y, kind: FS.kind } : null,
       floorPlace: active && FS.place && h ? { x: h.x, y: h.y, w: FS.place.w, d: FS.place.d, rot: FS.place.rot, name: FS.place.name } : null,
-      floorSnap: active && h && (FS.draw || FS.rect || FS.place) ? h : null
+      floorSnap: active && h && (FS.draw || FS.rect || FS.place) ? h : null,
+      floorBg: bg ? { href: bg.href, x: bg.x, y: bg.y, w: bg.nw * bg.scale, h: bg.nh * bg.scale, opacity: bg.opacity } : null,
+      floorCalib: active && FS.calib ? { a: FS.calib.a, to: FS.calib.b || h } : null
     };
   }
   /* zoom changed: labels and handles are sized in screen pixels, so a floor plan redraws; also the scale bar */
@@ -1345,7 +1352,7 @@
     bar.querySelector('span').textContent = (ns.cm >= 100 ? ns.cm / 100 + ' m' : ns.cm + ' cm');
     if (FS.lastZoom !== v.zoom) { FS.lastZoom = v.zoom; scheduleRender(); }
   }
-  function floorReset() { FS.draw = null; FS.rect = null; FS.place = null; FS.hover = null; FS.typed = ''; }
+  function floorReset() { FS.draw = null; FS.rect = null; FS.place = null; FS.hover = null; FS.typed = ''; FS.calib = null; }
   function floorTolerance() { return 10 / vpState().zoom; }
   /* where a click lands: on an existing point, on a line (which will be split there), or on the snap grid; Shift keeps 15-degree angles */
   function floorSnapPoint(pt, o) {
@@ -1375,18 +1382,23 @@
     return commit(label, (p) => fn(FL.ensure(p.maps.find((m) => m.id === id)), p));
   }
   function floorSetTool(tool, kind) {
-    FS.draw = null; FS.rect = null; FS.hover = null; FS.typed = ''; if (tool !== 'link') FS.place = null;
+    FS.draw = null; FS.rect = null; FS.hover = null; FS.typed = ''; FS.calib = null; if (tool !== 'link') FS.place = null;
     FS.tool = tool; if (kind) FS.kind = kind;
     renderAll();
   }
   function floorHover(e) {
-    if (!floorEditing() || !(FS.draw || FS.rect || FS.place)) return;
-    const pt = toMap(e.clientX, e.clientY), from = FS.draw ? FS.draw.a : (FS.rect ? FS.rect.a : null);
-    FS.hover = floorSnapPoint(pt, { from: from, shift: e.shiftKey });
+    if (!floorEditing() || !(FS.draw || FS.rect || FS.place || FS.calib)) return;
+    const pt = toMap(e.clientX, e.clientY), from = FS.draw ? FS.draw.a : (FS.rect ? FS.rect.a : (FS.calib ? FS.calib.a : null));
+    FS.hover = FS.calib ? { x: pt.x, y: pt.y, type: 'free' } : floorSnapPoint(pt, { from: from, shift: e.shiftKey });
     scheduleRender();
   }
   /* pointer down in edit mode with the select tool on a point or a link: start dragging it (anything else pans) */
   function floorPointerDown(e) {
+    if (floorEditing() && FS.tool === 'bgmove' && floorBg()) {
+      const bg = floorBg();
+      S.drag = { kind: 'fbg', start: toMap(e.clientX, e.clientY), snap: JSON.stringify(S.p), moved: false, items: [], ox: bg.x, oy: bg.y, mapId: curMap().id };
+      return true;
+    }
     if (!floorEditing() || FS.tool !== 'select' || FS.place) return false;
     const f = floorOf(), pt = toMap(e.clientX, e.clientY), hit = FL.hitTest(f, pt.x, pt.y, floorTolerance());
     if (!hit || (hit.type !== 'point' && hit.type !== 'link')) return false;
@@ -1397,6 +1409,7 @@
   }
   function floorDragMove(d, pt) {
     const f = floorOf(), dx = pt.x - d.start.x, dy = pt.y - d.start.y;
+    if (d.kind === 'fbg') { const bg = BG[d.mapId]; if (bg) { bg.x = d.ox + dx; bg.y = d.oy + dy; scheduleRender(); } return; }
     if (d.kind === 'fpoint') {
       const sp = floorSnapPoint({ x: d.ox + dx, y: d.oy + dy }, { exclude: d.id });
       const q = FL.pt(f, d.id); if (q) { q.x = sp.x; q.y = sp.y; }
@@ -1426,6 +1439,11 @@
       if (lk && lk !== true) { if (!(ev.ctrlKey || ev.metaKey)) { FS.place = null; FS.hover = null; } S.sel = { kind: 'flink', id: lk.id }; showTab('details'); renderAll(); }
       return;
     }
+    if (FS.tool === 'calib') {
+      if (!FS.calib) { FS.calib = { a: { x: pt.x, y: pt.y } }; FS.hover = { x: pt.x, y: pt.y }; renderAll(); return; }
+      if (Math.hypot(pt.x - FS.calib.a.x, pt.y - FS.calib.a.y) < 3 / vpState().zoom) return;
+      FS.calib.b = { x: pt.x, y: pt.y }; renderCanvas(); floorScaleToLine(); return;
+    }
     if (FS.tool === 'line') {
       const sp = floorSnapPoint(pt, { from: FS.draw ? FS.draw.a : null, shift: ev.shiftKey });
       if (!FS.draw) { FS.draw = { a: sp }; FS.hover = sp; FS.typed = ''; renderAll(); return; }
@@ -1444,13 +1462,42 @@
     }
     floorSelect(FL.hitTest(f, pt.x, pt.y, floorTolerance()));
   }
+  /* tracing image: pick or drop a picture of the room, size it by drawing a line of known length on it */
+  function floorLoadImage(file) {
+    if (!floorEditing()) { toast('Open a floor plan in edit mode to add a tracing image', true); return; }
+    if (!file || !/^image\//.test(file.type)) { toast('That is not an image (use PNG, JPG, WebP or SVG)', true); return; }
+    if (file.size > 40 * 1024 * 1024) { toast('Image is too large (40 MB max)', true); return; }
+    const mid = curMap().id, url = URL.createObjectURL(file), img = new Image(); // a short blob: URL keeps redraws cheap
+    img.onload = () => {
+      const nw = img.naturalWidth || 1000, nh = img.naturalHeight || 700, v = vpState(), cv = stageSize();
+      const visW = Math.max(200, (cv.w - 80) / v.zoom), sc = visW * 0.8 / nw;
+      if (BG[mid]) URL.revokeObjectURL(BG[mid].href);
+      BG[mid] = { href: url, name: file.name, nw: nw, nh: nh, scale: sc, x: (60 - v.x) / v.zoom, y: (90 - v.y) / v.zoom, opacity: 0.5 };
+      if (curMap().id === mid) { renderAll(); toast('Image added (not saved in the project). Use "Scale to size line" to match its real size'); }
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); toast('Could not read that image', true); };
+    img.src = url;
+  }
+  async function floorScaleToLine() {
+    const bg = floorBg(), c = FS.calib; if (!bg || !c || !c.b) return;
+    const dist = Math.hypot(c.b.x - c.a.x, c.b.y - c.a.y);
+    const r = await formDlg('Scale to size line', [{ k: 'len', label: 'Real length of this line (metres)', v: '', hint: 'The image is resized about the first point so the line becomes exactly this long. Your drawn plan does not move.' }], 'Scale image', '<p>The line you drew is ' + esc(FL.fmtLen(Math.round(dist))) + ' long on the plan now.</p>',
+      (o) => { const n = parseFloat(String(o.len).replace(',', '.')); return n > 0 && n < 5000 ? '' : 'Enter a length in metres, e.g. 3.2'; });
+    FS.calib = null;
+    if (r) {
+      const cm = parseFloat(String(r.len).replace(',', '.')) * 100, k = cm / dist;
+      bg.scale *= k; bg.x = c.a.x + (bg.x - c.a.x) * k; bg.y = c.a.y + (bg.y - c.a.y) * k;
+      FS.tool = 'select'; toast('Image scaled: 1 m on the image is now 1 m on the plan');
+    }
+    FS.hover = null; renderAll();
+  }
   /* keys on a floor plan: Esc, Enter, a typed length (metres), Delete, and the tool letters V L R */
   function floorKey(e) {
     if (!isFloor() || e.ctrlKey || e.metaKey || e.altKey) return false;
     const k = e.key;
     if (k === 'Escape') {
       if (FS.typed) { FS.typed = ''; renderCanvas(); return true; }
-      if (FS.draw || FS.rect || FS.place) { floorReset(); renderAll(); return true; }
+      if (FS.draw || FS.rect || FS.place || FS.calib) { floorReset(); renderAll(); return true; }
       return false;
     }
     if (!floorEditing()) return false;
@@ -1594,6 +1641,13 @@
     M.floorMaps(S.p).forEach((m) => { const lk = FL.linkOf(FL.ensure(m), id); if (lk) refs.push('<a class="lnk" data-act="goFloor" data-map="' + esc(m.id) + '" data-link="' + esc(lk.id) + '">' + esc(m.name) + '</a>'); });
     return refs.length ? fld('On floor plans', refs.join(', ')) : '';
   }
+  function floorBgToolbar() {
+    const bg = floorBg(), t = (id, label, tip) => '<button data-floortool="' + id + '" class="' + (FS.tool === id ? 'active' : '') + '" title="' + esc(tip) + '">' + label + '</button>';
+    if (!bg) return '<button data-act="floorBgPick" title="Trace over a picture of the room: pick a file, or drop an image on the plan. The picture is only used for tracing: it is not saved in the project and is gone when the page reloads.">Image...</button>';
+    return '<label class="trace-net" title="How strongly the tracing image shows"><span>Image</span> <input type="range" min="5" max="100" value="' + Math.round(bg.opacity * 100) + '" data-floorbgop style="width:90px"></label>' +
+      t('calib', 'Scale to size line', 'Click both ends of something with a known length on the image, then type its real length') + t('bgmove', 'Move image', 'Drag the image under your drawing') +
+      '<button data-act="floorBgRemove" title="Remove the tracing image (the plan stays)">Remove image</button>';
+  }
   function floorToolbar() {
     const t = (id, label, extra) => '<button data-floortool="' + id + '" class="' + (FS.tool === id && !FS.place ? 'active' : '') + '" title="' + esc(extra) + '">' + label + '</button>';
     return t('select', 'Select (V)', 'Select and drag points and links; click a line to edit it') + t('line', 'Line (L)', 'Click to start, click again for each next point; type a length in metres and press Enter; Esc/Enter finishes') +
@@ -1601,7 +1655,7 @@
       '<select data-floorkind title="What the lines you draw are">' + opts(FL.KINDS.map((k) => [k[0], k[1]]), FS.kind) + '</select><span class="sep"></span>' +
       '<button data-act="floorAddLink" title="Place a to-scale symbol for a rack, wall socket, device or group from your equipment maps">+ Add link...</button><span class="sep"></span>' +
       '<label class="trace-net" title="Snap clicks to this grid (points and lines always snap first; hold Shift for 15 degree angles)">Snap <select data-floorsnap>' + opts([['0', 'off'], ['5', '5 cm'], ['10', '10 cm'], ['25', '25 cm'], ['50', '50 cm']], String(FS.snap)) + '</select></label>' +
-      '<label class="trace-net"><input type="checkbox" data-floorlabels' + (FS.labels ? ' checked' : '') + '> Lengths</label>';
+      '<label class="trace-net"><input type="checkbox" data-floorlabels' + (FS.labels ? ' checked' : '') + '> Lengths</label><span class="sep"></span>' + floorBgToolbar();
   }
 
   async function deleteSelection() {
@@ -2123,6 +2177,7 @@
     const fixed = B.normalizeSizes(p), aligned = B.alignToGrid(p);
     if (fixed) setTimeout(() => toast('Adjusted ' + fixed + ' item(s) (too small to read, or not lined up with their rack)', false), 100);
     else if (aligned) setTimeout(() => toast('Aligned ' + aligned + ' item(s) to the grid (older project)', false), 100);
+    Object.keys(BG).forEach((k) => { URL.revokeObjectURL(BG[k].href); delete BG[k]; }); // tracing images belong to the page session, not to a project
     S.rev++; markDirty(false); S.p = p; S.mapId = firstMap().id; S.sel = null; S.trace = null; S.tool = null; S.undo = []; S.redo = []; S.issues = []; S.showIssues = false;
     saveNow(); renderAll();
     if (p.placements.some((q) => q.mapId === S.mapId)) fitMap();
@@ -2273,6 +2328,19 @@
       if (f === 'toolPreset') { if (e.target.value === 'custom') S.customColorFor = '__tool'; else { S.customColorFor = null; S.cableColor = e.target.value; } renderToolbar(); }
       else if (f === 'toolColor') { S.cableColor = e.target.value; S.customColorFor = null; renderToolbar(); }
     });
+    $('toolbar').addEventListener('input', (e) => {
+      if (!e.target.hasAttribute('data-floorbgop')) return;
+      const bg = floorBg(); if (bg) { bg.opacity = Math.min(1, Math.max(0.05, (parseInt(e.target.value, 10) || 50) / 100)); renderCanvas(); }
+    });
+    $('bgInput').onchange = (e) => { const f = e.target.files[0]; e.target.value = ''; if (f) floorLoadImage(f); };
+    const imgDrag = (e) => { const t = e.dataTransfer; return !!t && Array.prototype.some.call(t.items || [], (it) => it.kind === 'file' && /^image\//.test(it.type)); };
+    document.addEventListener('dragover', (e) => { if (imgDrag(e)) { e.preventDefault(); e.dataTransfer.dropEffect = floorEditing() ? 'copy' : 'none'; } });
+    document.addEventListener('drop', (e) => {
+      if (!imgDrag(e)) return;
+      e.preventDefault();
+      const f = Array.prototype.find.call(e.dataTransfer.files || [], (x) => /^image\//.test(x.type));
+      if (f) floorLoadImage(f);
+    });
     $('toolbar').onclick = (e) => {
       const a = e.target.closest('button'); if (!a) return;
       if (a.dataset.floortool) floorSetTool(a.dataset.floortool);
@@ -2292,6 +2360,8 @@
         case 'clearTrace': clearTrace(); break;
         case 'fitTrace': fitTrace(); break;
         case 'floorAddLink': floorAddLink(); break;
+        case 'floorBgPick': $('bgInput').click(); break;
+        case 'floorBgRemove': if (BG[curMap().id]) URL.revokeObjectURL(BG[curMap().id].href); delete BG[curMap().id]; if (FS.tool === 'calib' || FS.tool === 'bgmove') FS.tool = 'select'; FS.calib = null; renderAll(); break;
         case 'floorDelete': floorDeleteSelection(); break;
         case 'floorOpen': floorOpenItem(d.id); break;
         case 'goFloor': { switchMap(d.map, true); select({ kind: 'flink', id: d.link }); break; }

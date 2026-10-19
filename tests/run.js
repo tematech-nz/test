@@ -1,7 +1,7 @@
 'use strict';
 /* Dependency-free test runner: node tests/run.js */
 const assert = require('assert');
-require('../js/model.js'); require('../js/floor.js'); require('../js/layout.js'); require('../js/trace.js');
+require('../js/uuid.js'); require('../js/model.js'); require('../js/floor.js'); require('../js/layout.js'); require('../js/trace.js');
 require('../js/render.js'); require('../js/exporters.js'); require('../js/builder.js'); require('../js/topology.js'); require('../js/graphview.js');
 const NM = globalThis.NetMap;
 const M = NM.model, T = NM.trace, B = NM.builder, R = NM.render, X = NM.exporters;
@@ -1904,6 +1904,29 @@ test('floor plan data survives compact/expand and validates', () => {
   assert.strictEqual(mq.floor.lines.length, 4);
   assert.strictEqual(mq.floor.points.length, 4);
   assert.ok(!NM.model.validateProject(q).some((i) => i.level === 'error'));
+});
+
+test('uuid: one shared generator, collision-checked, seeded from loaded projects', () => {
+  const U = NM.uuid;
+  assert.throws(() => { delete require.cache[require.resolve('../js/uuid.js')]; require('../js/uuid.js'); }, /loaded twice/);
+  const ids = new Set(); for (let i = 0; i < 5000; i++) ids.add(U.make('x'));
+  assert.strictEqual(ids.size, 5000);
+  assert.ok(U.known([...ids][0]) && !U.known('x_nope'));
+  const n = U.seed({ a: [{ id: 'seedA_1', b: { id: 'seedA_2' } }] });
+  assert.strictEqual(n, 2); assert.ok(U.known('seedA_2'));
+  /* a forced collision is retried */
+  const real = globalThis.crypto && globalThis.crypto.getRandomValues; let calls = 0;
+  const first = U.make('c'), hex = first.slice(2);
+  if (real) {
+    const desc = Object.getOwnPropertyDescriptor(globalThis, 'crypto'), orig = globalThis.crypto.getRandomValues.bind(globalThis.crypto);
+    const bytes = hex.match(/../g).map((h) => parseInt(h, 16));
+    Object.defineProperty(globalThis, 'crypto', { value: { getRandomValues: (a) => { if (calls++ === 0) { a.set(bytes); return a; } return orig(a); } }, configurable: true });
+    const second = U.make('c');
+    assert.notStrictEqual(second, first); assert.ok(calls >= 2);
+    Object.defineProperty(globalThis, 'crypto', desc); // restore the built-in
+  }
+  const src = require('fs').readdirSync(require('path').join(__dirname, '..', 'js')).filter((f) => f !== 'uuid.js' && f.endsWith('.js'));
+  src.forEach((f) => { const s = require('fs').readFileSync(require('path').join(__dirname, '..', 'js', f), 'utf8'); assert.ok(!/randomUUID|Math\.random/.test(s), f + ' must use NetMap.uuid, not its own id generation'); });
 });
 
 console.log('\n' + passed + ' passed, ' + failed + ' failed');

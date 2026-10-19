@@ -198,6 +198,7 @@ A second kind of map (New map -> Type: Floor plan, listed under "Floor plans") f
 - While drawing a line you can type a length in metres and press Enter. Select a line to edit its type, length and angle.
 - A line whose both ends are connected to other lines cannot change length ("defined by the connected elements"): move a point instead.
 - "+ Add link..." opens a search with type filters (group, rack, wall socket, generic equipment, other). Pick an item and click the plan to place it at its real size; R rotates, Esc cancels, Ctrl+click keeps placing. Double-click a link to open the real item on its equipment map. The link only references the item: the equipment keeps living on its equipment map, and its details list the floor plans it is on.
+- Tracing image: "Image..." in the floor plan toolbar (or drag and drop a picture onto the plan) shows a floor plan scan or photo under your drawing. The "Image" slider sets its transparency, "Move image" drags it, and "Scale to size line" lets you click both ends of something of known length on the picture and type its real length: the image is resized so it matches the editor. The image is only a drawing aid: it is never stored in the project, a backup or an export, and is gone when the page reloads.
 - Cable lengths are never computed from the plan.
 
 ## Updates and unsaved changes
@@ -234,6 +235,7 @@ connectivity rules, and migration strategy.
 | --- | --- |
 | `js/model.js` | Data model, rules, validation, search, migration. No DOM. |
 | `js/trace.js` | End-to-end tracing. |
+| `js/uuid.js` | The one id generator (collision-checked, loaded once, first). All ids come from `NetMap.uuid.make(prefix)`. |
 | `js/floor.js` | Floor plan geometry engine (points, lines, splitting, locked lengths, links). |
 | `js/layout.js`, `js/render.js` | Geometry and SVG rendering (shared by screen and exports). |
 | `tools/version.js`, `tools/serve.js` | Version stamp (`version.json`, `js/version.js`) and the optional dev server. |

@@ -1,7 +1,7 @@
 # NetMap data format (schema version 5)
 
 A project is one JSON object. All records have stable, unique string IDs (prefix + random hex, for example
-`obj_9f2c...`). Names, labels and coordinates are never used as identifiers, so renaming or moving something
+`obj_9f2c...`), made by `js/uuid.js`, which refuses to hand out an id it has already generated or loaded from a file. Names, labels and coordinates are never used as identifiers, so renaming or moving something
 cannot break a connection. Files use LF line endings and are written with 2-space indentation.
 
 ## Compact form (schema 4)
@@ -100,6 +100,7 @@ A map with `"kind": "floor"` (equipment maps have no `kind`) carries a `floor` o
 
 - `lines[].kind` is `wall`, `door`, `window` or `furniture`. Lines join only at points; a point lying on a line splits it. Length is derived from the points and is locked in the UI when both ends are connected to other lines.
 - `links[]` reference a real item (`kind` `object` or `group`, `refId` its id). `x`,`y` is the centre, `w`x`d` the footprint, `rot` degrees. One link per item per plan. Deleting the item removes its links. Links never create connections or cable lengths.
+- A tracing image used while drawing a plan is never part of the data.
 - Migration 4 -> 5 adds nothing to existing maps; floor plans are simply new.
 
 ## Versioning and migration

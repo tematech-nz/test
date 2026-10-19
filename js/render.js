@@ -51,6 +51,11 @@
     var zoom = opts.zoom > 0 ? opts.zoom : 1, px = function (n) { return n / zoom; }, out = [];
     var bb = F.bounds(f) || { x: 0, y: 0, w: 800, h: 600 };
     var bx0 = Math.min(bb.x, 0) - 100, by0 = Math.min(bb.y, 0) - 100, bx1 = Math.max(bb.x + bb.w, 800) + 100, by1 = Math.max(bb.y + bb.h, 600) + 100;
+    var bgi = opts.floorBg;
+    if (bgi && !exporting) {
+      bx0 = Math.min(bx0, bgi.x - 50); by0 = Math.min(by0, bgi.y - 50); bx1 = Math.max(bx1, bgi.x + bgi.w + 50); by1 = Math.max(by1, bgi.y + bgi.h + 50);
+      out.push('<image href="' + esc(bgi.href) + '" x="' + num(bgi.x) + '" y="' + num(bgi.y) + '" width="' + num(bgi.w) + '" height="' + num(bgi.h) + '" preserveAspectRatio="none" opacity="' + num(bgi.opacity) + '" pointer-events="none"/>');
+    }
     var kindOrder = ['furniture', 'window', 'wall', 'door'];
     var gx0 = Math.floor(bx0 / 100) * 100, gy0 = Math.floor(by0 / 100) * 100, i;
     if (!exporting) { // 1 m grid (and 10 cm when zoomed in)
@@ -131,6 +136,12 @@
       var fp = opts.floorPlace;
       out.push('<g opacity="0.7" pointer-events="none" transform="rotate(' + num(fp.rot || 0) + ' ' + num(fp.x) + ' ' + num(fp.y) + ')"><rect x="' + num(fp.x - fp.w / 2) + '" y="' + num(fp.y - fp.d / 2) + '" width="' + num(fp.w) + '" height="' + num(fp.d) + '" fill="#fff59d" stroke="#e65100" stroke-width="' + num(px(2)) + '" stroke-dasharray="' + num(px(6)) + ' ' + num(px(4)) + '"/></g>' +
         '<text x="' + num(fp.x) + '" y="' + num(fp.y + Math.max(fp.w, fp.d) / 2 + fs2 * 1.2) + '" font-size="' + num(fs2) + '" text-anchor="middle" fill="#e65100" stroke="#fff" stroke-width="' + num(px(3)) + '" paint-order="stroke" font-family="sans-serif" pointer-events="none">' + esc(trunc(fp.name || '', 30)) + '</text>');
+    }
+    if (opts.floorCalib && opts.floorCalib.a && opts.floorCalib.to) {
+      var ca = opts.floorCalib.a, ct = opts.floorCalib.to, cl = Math.round(Math.sqrt(Math.pow(ct.x - ca.x, 2) + Math.pow(ct.y - ca.y, 2)));
+      out.push('<path d="M' + num(ca.x) + ' ' + num(ca.y) + 'L' + num(ct.x) + ' ' + num(ct.y) + '" stroke="#d81b60" stroke-width="' + num(px(2.5)) + '" fill="none" pointer-events="none"/>' +
+        '<circle cx="' + num(ca.x) + '" cy="' + num(ca.y) + '" r="' + num(px(5)) + '" fill="#d81b60" pointer-events="none"/><circle cx="' + num(ct.x) + '" cy="' + num(ct.y) + '" r="' + num(px(5)) + '" fill="#d81b60" pointer-events="none"/>' +
+        '<text x="' + num((ca.x + ct.x) / 2) + '" y="' + num((ca.y + ct.y) / 2 - px(10)) + '" font-size="' + num(fs2) + '" text-anchor="middle" font-weight="bold" fill="#d81b60" stroke="#fff" stroke-width="' + num(px(3)) + '" paint-order="stroke" font-family="sans-serif" pointer-events="none">' + F.fmtLen(cl) + '</text>');
     }
     if (opts.floorSnap) out.push('<circle cx="' + opts.floorSnap.x + '" cy="' + opts.floorSnap.y + '" r="' + num(px(opts.floorSnap.type === 'point' ? 8 : 6)) + '" fill="none" stroke="#00c853" stroke-width="' + num(px(2)) + '" pointer-events="none"/>');
     var b = { x: bx0, y: by0, w: bx1 - bx0, h: by1 - by0 };
