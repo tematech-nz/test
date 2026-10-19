@@ -12,7 +12,7 @@ No build step and no dependencies.
 - Or serve the folder: `npm run serve` (or `node tools/serve.js 8080`), then open http://127.0.0.1:8080/.
 - Phone: serve the folder on your LAN, or copy the folder to the phone. Use View mode on small screens.
 
-Try it: File -> Load demo project (two rooms, a fixed link between racks, a wall socket, a trace across two maps).
+Try it: File -> Load demo project: two rooms with a fixed link between racks, a trace across two maps, an Internet/router edge with IPs, a camera port group, PCs and a Wi-Fi AP, a live copy of the router on the second map, the "All items" overview, and two floor plans (walls, door, window, furniture, linked racks, socket and devices).
 
 ## Using it
 

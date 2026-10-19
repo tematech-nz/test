@@ -1929,5 +1929,19 @@ test('uuid: one shared generator, collision-checked, seeded from loaded projects
   src.forEach((f) => { const s = require('fs').readFileSync(require('path').join(__dirname, '..', 'js', f), 'utf8'); assert.ok(!/randomUUID|Math\.random/.test(s), f + ' must use NetMap.uuid, not its own id generation'); });
 });
 
+test('the showcase demo is valid, round-trips, and shows the newer features', () => {
+  const p = B.buildShowcaseProject();
+  assert.deepStrictEqual(M.validateProject(p).filter((i) => i.severity === 'error'), []);
+  assert.strictEqual(M.floorMaps(p).length, 2);
+  M.floorMaps(p).forEach((m) => { assert.ok(m.floor.lines.length >= 8 && m.floor.links.length >= 3); assert.ok(m.floor.lines.some((l) => l.kind === 'door') && m.floor.lines.some((l) => l.kind === 'window') && m.floor.lines.some((l) => l.kind === 'furniture')); });
+  assert.ok(p.objects.some((o) => o.type === 'router') && p.objects.some((o) => o.deviceKind === 'pc'));
+  assert.ok(p.objects.some((o) => (o.portGroups || []).some((g) => g.deviceKind === 'camera')));
+  assert.ok(p.placements.some((q) => q.ghost), 'a live copy');
+  assert.ok(M.allMap(p), 'overview map');
+  const q = M.migrate(JSON.parse(M.serializeProject(p))).project;
+  assert.strictEqual(q.maps.length, p.maps.length);
+  assert.strictEqual(M.floorMaps(q)[0].floor.links.length, M.floorMaps(p)[0].floor.links.length);
+});
+
 console.log('\n' + passed + ' passed, ' + failed + ' failed');
 process.exit(failed ? 1 : 0);

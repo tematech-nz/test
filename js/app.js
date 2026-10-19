@@ -2213,7 +2213,7 @@
     else if (choice === 'svg' || choice === 'png' || choice === 'pdf') exportImages(choice);
     else if (choice === 'table') showTable();
     else if (choice === 'validate') runValidate();
-    else if (choice === 'demo') { if (await confirmDlg('Load demo project', 'Replace the current project with the demo? Export a backup first if you need the current one.', 'Load demo', true)) { loadProject(B.buildDemoProject()); } }
+    else if (choice === 'demo') { if (await confirmDlg('Load demo project', 'Replace the current project with the demo? Export a backup first if you need the current one.', 'Load demo', true)) { loadProject(B.buildShowcaseProject()); } }
     else if (choice === 'new') { if (await confirmDlg('New project', 'Replace the current project with an empty one? Export a backup first if you need it.', 'Start empty', true)) loadProject(M.createProject('Untitled project')); }
     else if (choice === 'help') showHelp();
   }
@@ -2256,7 +2256,7 @@
         body: body,
         buttons: [{ key: 'demo', label: 'Load demo project' }, { key: 'x', label: 'Got it', cls: 'primary' }]
       }), onButton: (k, c) => c.close(k)
-    }).then(async (k) => { if (k === 'demo' && (!S.p.objects.length || await confirmDlg('Load demo project', 'Replace the current project with the demo? Export a backup first if you need the current one.', 'Load demo', true))) loadProject(B.buildDemoProject()); });
+    }).then(async (k) => { if (k === 'demo' && (!S.p.objects.length || await confirmDlg('Load demo project', 'Replace the current project with the demo? Export a backup first if you need the current one.', 'Load demo', true))) loadProject(B.buildShowcaseProject()); });
   }
 
   /* ---------------------------------------------------------------- wiring up */
@@ -2423,7 +2423,7 @@
         case 'newMap': mapForm(null); break;
         case 'editMap': e.stopPropagation(); mapForm(S.p.maps.find((m) => m.id === d.id)); break;
         case 'validate': runValidate(); break;
-        case 'demo': loadProject(B.buildDemoProject()); break;
+        case 'demo': loadProject(B.buildShowcaseProject()); break;
         case 'help': showHelp(); break;
         default: break;
       }

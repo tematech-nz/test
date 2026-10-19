@@ -238,6 +238,58 @@
     return p;
   }
 
+  /* the demo shown by "Load demo project": the base scenario plus a sample of the newer features (devices with IPs, a router and
+     the Internet, a pseudo-device port group, a live copy, and two floor plans with walls, door, window, furniture and linked equipment) */
+  function buildShowcaseProject() {
+    var p = buildDemoProject(), F = NM.floor;
+    var byName = function (n) { return p.objects.filter(function (o) { return o.name === n; })[0]; };
+    var port = function (o, side, n) { return o.ports.filter(function (x) { return x.side === side && x.label === String(n); })[0]; };
+    var mA = p.maps[0], mB = p.maps[1], roomA = p.groups.filter(function (g) { return g.name === 'Server room'; })[0], roomB = p.groups.filter(function (g) { return g.name === 'Office'; })[0];
+    var swA = byName('Switch A'), ppA = byName('PP-A'), ppB = byName('PP-B'), rackA = byName('Rack A'), rackB = byName('Rack B'), ws = byName('WS-02');
+    p.name = 'Demo network';
+
+    // internet edge: ISP -> router (WAN) -> Switch A (LAN)
+    var isp = addObjectPlaced(p, mA.id, { type: 'internet', name: 'INTERNET', ipAddress: '203.0.113.9' }, 700, 200);
+    var rtr = addObjectPlaced(p, mA.id, { type: 'router', name: 'Edge router', wanPorts: 1, lanPorts: 4, ipAddress: '192.168.1.1' }, 700, 330);
+    var rp = function (role, n) { return rtr.ports.filter(function (x) { return x.role === role; })[n]; };
+    M.addPatchCable(p, { aPortId: isp.ports[0].id, bPortId: rp('wan', 0).id, color: '#ff7f0e' });
+    M.addPatchCable(p, { aPortId: rp('lan', 0).id, bPortId: port(swA, 'front', 1).id, color: '#2ca02c' });
+    M.setDeviceIp(p, swA.id, '192.168.1.2');
+    // cameras plugged straight into Switch A: one port group stands for the devices behind it
+    M.addPortGroup(p, swA.id, { name: 'Cameras', portIds: [20, 21, 22, 23].map(function (n) { return port(swA, 'front', n).id; }), deviceKind: 'camera' });
+
+    // office devices on the wall socket and on a second patch panel port
+    var pc = addObjectPlaced(p, mB.id, { type: 'generic', name: 'Reception PC', deviceKind: 'pc', ipAddress: '192.168.1.50', portCount: 1, containerId: roomB.id });
+    var ap = addObjectPlaced(p, mB.id, { type: 'generic', name: 'Office Wi-Fi AP', deviceKind: 'ap', ipAddress: '192.168.1.60', portCount: 1, containerId: roomB.id });
+    M.addPatchCable(p, { aPortId: pc.ports[0].id, bPortId: port(ws, 'front', 2).id, color: '#8a8f98' });
+    M.addPatchCable(p, { aPortId: port(swA, 'front', 14).id, bPortId: port(ppA, 'front', 14).id, color: '#f2c200' });
+    M.addPatchCable(p, { aPortId: port(ppB, 'front', 14).id, bPortId: ap.ports[0].id, color: '#1f77b4' });
+    // a live copy: the Edge router also appears on the Office map (one editable original, the copy follows it)
+    placeItem(p, mB.id, 'object', rtr.id, 1000, 60);
+
+    // floor plans (all sizes in cm): walls, a door and a window as separate pieces, furniture boxes, and links to the real equipment
+    function wall(f, x0, y0, x1, y1, kind) { F.addLine(f, x0, y0, x1, y1, kind || 'wall'); }
+    var fa = F.ensure(M.addMap(p, { name: 'Server room plan', location: 'Building A, floor 1', kind: 'floor' }));
+    wall(fa, 0, 0, 0, 400); wall(fa, 0, 0, 150, 0); wall(fa, 150, 0, 350, 0, 'window'); wall(fa, 350, 0, 600, 0); wall(fa, 600, 0, 600, 400);
+    wall(fa, 600, 400, 290, 400); wall(fa, 290, 400, 200, 400, 'door'); wall(fa, 200, 400, 0, 400);
+    F.addRect(fa, 420, 40, 570, 100, 'furniture');
+    F.addLink(fa, { kind: 'group', refId: roomA.id, x: 300, y: 200, rot: 0, w: 600, d: 400 });
+    F.addLink(fa, { kind: 'object', refId: rackA.id, x: 90, y: 130, rot: 0, w: 60, d: 100 });
+    F.addLink(fa, { kind: 'object', refId: byName('PP-Standalone').id, x: 480, y: 330, rot: 0, w: 48, d: 12 });
+    var fb = F.ensure(M.addMap(p, { name: 'Office plan', location: 'Building B, floor 2', kind: 'floor' }));
+    wall(fb, 0, 0, 0, 500); wall(fb, 0, 0, 200, 0); wall(fb, 200, 0, 450, 0, 'window'); wall(fb, 450, 0, 800, 0); wall(fb, 800, 0, 800, 500);
+    wall(fb, 800, 500, 360, 500); wall(fb, 360, 500, 270, 500, 'door'); wall(fb, 270, 500, 0, 500);
+    F.addRect(fb, 250, 120, 410, 190, 'furniture'); F.addRect(fb, 520, 120, 680, 190, 'furniture');
+    F.addLink(fb, { kind: 'group', refId: roomB.id, x: 400, y: 250, rot: 0, w: 800, d: 500 });
+    F.addLink(fb, { kind: 'object', refId: rackB.id, x: 80, y: 80, rot: 0, w: 60, d: 100 });
+    F.addLink(fb, { kind: 'object', refId: ws.id, x: 790, y: 300, rot: 90, w: 12, d: 12 });
+    F.addLink(fb, { kind: 'object', refId: pc.id, x: 330, y: 160, rot: 0, w: 40, d: 40 });
+    F.addLink(fb, { kind: 'object', refId: ap.id, x: 600, y: 20, rot: 0, w: 25, d: 25 });
+    M.syncAllMap(p);
+    normalizeSizes(p); alignToGrid(p); // so the demo opens without the older-project notice
+    return p;
+  }
+
   /* after the port count or section size changes: resize every placement of the object to its natural size */
   function refitObject(p, objectId) {
     var o = M.buildIndex(p).objects[objectId];
@@ -640,6 +692,6 @@
     return m[1] + n;
   }
 
-  NM.builder = { containerAt: containerAt, placeNewAt: placeNewAt, copyClip: copyClip, pasteClipAt: pasteClipAt, copyName: copyName, nextName: nextName, applyFullWidth: applyFullWidth, applyFullWidthFor: applyFullWidthFor, minPlacementSize: minPlacementSize, normalizeSizes: normalizeSizes, addGhost: addGhost, relocate: relocate, patchBlockers: patchBlockers, blockMessage: blockMessage, arrivalSpot: arrivalSpot, setHeightFn: setHeightFn, stackedBelow: stackedBelow, followFold: followFold, alignToGrid: alignToGrid, fitMinimum: fitMinimum, resolveDrop: resolveDrop, settle: settle, findDropContainer: findDropContainer, dropSlot: dropSlot, restack: restack, captureChain: captureChain, restoreChain: restoreChain, applyExtension: applyExtension, refitObject: refitObject, placeItem: placeItem, addGroupPlaced: addGroupPlaced, addObjectPlaced: addObjectPlaced, buildDemoProject: buildDemoProject };
+  NM.builder = { containerAt: containerAt, placeNewAt: placeNewAt, copyClip: copyClip, pasteClipAt: pasteClipAt, copyName: copyName, nextName: nextName, applyFullWidth: applyFullWidth, applyFullWidthFor: applyFullWidthFor, minPlacementSize: minPlacementSize, normalizeSizes: normalizeSizes, addGhost: addGhost, relocate: relocate, patchBlockers: patchBlockers, blockMessage: blockMessage, arrivalSpot: arrivalSpot, setHeightFn: setHeightFn, stackedBelow: stackedBelow, followFold: followFold, alignToGrid: alignToGrid, fitMinimum: fitMinimum, resolveDrop: resolveDrop, settle: settle, findDropContainer: findDropContainer, dropSlot: dropSlot, restack: restack, captureChain: captureChain, restoreChain: restoreChain, applyExtension: applyExtension, refitObject: refitObject, placeItem: placeItem, addGroupPlaced: addGroupPlaced, addObjectPlaced: addObjectPlaced, buildDemoProject: buildDemoProject, buildShowcaseProject: buildShowcaseProject };
   if (typeof module !== 'undefined' && module.exports) module.exports = NM.builder;
 })(typeof window !== 'undefined' ? window : globalThis);
