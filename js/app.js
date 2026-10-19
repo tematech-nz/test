@@ -465,6 +465,10 @@
     const el = target.closest ? target.closest('[data-kind]') : null;
     if (el && target.closest('[data-ghost]')) { // a live copy is not editable here: a tap shows it read-only, a double-click opens the original
       if (S.tool || S.pgroup) { toast('That is a live copy: edit it on its own map (double-click it to go there)', true); return; }
+      if (el.dataset.kind === 'port' && !S.pgroup) { // a port on a live copy / the overview: selectable read-only, so it can be traced
+        select({ kind: 'port', id: el.dataset.id }); S.selGhost = true; renderRight();
+        return;
+      }
       if (el.dataset.kind === 'object' || el.dataset.kind === 'group' || el.dataset.kind === 'port') {
         const oid0 = el.dataset.kind === 'port' ? (M.buildIndex(S.p).portObj[el.dataset.id] || {}).id : el.dataset.id;
         select({ kind: el.dataset.kind === 'group' ? 'group' : 'object', id: oid0 }); S.selGhost = true; renderRight();

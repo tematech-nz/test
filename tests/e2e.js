@@ -1760,6 +1760,21 @@ const ok = (m) => console.log('  ok   ' + m);
     await page.mouse.click(box2.x + 5, box2.y + 5); await page.waitForTimeout(100);
   });
 
+  await step('overview ("All items"): a port can be selected and traced', async () => {
+    await page.evaluate(() => NetMap.app.api.loadProject(NetMap.builder.buildDemoProject()));
+    if (await page.evaluate(() => NetMap.app.S.mode === 'edit')) await page.click('#btnMode');
+    await page.selectOption('#mapSelect', await page.evaluate(() => NetMap.model.allMap(NetMap.app.S.p).id)); await page.waitForTimeout(200);
+    await page.evaluate(() => NetMap.app.api.fitMap()); await page.waitForTimeout(100);
+    const pid = await page.evaluate(() => NetMap.app.S.p.objects.find((o) => o.name === 'Switch A').ports.find((x) => x.label === '5').id);
+    await page.locator('#vp rect[data-kind="port"][data-id="' + pid + '"]').first().click({ force: true });
+    assert.deepStrictEqual(await page.evaluate(() => NetMap.app.S.sel && NetMap.app.S.sel.kind), 'port', 'the port itself is selected, not its equipment');
+    await page.click('#detailsPane button[data-act="trace"]');
+    await page.waitForSelector('#tracePane .trace-line');
+    assert.ok(await page.locator('#tracePane .trace-line').count() >= 1);
+    await page.evaluate(() => NetMap.app.api.loadProject(NetMap.builder.buildDemoProject()));
+    await page.waitForSelector('#vp [data-kind="object"]');
+  });
+
   await step('autosave survives a refresh', async () => {
     await page.click('#btnMode'); // back to view mode flushes the save
     const name = await page.evaluate(() => NetMap.app.S.p.name);
