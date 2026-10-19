@@ -8,7 +8,7 @@
   const POLL_MS = 60000;
 
   const S = {
-    p: null, mapId: null, mode: 'view', sel: null, trace: null, tool: null,
+    p: null, mapId: null, mode: 'view', sel: null, multi: [], trace: null, tool: null,
     undo: [], redo: [], unsaved: false, saveErr: null, savedAt: null, lastExport: null,
     drag: null, geo: null, query: '', showIssues: false, issues: [],
     collapsed: {}, pgroup: null, hoverPort: null, preview: null, drop: null, cableColor: 'auto', customColorFor: null, ring: null,
@@ -229,7 +229,7 @@
     closeLeft();
   }
   function switchMap(id, keepSel) {
-    S.mapId = id; clearPgroup(); floorReset(); if (!keepSel) { S.sel = null; }
+    S.mapId = id; clearPgroup(); floorReset(); S.multi = []; if (!keepSel) { S.sel = null; }
     if (S.place) { S.place = null; $('ghostInner').innerHTML = ''; $('ghost').style.display = 'none'; }
     renderAll();
     const v = vpState();
@@ -238,8 +238,77 @@
   }
 
   /* ---------------------------------------------------------------- selection and tools */
+  /* ---- multiple selection (Ctrl+click toggles, Ctrl+A selects everything on this map): equipment maps and floor plans ---- */
+  const multiKinds = { object: 1, group: 1, fline: 1, flink: 1 };
+  function multiAlive(r) {
+    if (r.kind === 'object' || r.kind === 'group') return !!M.findContainer(S.p, r.id) && !!M.placementOf(S.p, S.mapId, r.id);
+    const f = isFloor() ? floorOf() : null;
+    return !!f && (r.kind === 'fline' ? !!FL.lineById(f, r.id) : !!FL.linkById(f, r.id));
+  }
+  const validMulti = () => S.multi.filter(multiAlive);
+  function multiMap() { const out = {}; if (S.multi.length > 1) validMulti().forEach((r) => { out[r.kind + ':' + r.id] = true; }); return out; }
+  function toggleMulti(kind, id) {
+    if (!multiKinds[kind]) return;
+    let list = S.multi.length ? validMulti() : (S.sel && multiKinds[S.sel.kind] && !S.selGhost ? [{ kind: S.sel.kind, id: S.sel.id }] : []);
+    const i = list.findIndex((r) => r.kind === kind && r.id === id);
+    if (i >= 0) list.splice(i, 1); else list.push({ kind: kind, id: id });
+    if (list.length <= 1) { S.multi = []; S.sel = list[0] || null; } else { S.multi = list; S.sel = list[list.length - 1]; }
+    S.selGhost = false; renderAll(); showTab('details'); if (S.sel) openRight();
+  }
+  function selectAll() {
+    if (!isEdit() || S.tool || onAll()) return;
+    let list = [];
+    if (isFloor()) { const f = floorOf(); list = f.lines.map((l) => ({ kind: 'fline', id: l.id })).concat(f.links.map((l) => ({ kind: 'flink', id: l.id }))); }
+    else S.p.placements.forEach((q) => { if (q.mapId === S.mapId && !q.ghost) { const c = M.findContainer(S.p, q.refId); if (c) list.push({ kind: c.kind, id: q.refId }); } });
+    S.multi = list.length > 1 ? list : []; S.sel = list.length ? list[list.length - 1] : null; S.selGhost = false;
+    renderAll(); if (list.length) { showTab('details'); openRight(); toast(list.length + ' selected - Delete removes them, Esc clears'); }
+  }
+  function clearMulti() { S.multi = []; }
+  function multiDetails() {
+    const list = validMulti(), count = {};
+    list.forEach((r) => { count[r.kind] = (count[r.kind] || 0) + 1; });
+    const names = { object: 'equipment', group: 'group(s)', fline: 'line(s)', flink: 'link(s)' };
+    return '<h3>' + list.length + ' selected</h3><div class="sub">' + Object.keys(count).map((k) => count[k] + ' ' + names[k]).join(', ') + '</div>' +
+      '<div class="sub">Ctrl+click adds or removes one, Ctrl+A selects everything on this map, Esc clears.</div>' +
+      '<div class="btn-row">' + btn('deleteSel', 'Delete selected...', '', 'danger') + btn('clearMulti', 'Clear selection') + '</div>';
+  }
+  async function deleteMulti() {
+    const list = validMulti(); if (list.length < 2 || !isEdit()) return;
+    if (isFloor()) {
+      S.sel = null; S.multi = [];
+      floorEdit('Delete ' + list.length + ' floor plan items', (f) => { list.forEach((r) => { if (r.kind === 'fline') FL.deleteLine(f, r.id); else FL.removeLink(f, r.id); }); });
+      renderAll(); return;
+    }
+    const here = list.filter((r) => M.mapsFor(S.p, r.kind, r.id).length > 1);
+    let removeOnly = false;
+    if (here.length) {
+      const where = await openDialog({
+        title: 'Delete ' + list.length + ' items',
+        render: () => ({ body: '<p>' + here.length + ' of the selected items are also shown on other maps.</p><p>Remove everything from <b>this map only</b> (items and connections stay in the project), or <b>delete everywhere</b>?</p>',
+          buttons: [{ key: 'no', label: 'Cancel' }, { key: 'here', label: 'Remove from this map only', cls: 'primary' }, { key: 'all', label: 'Delete everywhere...', cls: 'danger' }] }),
+        onButton: (k, cx) => cx.close(k)
+      });
+      if (!where || where === 'no') return;
+      removeOnly = where === 'here';
+    }
+    if (removeOnly) {
+      const mid = S.mapId, gone = {};
+      list.forEach((r) => { gone[r.id] = true; M.descendants(S.p, r.id).forEach((d) => { gone[d.id] = true; }); });
+      S.sel = null; S.multi = [];
+      commit('Remove ' + list.length + ' items from map', (p) => { p.placements = p.placements.filter((q) => !(q.mapId === mid && gone[q.refId])); });
+      renderAll(); return;
+    }
+    const apply = (p) => { list.forEach((r) => { M.deleteContainerOrObject(p, r.kind, r.id, 'delete'); }); };
+    const copy = M.clone(S.p), b = { c: copy.patchCables.length, l: copy.fixedLinks.length, o: copy.objects.length, g: copy.groups.length };
+    apply(copy);
+    const lines = ['This deletes ' + (b.g - copy.groups.length) + ' group(s) and ' + (b.o - copy.objects.length) + ' equipment object(s); containers go together with their contents.',
+      (b.c - copy.patchCables.length) + ' patch cable(s) and ' + (b.l - copy.fixedLinks.length) + ' fixed link(s) (with all their wires) that touch them are deleted too.'];
+    if (!(await confirmDlg('Confirm deletion', '<p>' + lines.map(esc).join('</p><p>') + '</p><p class="sub">You can undo this.</p>', 'Delete', true))) return;
+    S.sel = null; S.multi = [];
+    commit('Delete ' + list.length + ' items', apply);
+  }
   function select(sel) {
-    S.sel = sel; S.selGhost = false; renderAll();
+    S.sel = sel; S.selGhost = false; S.multi = []; renderAll();
     if (sel) { showTab('details'); openRight(); }
   }
   function setTool(t) { S.tool = t; renderAll(); }
@@ -426,7 +495,7 @@
       else go();
       return;
     }
-    if (!el) { S.sel = null; closeRight(); renderAll(); return; }
+    if (!el) { S.sel = null; S.multi = []; closeRight(); renderAll(); return; }
     if (kind === 'pgroup' && !(ev && ev.shiftKey)) { // a linked group whose other end is on another map: go there (Shift+click selects this end instead)
       const q = M.peerGroup(S.p, id);
       if (q && !M.placementOf(S.p, S.mapId, q.obj.id)) {
@@ -434,6 +503,7 @@
         if (m) { goTo('pgroup', q.group.id, m); toast('Linked group: "' + q.group.name + '" on ' + q.obj.name + ' (Shift+click selects this end)'); return; }
       }
     }
+    if (isEdit() && !S.tool && ev && (ev.ctrlKey || ev.metaKey) && (kind === 'object' || kind === 'group')) { if (!target.closest('[data-ghost]') && !onAll()) toggleMulti(kind, id); return; }
     select({ kind: kind, id: id });
   }
 
@@ -471,7 +541,7 @@
         if (!q) return;
         const kind = h.dataset.handle, start = toMap(e.clientX, e.clientY);
         const items = kind === 'move' ? M.placementGroup(S.p, q.id).map((x) => ({ q: x, ox: x.x, oy: x.y })) : [{ q: q, ow: q.w, oh: q.h }];
-        S.drag = { kind: kind, plId: q.id, start: start, snap: JSON.stringify(S.p), items: items, moved: false, chain: kind === 'move' && !q.ghost ? B.captureChain(S.p, q.mapId, q.refId) : [], from: q.ghost ? null : (() => { const c = M.findContainer(S.p, q.refId); return c ? (c.kind === 'group' ? c.item.parentGroupId : c.item.containerId) : null; })() };
+        S.drag = { kind: kind, plId: q.id, ctrl: e.ctrlKey || e.metaKey, start: start, snap: JSON.stringify(S.p), items: items, moved: false, chain: kind === 'move' && !q.ghost ? B.captureChain(S.p, q.mapId, q.refId) : [], from: q.ghost ? null : (() => { const c = M.findContainer(S.p, q.refId); return c ? (c.kind === 'group' ? c.item.parentGroupId : c.item.containerId) : null; })() };
         return;
       }
       gesture = { x: e.clientX, y: e.clientY, vx: vpState().x, vy: vpState().y, target: e.target, moved: false };
@@ -545,6 +615,11 @@
     const d = S.drag; S.drag = null;
     const slot = S.drop; S.drop = null;
     if (d.kind === 'fbg') return; // the tracing image is not part of the project: no undo step
+    if (!d.moved && d.kind === 'move' && d.ctrl) { // Ctrl+click on an item's move handle: add it to / remove it from the selection
+      const q0 = S.p.placements.find((x) => x.id === d.plId), c0 = q0 && !q0.ghost && !onAll() && M.findContainer(S.p, q0.refId);
+      if (c0) toggleMulti(c0.kind, q0.refId);
+      return;
+    }
     if (!d.moved) { if (d.kind === 'label') select({ kind: 'link', id: d.linkId }); else if (d.kind === 'fpoint') select({ kind: 'fpoint', id: d.id }); else if (d.kind === 'flink') select({ kind: 'flink', id: d.id }); return; }
     S.undo.push({ label: d.kind === 'label' ? 'Move label' : (d.kind === 'fpoint' || d.kind === 'flink' ? 'Move on floor plan' : (d.kind === 'move' ? 'Move' : 'Resize')), snap: d.snap }); if (S.undo.length > 100) S.undo.shift(); S.redo = [];
     const gq = S.p.placements.find((x) => x.id === d.plId);
@@ -615,7 +690,7 @@
   function renderCanvas() {
     const map = curMap();
     const r = R.renderMap(S.p, map.id, Object.assign({
-      mode: onAll() ? 'view' : S.mode, moveGhosts: S.mode === 'edit' && onAll(), selection: S.sel, highlight: S.trace && S.trace.highlight,
+      mode: onAll() ? 'view' : S.mode, moveGhosts: S.mode === 'edit' && onAll(), selection: S.sel, multi: multiMap(), highlight: S.trace && S.trace.highlight,
       pendingPortId: S.tool && S.tool.pending, collapsed: S.collapsed, drop: S.place && S.place.host ? { containerId: S.place.host } : S.drop, alerts: netAlertMap(), ringPorts: ringPorts(),
       groupPorts: S.pgroup ? S.pgroup.ids : null, preview: S.preview
     }, floorRenderOpts()));
@@ -790,7 +865,8 @@
 
   function renderRight() {
     const pane = $('detailsPane');
-    if (!S.sel) {
+    if (S.multi.length > 1 && validMulti().length > 1) pane.innerHTML = multiDetails();
+    else if (!S.sel) {
       pane.innerHTML = '<h3>Nothing selected</h3><div class="sub">Tap an object, port, cable or fixed link on the map to see details. Use the search box to find a port, cable or wire by label or ID.</div>' +
         '<div class="btn-row">' + btn('help', 'Help') + '</div>';
     } else {
@@ -1462,7 +1538,7 @@
     if (d.kind === 'fpoint') { const id = curMap().id; const f = FL.ensure(S.p.maps.find((m) => m.id === id)); const newId = FL.settleAfterMove(f, d.id); if (newId !== d.id && S.sel && S.sel.id === d.id) S.sel = { kind: 'fpoint', id: newId }; }
   }
   function floorSelect(hit) {
-    if (!hit) { S.sel = null; closeRight(); renderAll(); return; }
+    if (!hit) { S.sel = null; S.multi = []; closeRight(); renderAll(); return; }
     select({ kind: hit.type === 'point' ? 'fpoint' : (hit.type === 'link' ? 'flink' : 'fline'), id: hit.id });
   }
   /* a click on the floor plan (also what a finger tap does) */
@@ -1505,7 +1581,9 @@
       if (made && made.length === 0) toast('Nothing to draw: the rectangle is flat or already there', true);
       renderAll(); return;
     }
-    floorSelect(FL.hitTest(f, pt.x, pt.y, floorTolerance()));
+    const hit0 = FL.hitTest(f, pt.x, pt.y, floorTolerance());
+    if (hit0 && (hit0.type === 'line' || hit0.type === 'link') && (ev.ctrlKey || ev.metaKey)) { toggleMulti(hit0.type === 'line' ? 'fline' : 'flink', hit0.id); return; }
+    floorSelect(hit0);
   }
   /* tracing image: pick or drop a picture of the room, size it by drawing a line of known length on it */
   function floorLoadImage(file) {
@@ -1569,6 +1647,7 @@
     return false;
   }
   function floorDeleteSelection() {
+    if (S.multi.length > 1) { deleteMulti(); return; }
     const sel = S.sel; if (!sel || !floorEditing()) return;
     if (sel.kind === 'fline') { S.sel = null; floorEdit('Delete line', (f) => FL.deleteLine(f, sel.id)); }
     else if (sel.kind === 'flink') { S.sel = null; floorEdit('Remove link', (f) => FL.removeLink(f, sel.id)); }
@@ -1706,6 +1785,7 @@
   }
 
   async function deleteSelection() {
+    if (S.multi.length > 1) { deleteMulti(); return; }
     const sel = S.sel; if (!sel) return;
     if (sel.kind === 'cable') {
       const c = S.p.patchCables.find((x) => x.id === sel.id);
@@ -2225,7 +2305,7 @@
     if (fixed) setTimeout(() => toast('Adjusted ' + fixed + ' item(s) (too small to read, or not lined up with their rack)', false), 100);
     else if (aligned) setTimeout(() => toast('Aligned ' + aligned + ' item(s) to the grid (older project)', false), 100);
     Object.keys(BG).forEach((k) => { URL.revokeObjectURL(BG[k].href); delete BG[k]; }); // tracing images belong to the page session, not to a project
-    S.rev++; markDirty(false); S.p = p; S.mapId = firstMap().id; S.sel = null; S.trace = null; S.tool = null; S.undo = []; S.redo = []; S.issues = []; S.showIssues = false;
+    S.rev++; markDirty(false); S.p = p; S.mapId = firstMap().id; S.sel = null; S.multi = []; S.trace = null; S.tool = null; S.undo = []; S.redo = []; S.issues = []; S.showIssues = false;
     saveNow(); renderAll();
     if (p.placements.some((q) => q.mapId === S.mapId)) fitMap();
   }
@@ -2419,6 +2499,7 @@
         case 'addToMap': commit('Add to map', (p) => { const pos = viewCentre(); B.placeItem(p, curMap().id, d.kind, d.id, pos.x, pos.y, true); }); break;
         case 'removeFromMap': removeFromThisMap(d.id); break;
         case 'deleteSel': deleteSelection(); break;
+        case 'clearMulti': S.multi = []; S.sel = null; renderAll(); break;
         case 'duplicate': if (copySelection(d.kind, d.id, true)) pasteStart(); break;
         case 'deleteCable': { S.sel = { kind: 'cable', id: d.id }; deleteSelection(); break; }
         case 'customColor': {
@@ -2490,8 +2571,9 @@
     document.addEventListener('keydown', (e) => {
       if ($('dlg').open) return;
       const typing = /INPUT|SELECT|TEXTAREA/.test((e.target.tagName || ''));
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'a' && !typing) { e.preventDefault(); selectAll(); return; } // never select the page, only the items in the editor
       if (!typing && floorKey(e)) { e.preventDefault(); return; }
-      if (e.key === 'Escape') { if (S.place) cancelPlace(); else if (S.pgroup) { clearPgroup(); renderAll(); } else if (S.tool) cancelTool(); else if (S.trace) clearTrace(); else if (S.sel) { S.sel = null; renderAll(); } }
+      if (e.key === 'Escape') { if (S.place) cancelPlace(); else if (S.pgroup) { clearPgroup(); renderAll(); } else if (S.tool) cancelTool(); else if (S.trace) clearTrace(); else if (S.sel || S.multi.length) { S.sel = null; S.multi = []; renderAll(); } }
       else if (isEdit() && !typing && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); }
       else if (isEdit() && !typing && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') { e.preventDefault(); redo(); }
       else if (isEdit() && !typing && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c') { if (S.sel && (S.sel.kind === 'object' || S.sel.kind === 'group')) { e.preventDefault(); copySelection(); } }

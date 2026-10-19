@@ -70,14 +70,14 @@
         out.push('<path d="' + minor + '" stroke="#eceff1" stroke-width="' + num(px(0.6)) + '" fill="none" pointer-events="none"/>');
       }
     }
-    var selLine = sel && sel.kind === 'fline' ? sel.id : null;
+    var selLine = sel && sel.kind === 'fline' ? sel.id : null, multi = opts.multi || {};
     kindOrder.forEach(function (kind) {
       f.lines.forEach(function (l) {
         if (l.kind !== kind) return;
         var a = F.pt(f, l.a), b = F.pt(f, l.b);
         if (!a || !b) return;
         var st = LINE_STYLE[kind] || LINE_STYLE.wall, w = Math.max(st.width, px(2)), d = 'M' + a.x + ' ' + a.y + 'L' + b.x + ' ' + b.y;
-        if (selLine === l.id) out.push('<path d="' + d + '" stroke="#1565c0" stroke-opacity="0.35" stroke-width="' + num(w + px(8)) + '" stroke-linecap="round" fill="none" pointer-events="none"/>');
+        if (selLine === l.id || multi['fline:' + l.id]) out.push('<path d="' + d + '" stroke="#1565c0" stroke-opacity="0.35" stroke-width="' + num(w + px(8)) + '" stroke-linecap="round" fill="none" pointer-events="none"/>');
         if (kind === 'window') {
           out.push('<path d="' + d + '" stroke="' + st.color + '" stroke-width="' + num(w) + '" fill="none" pointer-events="none"/><path d="' + d + '" stroke="#ffffff" stroke-width="' + num(w / 3) + '" fill="none" pointer-events="none"/>');
         } else if (kind === 'furniture') {
@@ -103,7 +103,7 @@
     // links: to-scale symbols of the real items
     f.links.forEach(function (lk) {
       var c = M.findContainer(p, lk.refId), item = c && c.item, type = lk.kind === 'group' ? 'group' : (item ? item.type : 'generic');
-      var col = LINK_STYLE[type] || LINK_STYLE.generic, isSel = sel && sel.kind === 'flink' && sel.id === lk.id, missing = !item;
+      var col = LINK_STYLE[type] || LINK_STYLE.generic, isSel = (sel && sel.kind === 'flink' && sel.id === lk.id) || !!multi['flink:' + lk.id], missing = !item;
       var g0 = '<g data-flink="' + esc(lk.id) + '" transform="rotate(' + num(lk.rot) + ' ' + num(lk.x) + ' ' + num(lk.y) + ')"><title>' + esc(item ? item.name + ' (' + (lk.kind === 'group' ? 'group' : M.typeLabel(item)) + ')' : 'missing item') + '</title>';
       g0 += '<rect x="' + num(lk.x - lk.w / 2) + '" y="' + num(lk.y - lk.d / 2) + '" width="' + num(lk.w) + '" height="' + num(lk.d) + '" rx="' + num(Math.min(3, lk.w / 6)) + '" fill="' + col[0] + '" fill-opacity="' + (type === 'group' ? '0.35' : '1') + '" stroke="' + (isSel ? '#e91e63' : (missing ? '#d32f2f' : col[1])) + '" stroke-width="' + num(isSel ? px(3) : px(1.6)) + '"' + (type === 'group' || missing ? ' stroke-dasharray="' + num(px(6)) + ' ' + num(px(4)) + '"' : '') + '/>';
       if (type !== 'group') g0 += '<path d="M' + num(lk.x - lk.w / 2) + ' ' + num(lk.y - lk.d / 2) + 'h' + num(lk.w) + '" stroke="' + col[1] + '" stroke-width="' + num(Math.max(px(3), lk.d / 12)) + '"/>'; // the front edge
@@ -222,7 +222,7 @@
     items.forEach(function (it) {
       var pl = it.box, ref = it.ref, st = STYLE[it.isGroup ? 'group' : ref.type], plId = it.pl.id;
       grow(pl.x, pl.y, pl.w, pl.h);
-      var isSel = sel && sel.id === ref.id && (sel.kind === 'group' || sel.kind === 'object');
+      var isSel = (sel && sel.id === ref.id && (sel.kind === 'group' || sel.kind === 'object')) || !!(opts.multi && opts.multi[(it.isGroup ? 'group:' : 'object:') + ref.id]);
       var isDrop = opts.drop && opts.drop.containerId === ref.id;
       var container = it.isGroup || ref.type === 'rack';
       var dim = hl && !container && !hl.objects[ref.id];

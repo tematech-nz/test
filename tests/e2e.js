@@ -1627,6 +1627,53 @@ const ok = (m) => console.log('  ok   ' + m);
     void dia;
   });
 
+  await step('multiple selection: Ctrl+A selects only editor items (not the page), Ctrl+click toggles, delete all at once - maps and floor plans', async () => {
+    await page.evaluate(() => NetMap.app.api.loadProject(NetMap.builder.buildShowcaseProject()));
+    await page.waitForSelector('#vp [data-kind="object"]');
+    const ids = await page.evaluate(() => ({ map: NetMap.app.S.p.maps[0].id, floor: NetMap.model.floorMaps(NetMap.app.S.p)[1].id }));
+    await page.selectOption('#mapSelect', ids.map); await page.waitForTimeout(150);
+    await page.evaluate(() => NetMap.app.api.fitMap()); await page.waitForTimeout(100);
+    if (!(await page.evaluate(() => NetMap.app.S.mode === 'edit'))) await page.click('#btnMode');
+    await page.waitForTimeout(100);
+    // Ctrl+click adds and removes
+    const grpBox = await page.locator('#vp rect[data-kind="object"][data-id]').nth(0).boundingBox();
+    await page.keyboard.down('Control');
+    const two = await page.evaluate(() => ['Rack A', 'PP-Standalone'].map((n) => NetMap.app.S.p.objects.find((o) => o.name === n).id));
+    for (const id of two) { const b = await page.locator('#vp rect[data-kind="object"][data-id="' + id + '"]').boundingBox(); await page.mouse.click(b.x + 6, b.y + 6); }
+    await page.keyboard.up('Control');
+    const n2 = await page.evaluate(() => NetMap.app.S.multi.length);
+    assert.strictEqual(n2, 2, 'two items selected with Ctrl+click');
+    assert.ok(/2 selected/i.test(await page.innerText('#detailsPane')), 'details show the count');
+    await page.keyboard.press('Escape'); assert.strictEqual(await page.evaluate(() => NetMap.app.S.multi.length), 0, 'Esc clears');
+    void grpBox;
+    // Ctrl+A: items only, the page text is not selected
+    await page.mouse.click(300, 700); // empty canvas area
+    await page.keyboard.press('Control+a');
+    assert.strictEqual(await page.evaluate(() => window.getSelection().toString()), '', 'no page text selection');
+    const total = await page.evaluate(() => NetMap.app.S.p.placements.filter((q) => q.mapId === NetMap.app.S.mapId && !q.ghost).length);
+    assert.strictEqual(await page.evaluate(() => NetMap.app.S.multi.length), total, 'everything on this map is selected');
+    await page.keyboard.press('Delete');
+    await page.waitForSelector('#dlg[open]');
+    await page.click('#dlg button[data-btn="here"], #dlg button[data-btn="yes"]');
+    await page.waitForTimeout(150);
+    if (await page.locator('#dlg[open]').count()) { await page.click('#dlg button[data-btn="yes"]'); await page.waitForTimeout(150); }
+    assert.strictEqual(await page.evaluate(() => NetMap.app.S.p.placements.filter((q) => q.mapId === NetMap.app.S.mapId && !q.ghost).length), 0, 'all gone from this map');
+    await page.click('#btnUndo'); await page.waitForTimeout(100);
+    assert.strictEqual(await page.evaluate(() => NetMap.app.S.p.placements.filter((q) => q.mapId === NetMap.app.S.mapId && !q.ghost).length), total, 'one undo restores them');
+    // floor plan: Ctrl+A then Delete, no dialog, one undo
+    await page.selectOption('#mapSelect', ids.floor); await page.waitForTimeout(200);
+    const fc = () => page.evaluate(() => { const f = NetMap.floor.ensure(NetMap.app.S.p.maps.find((m) => m.id === NetMap.app.S.mapId)); return f.lines.length + f.links.length; });
+    const f0 = await fc(); assert.ok(f0 > 5);
+    await page.keyboard.press('Control+a');
+    assert.strictEqual(await page.evaluate(() => NetMap.app.S.multi.length), f0, 'all lines and links selected');
+    await page.keyboard.press('Delete'); await page.waitForTimeout(100);
+    assert.strictEqual(await fc(), 0);
+    await page.click('#btnUndo'); await page.waitForTimeout(100);
+    assert.strictEqual(await fc(), f0, 'undo brings the plan back');
+    await page.evaluate(() => NetMap.app.api.loadProject(NetMap.builder.buildDemoProject()));
+    await page.waitForSelector('#vp [data-kind="object"]');
+  });
+
   await step('autosave survives a refresh', async () => {
     await page.click('#btnMode'); // back to view mode flushes the save
     const name = await page.evaluate(() => NetMap.app.S.p.name);

@@ -98,6 +98,7 @@ Try it: File -> Load demo project: two rooms with a fixed link between racks, a 
   wall sockets and generic devices are endpoints unless you tick "Allow paths through Internet". Subnets
   are shown on devices that have IP addresses (IP addresses are plain IPv4 such as 192.168.1.1 with no /prefix, and the subnet is assumed to be the /24 for now). Click a device or link to jump to it on the map.
   It is theoretical physical reachability: no routing, VLAN or firewall rules are modelled.
+- **Select several** (edit mode, equipment maps and floor plans): Ctrl+click adds or removes an item (group, equipment, floor plan line or link), Ctrl+A selects everything on the current map (the page text is never selected), Esc clears. Delete removes all selected items at once in one undo step; on equipment maps you get one confirmation (and "this map only" vs "everywhere" when some items are on several maps). Ports keep their own Ctrl+click meaning.
 - **Quick fixed link from ports** (edit mode, mouse): Ctrl+click free rear ports on one patch panel to group them
   (Shift+Ctrl+click extends a range). Move the pointer over another panel: the same number of rear ports, starting
   under the pointer, are highlighted (green = valid, red = occupied or not enough ports). Click to create the link
