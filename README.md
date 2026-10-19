@@ -137,6 +137,7 @@ Try it: File -> Load demo project (two rooms, a fixed link between racks, a wall
   uplinks and what lies beyond them (selecting the uplink side shows everything). Routers end a network: tracing a cable between one router's LAN
   and another's **WAN** shows everything on the **downstream router's LAN**, and a LAN never leaks across a router into the WAN side. It works across maps
   (open the overview with "See on full map" to see it all).
+- **Equipment list**: the navigation list shows the equipment of the current map (live copies are tagged "live copy", and items that are on no map yet "no map"); a link under it brings back the equipment of the other maps ("other map" tag). The overview lists everything.
 - **Delete vs remove from map**: deleting an item that is shown on more than one map asks whether to **remove it from this map only** (it and its
   connections stay on the other maps; a group or rack is removed together with what is shown inside it) or delete it everywhere.
 - **Fixed link labels** can be dragged out of the way in edit mode (per map; a dashed leader line shows where the label belongs, "Reset label

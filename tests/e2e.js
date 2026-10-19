@@ -390,6 +390,32 @@ const ok = (m) => console.log('  ok   ' + m);
     await page.click('#btnUndo');
   });
 
+  await step('equipment list shows only this map (plus unplaced items); a link brings back the other maps', async () => {
+    const info = await page.evaluate(() => {
+      const A = NetMap.app, B = NetMap.builder, M = NetMap.model, out = {};
+      A.commit('list setup', (p) => {
+        const m2 = { id: M.uid('map'), name: 'List map', location: '', viewport: { x: 0, y: 0, zoom: 1 } }; p.maps.push(m2); out.m2 = m2.id;
+        out.far = B.addObjectPlaced(p, m2.id, { type: 'generic', name: 'LIST-FAR-ONLY', portCount: 1 }, 40, 40).id;
+        out.here = B.addObjectPlaced(p, A.S.mapId, { type: 'generic', name: 'LIST-HERE-ONLY', portCount: 1 }, 40, 6000).id;
+        out.loose = M.addObject(p, { type: 'generic', name: 'LIST-LOOSE', portCount: 1 }).id;
+      });
+      out.m1 = A.S.mapId; return out;
+    });
+    const list = () => page.innerText('#objectList');
+    let txt = await list();
+    assert.ok(txt.includes('LIST-HERE-ONLY') && txt.includes('LIST-LOOSE') && !txt.includes('LIST-FAR-ONLY'), txt.slice(0, 200));
+    assert.ok(/Show equipment on other maps \(\d+\)/.test(txt));
+    await page.click('#objectList a[data-act="listAll"]');
+    txt = await list();
+    assert.ok(txt.includes('LIST-FAR-ONLY') && /other map/.test(txt));
+    await page.click('#objectList a[data-act="listAll"]');
+    await page.selectOption('#mapSelect', info.m2); await page.waitForTimeout(150);
+    txt = await list();
+    assert.ok(txt.includes('LIST-FAR-ONLY') && !txt.includes('LIST-HERE-ONLY'), 'the list follows the current map');
+    await page.selectOption('#mapSelect', info.m1); await page.waitForTimeout(100);
+    await page.click('#btnUndo');
+  });
+
   await step('hidden navigation stays hidden when clicking the map or changing mode', async () => {
     await page.click('#btnMenu');
     assert.ok(!(await page.isVisible('#left')));

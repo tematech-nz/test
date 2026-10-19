@@ -665,20 +665,28 @@
 
     const idx = M.buildIndex(S.p), mid = curMap().id;
     const onMap = (id) => !!M.placementOf(S.p, mid, id);
+    // the equipment list shows what is on THIS map (plus anything not placed on any map yet, so it can be found and added);
+    // containers stay when something inside them is shown; "show all" brings back the equipment of other maps
+    const unplaced = (kind, id) => !M.mapsFor(S.p, kind, id).length;
+    const shown = (kind, item) => S.listAll || onMap(item.id) || unplaced(kind, item.id) || M.containerChildren(S.p, item.id).some((k) => shown(k.kind, k.kind === 'group' ? idx.groups[k.id] : idx.objects[k.id]));
+    let hidden = 0;
     function node(kind, item, depth) {
-      const isG = kind === 'group';
+      if (!shown(kind, item)) { hidden++; return ''; }
+      const isG = kind === 'group', pl = M.placementOf(S.p, mid, item.id);
       let h = '<div class="list-item ' + (S.sel && S.sel.id === item.id ? 'active' : '') + '" style="margin-left:' + depth * 14 + 'px" data-act="goto" data-kind="' + kind + '" data-id="' + esc(item.id) + '">' +
         '<div class="grow">' + esc(item.name) + '</div><span class="tag">' + (isG ? 'group' : M.typeLabel(item)) + '</span>' +
-        (onMap(item.id) ? '' : '<span class="tag" title="Not drawn on the current map">other map</span>') + '</div>';
+        (pl && pl.ghost ? '<span class="tag" title="Shown here as a live copy of an item on another map">live copy</span>' : (pl ? '' : (unplaced(kind, item.id) ? '<span class="tag" title="Not placed on any map yet">no map</span>' : '<span class="tag" title="Not drawn on the current map">other map</span>'))) + '</div>';
       M.containerChildren(S.p, item.id).forEach((k) => {
         h += node(k.kind, k.kind === 'group' ? idx.groups[k.id] : idx.objects[k.id], depth + 1);
       });
       return h;
     }
-    let ol = '<h3>Equipment</h3>';
+    let ol = '<h3>Equipment' + (M.realMaps(S.p).length > 1 && !onAll() ? ' <span class="sub" style="text-transform:none;letter-spacing:0">on this map</span>' : '') + '</h3>';
     S.p.groups.filter((g) => !g.parentGroupId).forEach((g) => { ol += node('group', g, 0); });
     S.p.objects.filter((o) => !o.containerId).forEach((o) => { ol += node('object', o, 0); });
     if (!S.p.groups.length && !S.p.objects.length) ol += '<div class="sub">Nothing documented yet.</div>';
+    else if (!S.listAll && hidden) ol += '<div class="sub" style="margin-top:6px"><a class="lnk" data-act="listAll">Show equipment on other maps (' + (S.p.groups.filter((g) => !onMap(g.id) && !unplaced('group', g.id)).length + S.p.objects.filter((o) => !onMap(o.id) && !unplaced('object', o.id)).length) + ')</a></div>';
+    else if (S.listAll && M.realMaps(S.p).length > 1) ol += '<div class="sub" style="margin-top:6px"><a class="lnk" data-act="listAll">Only this map\'s equipment</a></div>';
     $('objectList').innerHTML = ol;
 
     const il = $('issueList');
@@ -1971,6 +1979,7 @@
         case 'trace': startTrace(d.kind, d.id); break;
         case 'clearTrace': clearTrace(); break;
         case 'fitTrace': fitTrace(); break;
+        case 'listAll': S.listAll = !S.listAll; renderLeft(); break;
         case 'traceNet': S.traceNet = !!a.checked; applyTraceNetwork(); renderAll(); showTab('trace'); break;
         case 'seeOnFullMap': seeOnFullMap(); break;
         case 'backFromFullMap': backFromFullMap(); break;
