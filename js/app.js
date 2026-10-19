@@ -1335,7 +1335,7 @@
     const z = vpState().zoom, h = FS.hover, active = floorEditing(), bg = floorBg();
     return {
       zoom: z, labels: active ? FS.labels : true, hoverLine: active ? null : FS.hoverLine,
-      floorDraw: active && FS.draw && h ? { a: FS.draw.a, to: h, kind: FS.kind, typed: FS.typed, deg: h.deg } : null,
+      floorDraw: active && FS.draw && h ? { a: FS.draw.a, to: h, kind: FS.kind, typed: FS.typed } : null,
       floorRect: active && FS.rect && h ? { x0: FS.rect.a.x, y0: FS.rect.a.y, x1: h.x, y1: h.y, kind: FS.kind } : null,
       floorPlace: active && FS.place && h ? { x: h.x, y: h.y, w: FS.place.w, d: FS.place.d, rot: FS.place.rot, name: FS.place.name } : null,
       floorSnap: active && h && (FS.draw || FS.rect || FS.place) ? h : null,
@@ -1543,7 +1543,8 @@
     if (k === 'Escape' && document.getElementById('ctxMenu')) { closeCtx(); return true; }
     if (k === 'Escape') {
       if (FS.typed) { FS.typed = ''; renderCanvas(); return true; }
-      if (FS.draw || FS.rect || FS.place || FS.calib) { floorReset(); renderAll(); return true; }
+      if (FS.draw || FS.rect || FS.place || FS.calib) { floorReset(); renderAll(); return true; } // first Esc: cancel what is being placed
+      if (floorEditing() && FS.tool !== 'select') { floorSetTool('select'); return true; } // next Esc: back to the select tool
       return false;
     }
     if (!floorEditing()) return false;

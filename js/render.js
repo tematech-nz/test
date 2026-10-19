@@ -91,6 +91,15 @@
         }
       });
     });
+    // hover tooltips (kind, length, angle) on an invisible, slightly wider copy of each line
+    if (!exporting) {
+      f.lines.forEach(function (l) {
+        var a = F.pt(f, l.a), b = F.pt(f, l.b);
+        if (!a || !b) return;
+        var kl = (F.KINDS.filter(function (k) { return k[0] === l.kind; })[0] || [0, l.kind])[1];
+        out.push('<path d="M' + a.x + ' ' + a.y + 'L' + b.x + ' ' + b.y + '" stroke="transparent" stroke-width="' + num(Math.max(px(10), 14)) + '" fill="none" pointer-events="stroke"><title>' + esc(kl + ' - ' + F.fmtLen(F.lineLength(f, l)) + ' - ' + F.lineAngle(f, l) + ' deg') + '</title></path>');
+      });
+    }
     // links: to-scale symbols of the real items
     f.links.forEach(function (lk) {
       var c = M.findContainer(p, lk.refId), item = c && c.item, type = lk.kind === 'group' ? 'group' : (item ? item.type : 'generic');
@@ -126,7 +135,7 @@
     if (opts.floorDraw && opts.floorDraw.a && opts.floorDraw.to) {
       var da = opts.floorDraw.a, dt = opts.floorDraw.to, dlen = Math.round(Math.sqrt(Math.pow(dt.x - da.x, 2) + Math.pow(dt.y - da.y, 2))), dst = LINE_STYLE[opts.floorDraw.kind] || LINE_STYLE.wall;
       out.push('<path d="M' + da.x + ' ' + da.y + 'L' + dt.x + ' ' + dt.y + '" stroke="' + dst.color + '" stroke-opacity="0.6" stroke-width="' + num(Math.max(dst.width, px(2))) + '" stroke-dasharray="' + num(px(8)) + ' ' + num(px(5)) + '" fill="none" pointer-events="none"/>');
-      out.push('<text x="' + num((da.x + dt.x) / 2) + '" y="' + num((da.y + dt.y) / 2 - px(10)) + '" font-size="' + num(fs2) + '" text-anchor="middle" font-weight="bold" fill="#e65100" stroke="#fff" stroke-width="' + num(px(3)) + '" paint-order="stroke" font-family="sans-serif" pointer-events="none">' + esc(opts.floorDraw.typed ? opts.floorDraw.typed + ' m (Enter)' : F.fmtLen(dlen) + (opts.floorDraw.deg != null ? '  ' + opts.floorDraw.deg + ' deg' : '')) + '</text>');
+      out.push('<text x="' + num((da.x + dt.x) / 2) + '" y="' + num((da.y + dt.y) / 2 - px(10)) + '" font-size="' + num(fs2) + '" text-anchor="middle" font-weight="bold" fill="#e65100" stroke="#fff" stroke-width="' + num(px(3)) + '" paint-order="stroke" font-family="sans-serif" pointer-events="none">' + esc(opts.floorDraw.typed ? opts.floorDraw.typed + ' m (Enter)' : F.fmtLen(dlen)) + '</text>');
     }
     if (opts.floorRect) {
       var r0 = opts.floorRect, rs = LINE_STYLE[r0.kind] || LINE_STYLE.wall;

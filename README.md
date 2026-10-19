@@ -195,7 +195,8 @@ A second kind of map (New map -> Type: Floor plan, listed under "Floor plans") f
 
 - Tools: Select (V), Line (L), Rectangle (R). Pick what the lines are first: wall, door, window or furniture (a plain box, for example a desk). Walls are built; doors, windows and furniture are stored the same way.
 - A rectangle is four lines sharing corner points. Lines may be diagonal. Where lines cross, or a line or rectangle starts or ends on another line, a point is created and the line splits there; nothing overlaps. Any line can be deleted.
-- While drawing a line, its direction clicks into 0/30/45/60/90... degrees when the pointer is near one (the angle is shown next to the length). Shift forces the nearest such angle, Alt turns the snapping off. Points and lines still snap first.
+- While drawing a line, its direction clicks into 0/30/45/60/90... degrees when the pointer is near one. Shift forces the nearest such angle, Alt turns the snapping off. Points and lines still snap first.
+- Esc while drawing or placing cancels just that; Esc again returns to the Select tool. A line's kind, length and angle show in a tooltip when you hover over it.
 - While drawing a line you can type a length in metres and press Enter. Select a line to edit its type, length and angle.
 - Right-click a line (edit mode): Make horizontal, Make vertical (turns it about its connected end and keeps its length; greyed out when both ends are connected) and Delete line.
 - A line whose both ends are connected to other lines cannot change length ("defined by the connected elements"): move a point instead.
