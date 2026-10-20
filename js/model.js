@@ -548,7 +548,7 @@
       prunePortGroups(o);
     }
   }
-  /* patch: sectionRows, portOrder ('rows'|'columns'), align ('left'|'center'|'right'), uplinkSide ('left'|'right'), portIsolation */
+  /* patch: sectionRows, portOrder ('rows'|'columns'), flipV / flipH (mirror the access ports), align ('left'|'center'|'right'), uplinkSide ('left'|'right'), portIsolation */
   function setSwitchLayout(p, objectId, patch) {
     var o = buildIndex(p).objects[objectId];
     if (!o || o.type !== 'switch') throw new Error('Not a switch');
@@ -562,6 +562,7 @@
       if (patch.portOrder !== 'rows' && patch.portOrder !== 'columns') throw new Error('Port order is rows or columns');
       o.portOrder = patch.portOrder;
     }
+    ['flipV', 'flipH'].forEach(function (k) { if (patch[k] !== undefined) { if (patch[k]) o[k] = true; else delete o[k]; } }); // mirror the port block upside down / left to right
     if (patch.align !== undefined) {
       if (['left', 'center', 'right'].indexOf(patch.align) < 0) throw new Error('Align is left, center or right');
       if (patch.align === 'left') delete o.align; else o.align = patch.align;

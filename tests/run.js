@@ -2157,5 +2157,40 @@ test('DHCP: a device with "any address from this LAN" belongs to the LAN of the 
   assert.strictEqual(made.dhcp, true);
 });
 
+test('switch port order: reverse vertical (2 above 1) and reverse horizontal mirror the access ports; every port keeps its own spot', () => {
+  const mk = (n, size, rows) => { const p = M.createProject('s'), sw = M.addObject(p, { type: 'switch', name: 'S', portCount: n, sectionSize: size, sectionRows: rows }); return { p, sw }; };
+  const L = NM.layout, lay = (sw) => { const z = L.defaultSize(sw); return L.computeLayout(sw, z.w, z.h, {}); };
+  const { p, sw } = mk(16, 8, 2); const P0 = lay(sw), pos = (l, n) => l.ports[sw.ports[n - 1].id];
+  assert.ok(pos(P0, 1).y < pos(P0, 2).y && pos(P0, 3).x > pos(P0, 1).x, 'default: 1 above 2, 3 to the right');
+  M.setSwitchLayout(p, sw.id, { flipV: true });
+  const V = lay(sw);
+  assert.ok(pos(V, 2).y < pos(V, 1).y && pos(V, 1).x === pos(V, 2).x, '2 above 1');
+  assert.ok(pos(V, 3).x > pos(V, 1).x, 'left to right is unchanged by the vertical flip');
+  M.setSwitchLayout(p, sw.id, { flipV: false, flipH: true });
+  const H = lay(sw);
+  assert.ok(pos(H, 1).x > pos(H, 3).x && pos(H, 1).y < pos(H, 2).y, '1 is right of 3 (counts from the right), still above 2');
+  assert.ok(pos(H, 9).x < pos(H, 1).x, 'the second section is now on the left');
+  M.setSwitchLayout(p, sw.id, { flipV: true, flipH: true });
+  const B = lay(sw);
+  assert.ok(pos(B, 2).y < pos(B, 1).y && pos(B, 1).x > pos(B, 3).x, 'both: 2 above 1 and counting from the right');
+  assert.strictEqual(B.groups.length, P0.groups.length, 'a frame per section as before');
+  // every layout keeps ports apart and inside the box, also with several lines of sections and a partial last line
+  [[48, 12, 2], [30, 6, 3], [24, 24, 1]].forEach(([n, size, rows]) => {
+    const q = mk(n, size, rows);
+    [[false, false], [true, false], [false, true], [true, true]].forEach(([v, h]) => {
+      M.setSwitchLayout(q.p, q.sw.id, { flipV: v, flipH: h });
+      const z = L.defaultSize(q.sw), l = L.computeLayout(q.sw, z.w, z.h, {});
+      const keys = q.sw.ports.map(x => Math.round(l.ports[x.id].x) + ',' + Math.round(l.ports[x.id].y));
+      assert.strictEqual(new Set(keys).size, n, n + ' ports flip ' + v + '/' + h + ': no two share a spot');
+      assert.ok(q.sw.ports.every(x => l.ports[x.id].x >= 0 && l.ports[x.id].x + l.ports[x.id].w <= z.w + 1 && l.ports[x.id].y >= 0 && l.ports[x.id].y + l.ports[x.id].h <= z.h + 1), 'inside the box');
+    });
+  });
+  // off again: the flags disappear from the file; they survive save and load
+  M.setSwitchLayout(p, sw.id, { flipV: false, flipH: false });
+  assert.ok(!('flipV' in sw) && !('flipH' in sw));
+  M.setSwitchLayout(p, sw.id, { flipV: true });
+  assert.strictEqual(M.migrate(JSON.parse(M.serializeProject(p))).project.objects[0].flipV, true);
+});
+
 console.log('\n' + passed + ' passed, ' + failed + ' failed');
 process.exit(failed ? 1 : 0);

@@ -2009,6 +2009,28 @@ const ok = (m) => console.log('  ok   ' + m);
     await page.waitForSelector('#vp [data-kind="object"]');
   });
 
+  await step('switch: "Reverse vertical / horizontal" checkboxes mirror the port block', async () => {
+    await page.evaluate(() => NetMap.app.api.loadProject(NetMap.builder.buildDemoProject()));
+    if (!(await page.evaluate(() => NetMap.app.S.mode === 'edit'))) await page.click('#btnMode');
+    const ids = await page.evaluate(() => { const sw = NetMap.app.S.p.objects.find((o) => o.name === 'Switch A'); return { sw: sw.id, p1: sw.ports.find((x) => x.label === '1').id, p13: sw.ports.find((x) => x.label === '13').id }; });
+    await page.evaluate((id) => NetMap.app.api.select({ kind: 'object', id }), ids.sw);
+    await page.waitForSelector('#detailsPane input[data-f="flipV"]');
+    const y = (id) => page.evaluate((i) => parseFloat(document.querySelector('#vp rect[data-kind="port"][data-id="' + i + '"]').getAttribute('y')), id);
+    const x = (id) => page.evaluate((i) => parseFloat(document.querySelector('#vp rect[data-kind="port"][data-id="' + i + '"]').getAttribute('x')), id);
+    const y1 = await y(ids.p1), y13 = await y(ids.p13), x1 = await x(ids.p1);
+    assert.ok(y1 < y13, 'default: port 1 is on the upper row');
+    await page.check('#detailsPane input[data-f="flipV"]');
+    assert.ok((await y(ids.p1)) > (await y(ids.p13)), 'reverse vertical: the rows swap');
+    await page.uncheck('#detailsPane input[data-f="flipV"]');
+    assert.strictEqual(await y(ids.p1), y1, 'and back');
+    await page.check('#detailsPane input[data-f="flipH"]');
+    assert.ok((await x(ids.p1)) > x1, 'reverse horizontal: port 1 moves to the right');
+    await page.uncheck('#detailsPane input[data-f="flipH"]');
+    assert.strictEqual(await x(ids.p1), x1);
+    await page.evaluate(() => NetMap.app.api.loadProject(NetMap.builder.buildDemoProject()));
+    await page.waitForSelector('#vp [data-kind="object"]');
+  });
+
   await step('autosave survives a refresh', async () => {
     await page.click('#btnMode'); // back to view mode flushes the save
     const name = await page.evaluate(() => NetMap.app.S.p.name);

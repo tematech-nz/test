@@ -46,7 +46,7 @@ compact files open identically (`compactProject()` / `expandProject()` in `js/mo
   per-port `"ip"`. IPs are plain IPv4 strings without a prefix (schema 3 strips a `/nn` from older files); the subnet used for network warnings is assumed to be the /24. Invalid values produce validation warnings.
 - Switches may carry (all optional, omitted = default): `sectionSize` (ports per section; omitted = plain rows),
   `sectionRows` (rows per section, default 1), `portOrder` (`rows`|`columns`, default `columns` when sectionRows > 1),
-  `align` (`center`|`right`), `uplinkSide` (`left`), `uplinkRows`, and `portIsolation` (true). Uplink ports are ports with
+  `flipV` / `flipH` (true: the access-port block is mirrored upside down / left to right, e.g. 2 above 1), `align` (`center`|`right`), `uplinkSide` (`left`), `uplinkRows`, and `portIsolation` (true). Uplink ports are ports with
   `"role": "uplink"` (labels `U1..`), always listed after the access ports; `sectionSize` counts access ports only.
 - Any object inside a rack or group may carry `fullWidth: true` (stretch to the container's inner width).
 - Wall sockets, like patch panels, have `front` and `rear` ports with internal mappings (schema 2; files from schema 1 get rear

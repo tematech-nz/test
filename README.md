@@ -71,7 +71,8 @@ Try it: File -> Load demo project: two rooms with a fixed link between racks, a 
 - **Switch layout**: switches use plain rows by default. In the properties (or when creating one) choose ports per section
   and the section shape - e.g. a 16-port switch as two 2 x 4 sections (ports numbered 1 above 2, or across then down) - plus
   **uplink ports** (any number, shown in a purple block next to the sections: in line by default, left or right side) and
-  **align** left / center / right to match the real faceplate. "Full width" stretches equipment to the inner width of its rack
+  **align** left / center / right to match the real faceplate. Two **Reverse** checkboxes mirror the whole access-port block: *vertical* counts
+  from the bottom (2 above 1, as on switches that number that way) and *horizontal* counts from the right; both can be combined. "Full width" stretches equipment to the inner width of its rack
   or group and keeps following the rack when you resize it; in a narrow rack its sections wrap onto extra lines (taller), so the rack can
   shrink down to one section wide. Switches can also have **port isolation**.
 - **Port isolation** (switches): access ports cannot talk to each other, only to uplink ports. The Graph view honours it:

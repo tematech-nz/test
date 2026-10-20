@@ -978,11 +978,12 @@
     const order = o.portOrder === 'rows' ? 'rows' : 'columns', align = o.align || 'left', side = o.uplinkSide === 'left' ? 'left' : 'right';
     const sel = (f, list, v) => '<select data-f="' + f + '">' + opts(list, v) + '</select>';
     if (!isEdit()) {
-      return fld('Sections', cur ? per / cur + ' x (' + rows + ' x ' + cur / rows + ')' : 'none') + (up ? fld('Uplink ports', up) : '') + (o.portIsolation ? fld('Port isolation', 'on: access ports only reach uplinks') : '');
+      return fld('Sections', cur ? per / cur + ' x (' + rows + ' x ' + cur / rows + ')' : 'none') + (o.flipV || o.flipH ? fld('Reversed', [o.flipV ? 'vertical' : '', o.flipH ? 'horizontal' : ''].filter(Boolean).join(' + ')) : '') + (up ? fld('Uplink ports', up) : '') + (o.portIsolation ? fld('Port isolation', 'on: access ports only reach uplinks') : '');
     }
     let h = fld('Sections', sel('sectionSize', [[0, 'None (plain rows)']].concat(M.validSectionSizes(per).map((d) => [d, d + ' per section (' + per / d + ' x ' + d + ')'])), cur) + '<div class="sub">Equal sections only.</div>');
     if (cur) h += fld('Section shape', sel('sectionRows', M.validSectionRows(cur).map((d) => [d, d + (d === 1 ? ' row' : ' rows') + ' x ' + cur / d + ' columns']), rows));
     if (cur && rows > 1) h += fld('Port order', sel('portOrder', [['columns', 'down, then across (1 above 2)'], ['rows', 'across, then down']], order));
+    h += fld('Reverse', '<label><input type="checkbox" data-f="flipV"' + (o.flipV ? ' checked' : '') + '> vertical (counts from the bottom: 2 above 1)</label><br><label><input type="checkbox" data-f="flipH"' + (o.flipH ? ' checked' : '') + '> horizontal (counts from the right)</label>');
     h += fld('Align', sel('align', [['left', 'left'], ['center', 'center'], ['right', 'right']], align) + '<div class="sub">Where the ports sit when the switch is wider than its ports (e.g. full width).</div>');
     h += fld('Uplink ports', '<input type="number" id="upInput" min="0" max="16" value="' + up + '" style="width:60px"> ' + btn('applyUplinks', 'Apply') + '<div class="sub">Extra ports next to the sections (SFP, trunk...).</div>');
     if (up) h += fld('Uplinks on', sel('uplinkSide', [['right', 'right'], ['left', 'left']], side));
@@ -2360,6 +2361,7 @@
         else if (f === 'sectionSize') { M.setSectionSize(p, sel.id, parseInt(val, 10)); B.refitObject(p, sel.id); }
         else if (f === 'sectionRows') { M.setSwitchLayout(p, sel.id, { sectionRows: parseInt(val, 10) }); B.refitObject(p, sel.id); }
         else if (f === 'portOrder' || f === 'align' || f === 'uplinkSide') M.setSwitchLayout(p, sel.id, { [f]: val });
+        else if (f === 'flipV' || f === 'flipH') M.setSwitchLayout(p, sel.id, { [f]: !!val });
         else if (f === 'uplinkRows') { M.setSwitchLayout(p, sel.id, { uplinkRows: parseInt(val, 10) }); B.refitObject(p, sel.id); }
         else if (f === 'portIsolation') M.setSwitchLayout(p, sel.id, { portIsolation: !!val });
         else if (f === 'dhcp') M.setDhcp(p, sel.id, !!val);

@@ -95,6 +95,8 @@
     s.access.forEach(function (p, i) {
       var sec = Math.floor(i / s.size), k = i % s.size, line = Math.floor(sec / s.perRow), c = sec % s.perRow, row, col;
       if (s.order === 'columns') { col = Math.floor(k / s.R); row = k % s.R; } else { row = Math.floor(k / s.C); col = k % s.C; }
+      if (obj.flipH) { c = Math.min(s.perRow, s.nsec - line * s.perRow) - 1 - c; col = s.C - 1 - col; } // mirrored left to right: the ports count from the right
+      if (obj.flipV) { line = s.lines - 1 - line; row = s.R - 1 - row; } // mirrored upside down: the ports count from the bottom (2 above 1)
       var sx = secX + c * (s.secW + SGAP), sy = y0 + line * (s.R * rowH + LINEGAP);
       out.ports[p.id] = { x: sx + col * s.cw + (s.cw - pw) / 2, y: sy + row * rowH + (rowH - ph) / 2, w: pw, h: ph, side: 'front', hidden: false };
       if (s.sectioned && k === 0) out.groups.push({ x: sx - 1, y: sy + 1, w: s.secW + 2, h: s.R * rowH - 2, side: 'front' });
