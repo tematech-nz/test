@@ -30,14 +30,16 @@ body.mode-edit #btnMode { background: var(--edit); border-color: var(--edit); }
 body.mode-edit #editBanner { display: block; }
 body.mode-edit #stage { outline: 3px solid var(--edit); outline-offset: -3px; }
 
-#app { flex: 1; display: grid; grid-template-columns: 270px 1fr 340px; min-height: 0; }
+#app { flex: 1; display: grid; grid-template-columns: 270px 1fr var(--right-w, 340px); min-height: 0; }
 #left, #right { background: var(--panel); overflow: auto; min-height: 0; }
 #left { border-right: 1px solid var(--line); }
-#right { border-left: 1px solid var(--line); display: flex; flex-direction: column; }
+#right { border-left: 1px solid var(--line); display: flex; flex-direction: column; position: relative; }
+#rightGrip { position: absolute; left: -4px; top: 0; bottom: 0; width: 8px; cursor: col-resize; z-index: 5; touch-action: none; }
+#rightGrip:hover, #rightGrip.drag { background: rgba(21, 101, 192, .28); }
 .drawer-head, #btnCloseLeft, #btnCloseRight { display: none; }
 #btnMenu.active { background: var(--accent); color: #fff; }
 @media (min-width: 761px) {
-  body.nav-hidden #app { grid-template-columns: 0 1fr 340px; }
+  body.nav-hidden #app { grid-template-columns: 0 1fr var(--right-w, 340px); }
   body.nav-hidden #left { visibility: hidden; overflow: hidden; border: 0; }
 }
 #left section { padding: 8px 10px; border-bottom: 1px solid var(--line); }
@@ -148,6 +150,7 @@ body.view-graph #canvas, body.view-graph #toolbar, body.view-graph #zoomctl, bod
   #left .drawer-head, #right .icon-btn { display: flex; }
   .drawer-head { justify-content: space-between; align-items: center; padding: 8px 10px; border-bottom: 1px solid var(--line); }
   #btnCloseLeft, #btnCloseRight { display: inline-block; }
+  #rightGrip { display: none; }
   #right { position: fixed; z-index: 15; left: 0; right: 0; bottom: 0; max-height: 52vh; border-left: 0; border-top: 2px solid var(--accent); border-radius: 14px 14px 0 0; transform: translateY(105%); transition: transform .2s; box-shadow: 0 -4px 20px rgba(0,0,0,.25); }
   #right.open { transform: none; }
   .field { grid-template-columns: 84px 1fr; }

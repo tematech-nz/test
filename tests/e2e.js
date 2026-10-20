@@ -2009,26 +2009,47 @@ const ok = (m) => console.log('  ok   ' + m);
     await page.waitForSelector('#vp [data-kind="object"]');
   });
 
-  await step('switch: "Reverse vertical / horizontal" checkboxes mirror the port block', async () => {
+  await step('switch: the "Port numbering" list mirrors the port block', async () => {
     await page.evaluate(() => NetMap.app.api.loadProject(NetMap.builder.buildDemoProject()));
     if (!(await page.evaluate(() => NetMap.app.S.mode === 'edit'))) await page.click('#btnMode');
     const ids = await page.evaluate(() => { const sw = NetMap.app.S.p.objects.find((o) => o.name === 'Switch A'); return { sw: sw.id, p1: sw.ports.find((x) => x.label === '1').id, p13: sw.ports.find((x) => x.label === '13').id }; });
     await page.evaluate((id) => NetMap.app.api.select({ kind: 'object', id }), ids.sw);
-    await page.waitForSelector('#detailsPane input[data-f="flipV"]');
+    await page.waitForSelector('#detailsPane select[data-f="portNumbering"]');
     const y = (id) => page.evaluate((i) => parseFloat(document.querySelector('#vp rect[data-kind="port"][data-id="' + i + '"]').getAttribute('y')), id);
     const x = (id) => page.evaluate((i) => parseFloat(document.querySelector('#vp rect[data-kind="port"][data-id="' + i + '"]').getAttribute('x')), id);
     const y1 = await y(ids.p1), y13 = await y(ids.p13), x1 = await x(ids.p1);
     assert.ok(y1 < y13, 'default: port 1 is on the upper row');
-    await page.check('#detailsPane input[data-f="flipV"]');
-    assert.ok((await y(ids.p1)) > (await y(ids.p13)), 'reverse vertical: the rows swap');
-    await page.uncheck('#detailsPane input[data-f="flipV"]');
+    const labels = await page.locator('#detailsPane select[data-f="portNumbering"] option').allInnerTexts();
+    assert.ok(labels.length === 4 && labels.some((t) => /bottom/.test(t)) && labels.some((t) => /right/.test(t)), 'one list, no separate checkboxes: ' + labels.join(' | '));
+    assert.strictEqual(await page.locator('#detailsPane input[data-f="flipV"]').count(), 0);
+    const pickBy = (re) => page.evaluate((src) => Array.from(document.querySelectorAll('#detailsPane select[data-f="portNumbering"] option')).find((o) => new RegExp(src).test(o.textContent)).value, re.source);
+    await page.selectOption('#detailsPane select[data-f="portNumbering"]', await pickBy(/bottom left/));
+    assert.ok((await y(ids.p1)) > (await y(ids.p13)), 'from the bottom: the rows swap');
+    await page.selectOption('#detailsPane select[data-f="portNumbering"]', await pickBy(/top left/));
     assert.strictEqual(await y(ids.p1), y1, 'and back');
-    await page.check('#detailsPane input[data-f="flipH"]');
-    assert.ok((await x(ids.p1)) > x1, 'reverse horizontal: port 1 moves to the right');
-    await page.uncheck('#detailsPane input[data-f="flipH"]');
+    await page.selectOption('#detailsPane select[data-f="portNumbering"]', await pickBy(/top right/));
+    assert.ok((await x(ids.p1)) > x1, 'from the right: port 1 moves to the right');
+    await page.selectOption('#detailsPane select[data-f="portNumbering"]', await pickBy(/top left/));
     assert.strictEqual(await x(ids.p1), x1);
     await page.evaluate(() => NetMap.app.api.loadProject(NetMap.builder.buildDemoProject()));
     await page.waitForSelector('#vp [data-kind="object"]');
+  });
+
+  await step('details panel: drag its left edge to change the width (remembered); double-click resets', async () => {
+    await page.evaluate(() => NetMap.app.api.loadProject(NetMap.builder.buildDemoProject()));
+    const w = () => page.evaluate(() => Math.round(document.getElementById('right').getBoundingClientRect().width));
+    const w0 = await w(); assert.ok(w0 >= 330 && w0 <= 345, 'starts at about 340: ' + w0);
+    const gb = await page.locator('#rightGrip').boundingBox();
+    await page.mouse.move(gb.x + 4, gb.y + 200); await page.mouse.down(); await page.mouse.move(gb.x - 146, gb.y + 200, { steps: 5 }); await page.mouse.up();
+    const w1 = await w(); assert.ok(w1 >= w0 + 140, 'wider after dragging left: ' + w0 + ' -> ' + w1);
+    assert.strictEqual(await page.evaluate(() => localStorage.getItem('netmap.rightWidth')), String(w1), 'remembered');
+    const gb2 = await page.locator('#rightGrip').boundingBox();
+    await page.mouse.move(gb2.x + 4, gb2.y + 200); await page.mouse.down(); await page.mouse.move(gb2.x + 600, gb2.y + 200, { steps: 5 }); await page.mouse.up();
+    assert.ok((await w()) >= 280 && (await w()) < w0, 'never narrower than the minimum (280)');
+    await page.locator('#rightGrip').dblclick({ position: { x: 4, y: 200 } });
+    assert.strictEqual(await w(), 340, 'double-click resets');
+    await page.reload(); await page.waitForSelector('#vp [data-kind="object"]');
+    assert.strictEqual(await w(), 340);
   });
 
   await step('autosave survives a refresh', async () => {

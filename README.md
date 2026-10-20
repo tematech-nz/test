@@ -71,8 +71,8 @@ Try it: File -> Load demo project: two rooms with a fixed link between racks, a 
 - **Switch layout**: switches use plain rows by default. In the properties (or when creating one) choose ports per section
   and the section shape - e.g. a 16-port switch as two 2 x 4 sections (ports numbered 1 above 2, or across then down) - plus
   **uplink ports** (any number, shown in a purple block next to the sections: in line by default, left or right side) and
-  **align** left / center / right to match the real faceplate. Two **Reverse** checkboxes mirror the whole access-port block: *vertical* counts
-  from the bottom (2 above 1, as on switches that number that way) and *horizontal* counts from the right; both can be combined. "Full width" stretches equipment to the inner width of its rack
+  **align** left / center / right to match the real faceplate. One **Port numbering** list sets where port 1 is and which way the numbers run: 1 above 2 or 2 above 1 (as on switches that number
+  that way), or across then down, each from the left or the right (and from the bottom for the across-then-down kind). "Full width" stretches equipment to the inner width of its rack
   or group and keeps following the rack when you resize it; in a narrow rack its sections wrap onto extra lines (taller), so the rack can
   shrink down to one section wide. Switches can also have **port isolation**.
 - **Port isolation** (switches): access ports cannot talk to each other, only to uplink ports. The Graph view honours it:
@@ -160,6 +160,7 @@ Try it: File -> Load demo project: two rooms with a fixed link between racks, a 
   drawn on top of equipment, so they never hide behind it. When a link continues on another map, its wire runs to the label in full, drawn above
   everything, and follows the label when you move it (a label right under or over its panel gets a short stub into the middle of its top or bottom edge, otherwise the wire joins the side of the label that faces the panel). In view mode, double-click a link's
   label to jump to the map where the link ends. A link with both ends on the map keeps a thin dashed leader line to a moved label.
+- **Details panel width**: drag the left edge of the details panel to make it wider or narrower (280 px and up); double-click the edge to reset. The width is remembered in this browser.
 - **Quick start**: File > Quick start / help (shown once automatically on the first visit with an empty project) explains the workflow,
   including that a fixed link can join panels on different maps, plus keyboard shortcuts.
 - **New fixed link** shows the real rear ports of both panels: occupied ports are greyed out and cannot be picked, port groups are shown
