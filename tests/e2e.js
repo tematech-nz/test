@@ -2009,27 +2009,23 @@ const ok = (m) => console.log('  ok   ' + m);
     await page.waitForSelector('#vp [data-kind="object"]');
   });
 
-  await step('switch: the "Port numbering" list mirrors the port block', async () => {
+  await step('switch: "Reverse vertical / horizontal" checkboxes mirror the port block', async () => {
     await page.evaluate(() => NetMap.app.api.loadProject(NetMap.builder.buildDemoProject()));
     if (!(await page.evaluate(() => NetMap.app.S.mode === 'edit'))) await page.click('#btnMode');
     const ids = await page.evaluate(() => { const sw = NetMap.app.S.p.objects.find((o) => o.name === 'Switch A'); return { sw: sw.id, p1: sw.ports.find((x) => x.label === '1').id, p13: sw.ports.find((x) => x.label === '13').id }; });
     await page.evaluate((id) => NetMap.app.api.select({ kind: 'object', id }), ids.sw);
-    await page.waitForSelector('#detailsPane select[data-f="portNumbering"]');
+    await page.waitForSelector('#detailsPane input[data-f="flipV"]');
     const y = (id) => page.evaluate((i) => parseFloat(document.querySelector('#vp rect[data-kind="port"][data-id="' + i + '"]').getAttribute('y')), id);
     const x = (id) => page.evaluate((i) => parseFloat(document.querySelector('#vp rect[data-kind="port"][data-id="' + i + '"]').getAttribute('x')), id);
     const y1 = await y(ids.p1), y13 = await y(ids.p13), x1 = await x(ids.p1);
     assert.ok(y1 < y13, 'default: port 1 is on the upper row');
-    const labels = await page.locator('#detailsPane select[data-f="portNumbering"] option').allInnerTexts();
-    assert.ok(labels.length === 4 && labels.some((t) => /bottom/.test(t)) && labels.some((t) => /right/.test(t)), 'one list, no separate checkboxes: ' + labels.join(' | '));
-    assert.strictEqual(await page.locator('#detailsPane input[data-f="flipV"]').count(), 0);
-    const pickBy = (re) => page.evaluate((src) => Array.from(document.querySelectorAll('#detailsPane select[data-f="portNumbering"] option')).find((o) => new RegExp(src).test(o.textContent)).value, re.source);
-    await page.selectOption('#detailsPane select[data-f="portNumbering"]', await pickBy(/bottom left/));
-    assert.ok((await y(ids.p1)) > (await y(ids.p13)), 'from the bottom: the rows swap');
-    await page.selectOption('#detailsPane select[data-f="portNumbering"]', await pickBy(/top left/));
+    await page.check('#detailsPane input[data-f="flipV"]');
+    assert.ok((await y(ids.p1)) > (await y(ids.p13)), 'reverse vertical: the rows swap');
+    await page.uncheck('#detailsPane input[data-f="flipV"]');
     assert.strictEqual(await y(ids.p1), y1, 'and back');
-    await page.selectOption('#detailsPane select[data-f="portNumbering"]', await pickBy(/top right/));
-    assert.ok((await x(ids.p1)) > x1, 'from the right: port 1 moves to the right');
-    await page.selectOption('#detailsPane select[data-f="portNumbering"]', await pickBy(/top left/));
+    await page.check('#detailsPane input[data-f="flipH"]');
+    assert.ok((await x(ids.p1)) > x1, 'reverse horizontal: port 1 moves to the right');
+    await page.uncheck('#detailsPane input[data-f="flipH"]');
     assert.strictEqual(await x(ids.p1), x1);
     await page.evaluate(() => NetMap.app.api.loadProject(NetMap.builder.buildDemoProject()));
     await page.waitForSelector('#vp [data-kind="object"]');
