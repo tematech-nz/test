@@ -2055,6 +2055,34 @@ const ok = (m) => console.log('  ok   ' + m);
     assert.strictEqual(await w(), 340);
   });
 
+  await step('switch port group with its own subnet: form, group panel, validation', async () => {
+    await page.evaluate(() => NetMap.app.api.loadProject(NetMap.builder.buildDemoProject()));
+    if (!(await page.evaluate(() => NetMap.app.S.mode === 'edit'))) await page.click('#btnMode');
+    const sw = await page.evaluate(() => NetMap.app.S.p.objects.find((o) => o.name === 'Switch A').id);
+    await page.evaluate((id) => NetMap.app.api.select({ kind: 'object', id }), sw);
+    await page.waitForSelector('#pgNewSubnet');
+    await page.fill('#pgNewName', 'IoT'); await page.fill('#pgNewPorts', '13-22'); await page.fill('#pgNewSubnet', '192.168.70');
+    await page.click('#detailsPane button[data-act="addPGroup"]');
+    await page.waitForSelector('#detailsPane input[data-f="pgSubnet"]');
+    const sub = () => page.evaluate((id) => NetMap.app.S.p.objects.find((o) => o.id === id).portGroups.find((g) => g.name === 'IoT').subnet, sw);
+    assert.strictEqual(await sub(), '192.168.70.0/24', 'normalised to a /24 network');
+    assert.strictEqual(await page.inputValue('#detailsPane input[data-f="pgSubnet"]'), '192.168.70.0/24');
+    await page.fill('#detailsPane input[data-f="pgSubnet"]', '10.9.0.0/24'); await page.press('#detailsPane input[data-f="pgSubnet"]', 'Tab');
+    assert.strictEqual(await sub(), '10.9.0.0/24', 'edited in the group panel');
+    await page.fill('#detailsPane input[data-f="pgSubnet"]', '999.1.1.1'); await page.press('#detailsPane input[data-f="pgSubnet"]', 'Tab');
+    assert.strictEqual(await sub(), '10.9.0.0/24', 'an invalid subnet is refused and nothing changes');
+    assert.ok(/Not a valid subnet/.test(await page.innerText('#toast')), 'with a message');
+    await page.fill('#detailsPane input[data-f="pgSubnet"]', ''); await page.press('#detailsPane input[data-f="pgSubnet"]', 'Tab');
+    assert.strictEqual(await sub(), undefined, 'empty: back to the default network');
+    // a patch panel group has no subnet field
+    const pp = await page.evaluate(() => NetMap.app.S.p.objects.find((o) => o.name === 'PP-A').id);
+    await page.evaluate((id) => NetMap.app.api.select({ kind: 'object', id }), pp);
+    await page.waitForSelector('#pgNewName');
+    assert.strictEqual(await page.locator('#pgNewSubnet').count(), 0);
+    await page.evaluate(() => NetMap.app.api.loadProject(NetMap.builder.buildDemoProject()));
+    await page.waitForSelector('#vp [data-kind="object"]');
+  });
+
   await step('autosave survives a refresh', async () => {
     await page.click('#btnMode'); // back to view mode flushes the save
     const name = await page.evaluate(() => NetMap.app.S.p.name);

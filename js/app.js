@@ -1064,7 +1064,7 @@
   const groupSide = (o, g) => { const sides = Array.from(new Set(o.ports.filter((pt) => g.portIds.indexOf(pt.id) >= 0).map((pt) => pt.side))); return M.isTermination(o) && sides.length === 1 ? sides[0] : null; };
   function pgroupRows(o) {
     return (o.portGroups || []).map((g) => '<div class="list-item" data-act="select" data-kind="pgroup" data-id="' + esc(g.id) + '"><span class="swatch" style="background:' + esc(g.color) + '"></span><div class="grow"><b>' + esc(g.name) + '</b> <span class="sub">' +
-      (groupSide(o, g) ? groupSide(o, g) + ' ' : '') + esc(portsText(o, g, groupSide(o, g))) + '</span></div></div>').join('');
+      (groupSide(o, g) ? groupSide(o, g) + ' ' : '') + esc(portsText(o, g, groupSide(o, g))) + (g.subnet ? ' - own network ' + esc(g.subnet) : '') + '</span></div></div>').join('');
   }
   function detPGroup(id) {
     const f = M.findPortGroup(S.p, id), o = f.obj, g = f.group, side = groupSide(o, g);
@@ -1074,6 +1074,10 @@
     if (!M.isTermination(o) && o.type !== 'rack' && o.type !== 'internet') {
       h += isEdit() ? fld('Plugged-in device', '<select data-f="pgDevice" data-t="' + esc(g.id) + '">' + opts([['', 'none - just a label']].concat(M.DEVICE_KINDS.map((k) => [k[0], k[1]])), g.deviceKind || '') + '</select>' +
         '<div class="sub">Marks these ports as occupied by that kind of equipment without adding each one (e.g. 16 cameras). The graph shows one "' + esc(g.name) + ' x' + g.portIds.length + '" endpoint on ' + esc(o.name) + '.</div>') : (g.deviceKind ? fld('Plugged-in device', esc(M.DEVICE_KINDS.find((k) => k[0] === g.deviceKind)[1]) + ' x' + g.portIds.length) : '');
+    }
+    if (o.type === 'switch' && (isEdit() || g.subnet)) {
+      h += inp('Subnet', 'pgSubnet', g.subnet || '', g.id, 'placeholder="e.g. 192.168.70.0/24"');
+      if (isEdit()) h += '<div class="sub">Optional. With a subnet these ports are a network of their own (a VLAN): they only talk to ports of the same network, and the uplinks carry all networks. Ports in no such group are the default network. Devices on a DHCP port count as being in this subnet.</div>';
     }
     if (isEdit()) h += '<div class="sub">Ports as numbers and ranges, e.g. 7-14, 17. A port belongs to one group.</div>';
     const peer = M.peerGroup(S.p, g.id);
@@ -1097,6 +1101,7 @@
     h += '<h3>Port groups (' + (o.portGroups || []).length + ')</h3>' + (pgroupRows(o) || '<div class="sub">None. Name and colour a set of ports, e.g. "to rack office".</div>');
     if (isEdit()) {
       h += '<div class="sub" style="margin-top:6px">New group: <input type="text" id="pgNewName" placeholder="name" style="width:9em"> ports <input type="text" id="pgNewPorts" placeholder="7-14, 17" style="width:7em">' +
+        (o.type === 'switch' ? ' <input type="text" id="pgNewSubnet" placeholder="subnet (optional)" title="Optional: these ports are a network of their own with this subnet, e.g. 192.168.70.0/24" style="width:9em">' : '') +
         (M.isTermination(o) ? ' <select id="pgNewSide"><option value="rear">rear</option><option value="front">front</option></select>' : '') +
         ' <select id="pgNewColor">' + opts(M.CABLE_COLORS.filter((c) => c[0] !== 'white').map((c) => [c[1], c[0]]), '#1f77b4') + '</select> ' +
         (M.isTermination(o) || o.type === 'rack' || o.type === 'internet' ? '' : '<select id="pgNewDevice" title="Plugged-in device: marks the ports as occupied by that kind of equipment">' + opts([['', 'no device']].concat(M.DEVICE_KINDS.map((k) => [k[0], k[1]])), '') + '</select> ') + btn('addPGroup', 'Add') + '</div>';
@@ -2380,6 +2385,7 @@
         if (f === 'pgName') M.updatePortGroup(p, sel.id, { name: val });
         else if (f === 'pgColor') M.updatePortGroup(p, sel.id, { color: val });
         else if (f === 'pgDevice') M.updatePortGroup(p, sel.id, { deviceKind: val });
+        else if (f === 'pgSubnet') M.updatePortGroup(p, sel.id, { subnet: val });
         else if (f === 'pgPorts') M.updatePortGroup(p, sel.id, { portsText: val, side: side || undefined });
       } else if (sel.kind === 'link') M.updateLinkMeta(p, sel.id, { [f]: val });
     });
@@ -2701,7 +2707,7 @@
         }
         case 'addPGroup': {
           const id = S.sel.id, side = $('pgNewSide') ? $('pgNewSide').value : undefined;
-          const spec = { name: $('pgNewName').value, portsText: $('pgNewPorts').value, side: side, color: $('pgNewColor').value, deviceKind: $('pgNewDevice') ? $('pgNewDevice').value || undefined : undefined };
+          const spec = { name: $('pgNewName').value, portsText: $('pgNewPorts').value, side: side, color: $('pgNewColor').value, deviceKind: $('pgNewDevice') ? $('pgNewDevice').value || undefined : undefined, subnet: $('pgNewSubnet') ? $('pgNewSubnet').value : undefined };
           const g = commit('Add port group', (p) => M.addPortGroup(p, id, spec));
           if (g && g !== true) { S.sel = { kind: 'pgroup', id: g.id }; renderAll(); }
           break;

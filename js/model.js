@@ -433,6 +433,25 @@
     p.objects.forEach(function (o) { (o.portGroups || []).forEach(function (g) { if (g.deviceKind) out.push({ obj: o, group: g, count: g.portIds.length }); }); });
     return out;
   }
+  /*
+   * A port group on a switch can carry a subnet: its ports then form their own network (a VLAN) with that subnet; ports in no such group are
+   * the default network. Accepts an address (192.168.70.5), a network (192.168.70.0/24) or the first three numbers (192.168.70); the app
+   * works with /24 networks, so that is what is stored. '' removes it.
+   */
+  var SUBNET_ERROR = 'Not a valid subnet: use four numbers such as 192.168.70.0/24 (or just 192.168.70); only /24 networks are understood';
+  function parseSubnet(text) {
+    var s = String(text == null ? '' : text).trim();
+    if (!s) return '';
+    var q = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})(?:\.(\d{1,3}))?(?:\/24)?$/.exec(s);
+    if (!q || [q[1], q[2], q[3], q[4] || '0'].some(function (x) { return +x > 255; })) throw new Error(SUBNET_ERROR);
+    return +q[1] + '.' + +q[2] + '.' + +q[3] + '.0/24';
+  }
+  /* the network a port is in: its group's subnet, or '' for the default network */
+  function portSubnet(o, portId) {
+    var gs = o.portGroups || [];
+    for (var i = 0; i < gs.length; i++) if (gs[i].subnet && gs[i].portIds.indexOf(portId) >= 0) return gs[i].subnet;
+    return '';
+  }
   function addPortGroup(p, objectId, spec) {
     var o = buildIndex(p).objects[objectId];
     if (!o) throw new Error('Object not found');
@@ -449,6 +468,8 @@
     o.portGroups.forEach(function (g) { g.portIds = g.portIds.filter(function (x) { return ids.indexOf(x) < 0; }); });
     var grp = { id: uid('pgp'), name: name, color: spec.color || '#1f77b4', portIds: ids };
     if (spec.deviceKind) grp.deviceKind = spec.deviceKind;
+    var sub = parseSubnet(spec.subnet);
+    if (sub) { if (o.type !== 'switch') throw new Error('Only switch ports can be put in a subnet of their own'); grp.subnet = sub; }
     o.portGroups.push(grp);
     prunePortGroups(o);
     return grp;
@@ -459,6 +480,11 @@
     var g = f.group, o = f.obj;
     if (patch.name !== undefined) { if (!String(patch.name).trim()) throw new Error('Give the group a name'); g.name = String(patch.name).trim(); }
     if (patch.color !== undefined) g.color = patch.color;
+    if (patch.subnet !== undefined) {
+      var sub = parseSubnet(patch.subnet);
+      if (sub && o.type !== 'switch') throw new Error('Only switch ports can be put in a subnet of their own');
+      if (sub) g.subnet = sub; else delete g.subnet;
+    }
     if (patch.deviceKind !== undefined) {
       if (!validKind(patch.deviceKind)) throw new Error('Unknown device type');
       checkPseudo(p, o, g.portIds, patch.deviceKind);
@@ -1353,7 +1379,7 @@
     findContainer: findContainer, groupOf: groupOf, parentOf: parentOf, containerChildren: containerChildren, descendants: descendants,
     addPlacement: addPlacement, placementOf: placementOf, placementGroup: placementGroup, movePlacement: movePlacement,
     growToFit: growToFit, mapsFor: mapsFor, addGroup: addGroup, addObject: addObject, setContainer: setContainer,
-    setPortCount: setPortCount, findPortGroup: findPortGroup, parsePortRange: parsePortRange, addPortGroup: addPortGroup, updatePortGroup: updatePortGroup, deletePortGroup: deletePortGroup, portGroupOf: portGroupOf, prunePortGroups: prunePortGroups, hasDeviceIp: hasDeviceIp, isFloorMap: isFloorMap, equipmentMaps: equipmentMaps, floorMaps: floorMaps, addMap: addMap, moveMap: moveMap, normalizeGhosts: normalizeGhosts, overviewBlock: overviewBlock, overviewBlocks: overviewBlocks, OVERVIEW_CLEAR: OVERVIEW_CLEAR, moveOverviewBlock: moveOverviewBlock, overviewOffset: overviewOffset, setLinkLabelOffset: setLinkLabelOffset, realMaps: realMaps, allMap: allMap, syncAllMap: syncAllMap, peerGroup: peerGroup, linkPortGroups: linkPortGroups, unlinkPortGroup: unlinkPortGroup, realPlacement: realPlacement, syncGhosts: syncGhosts, pseudoOf: pseudoOf, pseudoDevices: pseudoDevices, hasPortIp: hasPortIp, setDeviceIp: setDeviceIp, setDhcp: setDhcp, effectivePortIp: effectivePortIp, ipList: ipList, setPortIp: setPortIp, IP_ERROR: IP_ERROR, setDeviceKind: setDeviceKind, isTermination: isTermination, DEVICE_KINDS: DEVICE_KINDS, deviceKindInfo: deviceKindInfo, typeLabel: typeLabel, accessPorts: accessPorts, validSectionRows: validSectionRows, setUplinkPorts: setUplinkPorts, setSwitchLayout: setSwitchLayout, setFullWidth: setFullWidth, setSectionSize: setSectionSize, validSectionSizes: validSectionSizes, defaultSectionSize: defaultSectionSize, effectiveSectionSize: effectiveSectionSize, setRouterPorts: setRouterPorts, isValidIp: isValidIp, canConnectPatch: canConnectPatch, addPatchCable: addPatchCable,
+    setPortCount: setPortCount, findPortGroup: findPortGroup, parsePortRange: parsePortRange, addPortGroup: addPortGroup, updatePortGroup: updatePortGroup, deletePortGroup: deletePortGroup, portGroupOf: portGroupOf, prunePortGroups: prunePortGroups, hasDeviceIp: hasDeviceIp, isFloorMap: isFloorMap, equipmentMaps: equipmentMaps, floorMaps: floorMaps, addMap: addMap, moveMap: moveMap, normalizeGhosts: normalizeGhosts, overviewBlock: overviewBlock, overviewBlocks: overviewBlocks, OVERVIEW_CLEAR: OVERVIEW_CLEAR, moveOverviewBlock: moveOverviewBlock, overviewOffset: overviewOffset, setLinkLabelOffset: setLinkLabelOffset, realMaps: realMaps, allMap: allMap, syncAllMap: syncAllMap, peerGroup: peerGroup, linkPortGroups: linkPortGroups, unlinkPortGroup: unlinkPortGroup, realPlacement: realPlacement, syncGhosts: syncGhosts, pseudoOf: pseudoOf, pseudoDevices: pseudoDevices, hasPortIp: hasPortIp, setDeviceIp: setDeviceIp, setDhcp: setDhcp, parseSubnet: parseSubnet, portSubnet: portSubnet, SUBNET_ERROR: SUBNET_ERROR, effectivePortIp: effectivePortIp, ipList: ipList, setPortIp: setPortIp, IP_ERROR: IP_ERROR, setDeviceKind: setDeviceKind, isTermination: isTermination, DEVICE_KINDS: DEVICE_KINDS, deviceKindInfo: deviceKindInfo, typeLabel: typeLabel, accessPorts: accessPorts, validSectionRows: validSectionRows, setUplinkPorts: setUplinkPorts, setSwitchLayout: setSwitchLayout, setFullWidth: setFullWidth, setSectionSize: setSectionSize, validSectionSizes: validSectionSizes, defaultSectionSize: defaultSectionSize, effectiveSectionSize: effectiveSectionSize, setRouterPorts: setRouterPorts, isValidIp: isValidIp, canConnectPatch: canConnectPatch, addPatchCable: addPatchCable,
     updatePatchCable: updatePatchCable, deletePatchCable: deletePatchCable, addInternalMapping: addInternalMapping,
     removeInternalMapping: removeInternalMapping, autoMapPanel: autoMapPanel, rearPorts: rearPorts,
     sequentialPorts: sequentialPorts, addFixedLink: addFixedLink, updateLinkMeta: updateLinkMeta,

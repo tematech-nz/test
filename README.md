@@ -75,6 +75,11 @@ Try it: File -> Load demo project: two rooms with a fixed link between racks, a 
   from the bottom (2 above 1, as on switches that number that way) and *horizontal* counts from the right; both can be combined. "Full width" stretches equipment to the inner width of its rack
   or group and keeps following the rack when you resize it; in a narrow rack its sections wrap onto extra lines (taller), so the rack can
   shrink down to one section wide. Switches can also have **port isolation**.
+- **Separate subnets on one switch (VLANs)**: make a port group on a switch (for example ports 1-12 and 13-22) and give it a **Subnet** (192.168.1.0/24, or
+  just 192.168.1). Its ports are then a network of their own: they only talk to ports of the same network, the uplinks carry every network, and ports in
+  no such group are the default network. In the Graph, devices of two networks meet only through a router above (up and back), and not at all when there
+  is none; "Show all links in this network" stays inside the network, a switch with several subnets raises no "different subnets" warning, and a DHCP
+  device on such a port is in that subnet. The app works with /24 networks.
 - **Port isolation** (switches): access ports cannot talk to each other, only to uplink ports. The Graph view honours it:
   devices on an isolated switch's access ports reach the uplink side but not each other directly. They can only meet by going
   up an uplink and back down (e.g. through a router, shown as a longer path through the switch twice); if nothing upstream turns

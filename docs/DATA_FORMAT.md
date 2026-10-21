@@ -56,7 +56,8 @@ compact files open identically (`compactProject()` / `expandProject()` in `js/mo
 - Router ports may carry `networkColor` (hex), the default colour for patch cables extending from them.
 - A fixed link may carry `labelAt: { "<mapId>": [dx, dy] }`: its label was dragged by that offset (map units) on that map.
 - Any equipment with ports may carry `portGroups`: `[{ "id", "name", "color", "portIds": [...] }]` (a port is in at most one
-  group; visual/organisational). A group of a switch, router or generic device may also carry `deviceKind` (a device type id such as
+  group; visual/organisational). A group of a **switch** may also carry `subnet` (a /24 network such as `"192.168.70.0/24"`): its ports are then a
+  network of their own (a VLAN); ports in no such group are the default network and uplinks carry all of them. A group of a switch, router or generic device may also carry `deviceKind` (a device type id such as
   `camera`): a **pseudo-device** - the ports are occupied by that many unmodelled devices; the topology graph shows one endpoint
   "<name> x<ports>" and patch cables cannot be added to those ports. A group may also carry `peerId`: the id of the linked group at the
   other end of a fixed link made from it (both groups carry each other's id; names and colours are independent).

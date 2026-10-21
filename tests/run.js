@@ -2223,5 +2223,50 @@ test('overview blocks never overlap: a block dropped on another gives way (short
   assert.strictEqual(JSON.stringify(p.maps.map(m => m.allOff)), snap, 'idempotent: nothing moves once the blocks are clear');
 });
 
+test('switch ports in subnets of their own (VLANs): same-network ports talk through the switch, others only via a router; segments and traces follow', () => {
+  const TP = NM.topology;
+  const p = M.createProject('vlan');
+  const sw = M.addObject(p, { type: 'switch', name: 'SW', portCount: 22, uplinkPorts: 1 });
+  const rt = M.addObject(p, { type: 'router', name: 'R', wanPorts: 1, lanPorts: 2 });
+  const mk = (n) => M.addObject(p, { type: 'generic', name: n, portCount: 1 });
+  const d1 = mk('D1'), d2 = mk('D2'), d3 = mk('D3'), d4 = mk('D4');
+  const port = (o, label) => o.ports.find(x => x.label === String(label)).id;
+  M.addPortGroup(p, sw.id, { name: 'Office', portsText: '1-12', subnet: '192.168.1', color: '#1f77b4' });
+  const iot = M.addPortGroup(p, sw.id, { name: 'IoT', portsText: '13-22', subnet: '192.168.70.0/24', color: '#2ca02c' });
+  assert.strictEqual(iot.subnet, '192.168.70.0/24'); assert.strictEqual(sw.portGroups[0].subnet, '192.168.1.0/24', 'normalised to a /24 network');
+  assert.strictEqual(M.portSubnet(sw, port(sw, 5)), '192.168.1.0/24'); assert.strictEqual(M.portSubnet(sw, port(sw, 15)), '192.168.70.0/24');
+  const plug = (d, n) => M.addPatchCable(p, { aPortId: d.ports[0].id, bPortId: port(sw, n) });
+  plug(d1, 1); plug(d2, 5); plug(d3, 13); plug(d4, 20);
+  M.addPatchCable(p, { aPortId: sw.ports.find(x => x.role === 'uplink').id, bPortId: rt.ports.find(x => x.label === 'L1').id });
+  M.setDeviceIp(p, d1.id, '192.168.1.10'); M.setDeviceIp(p, d2.id, '192.168.1.11'); M.setDeviceIp(p, d3.id, '192.168.70.10'); M.setDeviceIp(p, d4.id, '192.168.70.11');
+  const g = TP.buildGraph(p), tree = TP.reachTree(g, d1.id);
+  assert.strictEqual(tree.depth[d2.id], 2, 'D1 -> switch -> D2: same network');
+  assert.strictEqual(tree.depth[d3.id], 4, 'D1 reaches D3 only the long way: up to the router and back down (routed)');
+  assert.strictEqual(TP.allPaths(g, d1.id, d3.id).length, 1);
+  assert.deepStrictEqual(TP.allPaths(g, d1.id, d3.id)[0].nodes.map(id => g.nodes[id].name), ['D1', 'SW', 'R', 'SW', 'D3']);
+  assert.strictEqual(TP.reachTree(g, d3.id).depth[d4.id], 2, 'D3 and D4 share the IoT network');
+  assert.ok(g.nodes[sw.id].nets.includes('192.168.1.0/24') && g.nodes[sw.id].nets.includes('192.168.70.0/24'), 'the switch is in both subnets');
+  // without the router the two networks cannot meet at all
+  const q = M.clone(p); M.deleteContainerOrObject(q, 'object', rt.id, 'delete');
+  assert.strictEqual(TP.reachTree(TP.buildGraph(q), d1.id).depth[d3.id], undefined, 'no route between the networks of a switch without a router');
+  assert.strictEqual(TP.reachTree(TP.buildGraph(q), d1.id).depth[d2.id], 2);
+  // one switch, two subnets: that is not a mismatch, so no network warning
+  assert.ok(!TP.networkIssues(p).some(i => /subnet/i.test(i.message)), 'no "different subnets" warning: ' + JSON.stringify(TP.networkIssues(p).map(i => i.message)));
+  // "show all links in this network" from D1 stays inside its own network
+  const tr = NM.trace.traceTarget(p, { kind: 'port', id: d1.ports[0].id }).traces;
+  const cables = TP.networkTraces(p, tr, g).map(t => t.path.filter(s => s.type === 'patch').map(s => s.id)).flat();
+  const cableOf = (d, n) => p.patchCables.find(c => (c.aPortId === d.ports[0].id || c.bPortId === d.ports[0].id)).id;
+  assert.ok(cables.includes(cableOf(d2)) && cables.includes(cableOf(d1)), 'its own network');
+  assert.ok(!cables.includes(cableOf(d3)) && !cables.includes(cableOf(d4)), 'not the other network');
+  // DHCP: a device on a port of a network with a subnet is in that subnet, whatever the router says
+  const d5 = mk('D5'); plug(d5, 18); M.setDhcp(p, d5.id, true);
+  assert.deepStrictEqual(TP.buildGraph(p).nodes[d5.id].nets, ['192.168.70.0/24']);
+  // rules: only switches; subnet text is checked; removing it makes the ports default again
+  assert.throws(() => M.addPortGroup(p, rt.id, { name: 'x', portsText: 'L1', subnet: '10.0.0.0/24' }), /Only switch ports/);
+  assert.throws(() => M.updatePortGroup(p, iot.id, { subnet: '300.1.1.0' }), /Not a valid subnet/);
+  M.updatePortGroup(p, iot.id, { subnet: '' }); assert.ok(!('subnet' in iot) && M.portSubnet(sw, port(sw, 15)) === '');
+  assert.strictEqual(M.migrate(JSON.parse(M.serializeProject(p))).project.objects.find(o => o.id === sw.id).portGroups[0].subnet, '192.168.1.0/24', 'survives save and load');
+});
+
 console.log('\n' + passed + ' passed, ' + failed + ' failed');
 process.exit(failed ? 1 : 0);

@@ -25,6 +25,7 @@
       var s = subnetOf(ip);
       if (s && out.indexOf(s) < 0) out.push(s);
     });
+    (o.portGroups || []).forEach(function (g) { if (g.subnet && out.indexOf(g.subnet) < 0) out.push(g.subnet); }); // subnets of a switch's own networks (VLANs)
     return out;
   }
 
@@ -47,6 +48,7 @@
         id: o.id, name: o.name, type: o.type, label: M.typeLabel(o), ip: M.ipList(o).map(function (x) { return x.ip; }).filter(function (v, i, a) { return a.indexOf(v) === i; }).join(', '), nets: nodeNets(o),
         transit: !TERMINAL[o.type] || (o.type === 'internet' && !!opts.viaInternet),
         isolated: o.type === 'switch' && !!o.portIsolation,
+        hasVlans: o.type === 'switch' && (o.portGroups || []).some(function (g) { return !!g.subnet; }),
         publicIp: o.type === 'internet' && !!o.publicIp,
         dhcp: !!o.dhcp && (o.type === 'generic' || o.type === 'switch')
       };
@@ -89,6 +91,13 @@
       l.paths.push(e);
       if (idx.ports[e.aPortId].role === 'uplink') l.uplinkAt[e.a] = true;
       if (idx.ports[e.bPortId].role === 'uplink') l.uplinkAt[e.b] = true;
+      // which network (VLAN) each access port of a switch end is in: '' is the default one; uplinks carry every network
+      [[e.a, e.aPortId], [e.b, e.bPortId]].forEach(function (x) {
+        var so = idx.objects[x[0]];
+        if (!so || so.type !== 'switch' || idx.ports[x[1]].role === 'uplink') return;
+        (l.vlanAt = l.vlanAt || {})[x[0]] = l.vlanAt[x[0]] || {};
+        l.vlanAt[x[0]][M.portSubnet(so, x[1])] = true;
+      });
     });
     // a DHCP device has no address of its own to read a subnet from: it is in the LAN of the router it hangs off (reached over switches only)
     order.forEach(function (id) {
@@ -100,6 +109,10 @@
         (adj[cur] || []).forEach(function (e) {
           if (seenN[e.to]) return;
           var far = nodes[e.to];
+          if (cur === id && far.type === 'switch') { // plugged into a port of a switch network with a subnet of its own: that is its network
+            var vk = vlanKeyOf(e.link, e.to);
+            if (vk) { if (n.nets.indexOf(vk) < 0) n.nets.push(vk); return; }
+          }
           if (far.type === 'router') {
             e.link.paths.forEach(function (pe) {
               [pe.aPortId, pe.bPortId].forEach(function (pid) {
@@ -131,11 +144,33 @@
     if (!na || !nb || !na.length || !nb.length) return false;
     return !na.some(function (x) { return nb.indexOf(x) >= 0; });
   }
-  function canPass(graph, nodeId, inLink, outLink, rootId, hair) {
+  /*
+   * vl: the network (VLAN) the route is in while it is inside switches: '' is the default network, another string a subnet, null = not known
+   * (it came from a router or over a trunk from above). Through a switch, access ports of different networks never meet; uplinks carry all.
+   */
+  function vlanKeyOf(link, nodeId) {
+    var k = Object.keys((link.vlanAt && link.vlanAt[nodeId]) || {});
+    return k.length === 1 ? k[0] : null;
+  }
+  function nextVl(graph, nodeId, inLink, vl) {
+    var n = graph.nodes[nodeId];
+    if (!n || n.type !== 'switch') return null; // routers and devices start a new route inside the next LAN
+    if (inLink && !inLink.uplinkAt[nodeId]) return vlanKeyOf(inLink, nodeId);
+    return vl === undefined ? null : vl;
+  }
+  function canPass(graph, nodeId, inLink, outLink, rootId, hair, vl) {
     if (nodeId === rootId || (rootId && typeof rootId === 'object' && rootId[nodeId])) return true;
     var n = graph.nodes[nodeId];
     if (!n.transit) return false;
     if (inLink && outLink && inLink === outLink && n.type !== 'router') return false; // no U-turn on the same link (a router on a stick may)
+    if (n.type === 'switch' && inLink && outLink && !outLink.uplinkAt[nodeId]) { // leaving through an access port: only into the network the route is in
+      var cur = nextVl(graph, nodeId, inLink, vl), want = (outLink.vlanAt && outLink.vlanAt[nodeId]) || {};
+      if (cur !== null && !want[cur]) return false;
+    }
+    if (n.hasVlans && hair && hair[nodeId] && inLink && outLink && inLink.uplinkAt[nodeId] && !outLink.uplinkAt[nodeId]) { // a router turning the route round into the network it came from: no, they talk directly
+      var back = (outLink.vlanAt && outLink.vlanAt[nodeId]) || {};
+      if (hair[nodeId].k !== null && back[hair[nodeId].k]) return false;
+    }
     if (n.isolated && inLink && outLink) {
       if (!(inLink.uplinkAt[nodeId] || outLink.uplinkAt[nodeId])) return false;
       if (hair && hair[nodeId] && inLink.uplinkAt[nodeId] && !outLink.uplinkAt[nodeId]) { // back down into the switch the path came up from
@@ -148,8 +183,8 @@
   /* the isolated switches left through an uplink after entering from an access port (the route so far, as {id: true}) */
   function hairAfter(graph, nodeId, inLink, outLink, hair) {
     var n = graph.nodes[nodeId];
-    if (!(n && n.isolated && inLink && outLink && !inLink.uplinkAt[nodeId] && outLink.uplinkAt[nodeId]) || (hair && hair[nodeId])) return hair || {};
-    var h = {}; Object.keys(hair || {}).forEach(function (k) { h[k] = true; }); h[nodeId] = true; return h;
+    if (!(n && (n.isolated || n.hasVlans) && inLink && outLink && !inLink.uplinkAt[nodeId] && outLink.uplinkAt[nodeId]) || (hair && hair[nodeId])) return hair || {};
+    var h = {}; Object.keys(hair || {}).forEach(function (k) { h[k] = hair[k]; }); h[nodeId] = { k: vlanKeyOf(inLink, nodeId) }; return h;
   }
 
   /*
@@ -161,23 +196,23 @@
     var roots = [].concat(rootId), rootSet = {}, depth = {}, seenState = {}, queue = [], out = [];
     roots.forEach(function (r) {
       rootSet[r] = true; depth[r] = 0; seenState[r + '|'] = true;
-      queue.push({ id: r, via: null, d: 0, hair: {} });
+      queue.push({ id: r, via: null, d: 0, hair: {}, vl: null });
       out.push({ id: r, depth: 0, parent: null, link: null });
     });
     rootId = rootSet;
     while (queue.length) {
       var st = queue.shift();
       (graph.adj[st.id] || []).forEach(function (n) {
-        if (!canPass(graph, st.id, st.via, n.link, rootId, st.hair)) return;
-        var hair = hairAfter(graph, st.id, st.via, n.link, st.hair);
-        var key = n.to + '|' + n.link.id + '|' + Object.keys(hair).sort().join(',');
+        if (!canPass(graph, st.id, st.via, n.link, rootId, st.hair, st.vl)) return;
+        var hair = hairAfter(graph, st.id, st.via, n.link, st.hair), vl = st.id in rootId ? null : nextVl(graph, st.id, st.via, st.vl);
+        var key = n.to + '|' + n.link.id + '|' + Object.keys(hair).sort().join(',') + '|' + (vl === null ? '~' : vl);
         if (seenState[key]) return;
         seenState[key] = true;
         if (depth[n.to] === undefined) {
           depth[n.to] = st.d + 1;
           out.push({ id: n.to, depth: st.d + 1, parent: st.id, link: n.link });
         }
-        queue.push({ id: n.to, via: n.link, d: st.d + 1, hair: hair });
+        queue.push({ id: n.to, via: n.link, d: st.d + 1, hair: hair, vl: vl });
       });
     }
     var unreachable = graph.order.filter(function (id) { return depth[id] === undefined; });
@@ -206,7 +241,12 @@
   function allPaths(graph, from, to, limit, maxHops) {
     limit = limit || 100; maxHops = maxHops || 12;
     var out = [], visited = {};
-    function cap(id) { return graph.nodes[id].isolated ? 2 : 1; }
+    function cap(id) { return graph.nodes[id].isolated || graph.nodes[id].hasVlans ? 2 : 1; }
+    function vlOf(nodes, links) { // the network the route is in after its devices so far
+      var vl = null;
+      for (var i = 1; i < nodes.length - 1; i++) vl = nextVl(graph, nodes[i], links[i - 1], vl);
+      return vl;
+    }
     function hairOf(nodes, links) { // isolated switches this route has already gone up out of
       var h = {};
       for (var i = 1; i < nodes.length - 1; i++) h = hairAfter(graph, nodes[i], links[i - 1], links[i], h);
@@ -219,7 +259,7 @@
       var inLink = links.length ? links[links.length - 1] : null;
       (graph.adj[id] || []).forEach(function (n) {
         if ((visited[n.to] || 0) >= cap(n.to)) return;
-        if (!canPass(graph, id, inLink, n.link, from, hairOf(nodes, links))) return;
+        if (!canPass(graph, id, inLink, n.link, from, hairOf(nodes, links), vlOf(nodes, links))) return;
         visited[n.to] = (visited[n.to] || 0) + 1; nodes.push(n.to); links.push(n.link);
         dfs(n.to, nodes, links);
         nodes.pop(); links.pop(); visited[n.to]--;
@@ -245,15 +285,15 @@
     graph.links.forEach(function (l) { l.paths.forEach(function (e) { linkOfPort[e.aPortId] = l; linkOfPort[e.bPortId] = l; }); });
     function addLink(l) { if (seen[l.id]) return; seen[l.id] = true; l.paths.forEach(function (e) { out.push(e.trace); }); }
     function flood(startNode, inLink) {
-      var done = {}, queue = [{ n: startNode, l: inLink }];
+      var done = {}, queue = [{ n: startNode, l: inLink, vl: null }];
       while (queue.length) {
-        var c = queue.shift(), key = c.n + '|' + (c.l ? c.l.id : '');
+        var c = queue.shift(), key = c.n + '|' + (c.l ? c.l.id : '') + '|' + (c.vl === undefined || c.vl === null ? '~' : c.vl);
         if (done[key]) continue; done[key] = true;
         var node = graph.nodes[c.n];
         if (!node || node.type !== 'switch') continue; // only switches carry the network further
         (graph.adj[c.n] || []).forEach(function (a) {
-          if (a.link === c.l || !canPass(graph, c.n, c.l, a.link, '')) return;
-          addLink(a.link); queue.push({ n: a.to, l: a.link });
+          if (a.link === c.l || !canPass(graph, c.n, c.l, a.link, '', null, c.vl)) return;
+          addLink(a.link); queue.push({ n: a.to, l: a.link, vl: nextVl(graph, c.n, c.l, c.vl) });
         });
       }
     }
@@ -421,6 +461,14 @@
     graph.order.forEach(function (id) { if (graph.nodes[id].type === 'switch') parent[id] = id; });
     graph.links.forEach(function (l) { if (graph.nodes[l.a].type === 'switch' && graph.nodes[l.b].type === 'switch') union(l.a, l.b); });
     var segs = {};
+    // networks (VLANs) a group of linked switches defines: devices on a trunk (uplink) join the one that matches their own subnet, else the default
+    var domVlans = {};
+    graph.order.forEach(function (id) {
+      var so = idx.objects[id];
+      if (so.type !== 'switch') return;
+      (so.portGroups || []).forEach(function (g) { if (g.subnet) (domVlans[find(id)] = domVlans[find(id)] || {})[g.subnet] = true; });
+    });
+    function vlanFor(dom, subnet) { return subnet && domVlans[dom] && domVlans[dom][subnet] ? subnet : ''; }
     function seg(key) { return segs[key] = segs[key] || { key: key, ports: [], hasInternet: false }; }
     function addPort(s, portId) {
       var pt = idx.ports[portId], o = idx.portObj[portId];
@@ -437,14 +485,19 @@
       if (!aSw && !bSw) {
         l.paths.forEach(function (e) { var s = seg('p:' + [e.aPortId, e.bPortId].sort().join('|')); addPort(s, e.aPortId); addPort(s, e.bPortId); });
       } else {
-        var swId = aSw ? l.a : l.b, other = aSw ? l.b : l.a, s2 = seg('c:' + find(swId));
-        l.paths.forEach(function (e) { addPort(s2, e.a === other ? e.aPortId : e.bPortId); });
+        var swId = aSw ? l.a : l.b, other = aSw ? l.b : l.a, dom = find(swId), swObj = idx.objects[swId];
+        l.paths.forEach(function (e) {
+          var devPort = e.a === other ? e.aPortId : e.bPortId, swPort = e.a === other ? e.bPortId : e.aPortId, vk;
+          if (idx.ports[swPort].role === 'uplink') { var dp = idx.ports[devPort], dobj = idx.portObj[devPort]; vk = vlanFor(dom, subnetOf(effectiveIp(dobj, dp))); }
+          else vk = M.portSubnet(swObj, swPort);
+          addPort(seg('c:' + dom + '|' + vk), devPort);
+        });
       }
     });
     graph.order.forEach(function (id) { // managed switches: the web/management address belongs to the switch's domain
       var o = idx.objects[id];
       if (o.type !== 'switch' || !o.ipAddress) return;
-      var s = seg('c:' + find(id)), ip = String(o.ipAddress).trim();
+      var ip = String(o.ipAddress).trim(), s = seg('c:' + find(id) + '|' + vlanFor(find(id), subnetOf(ip)));
       s.ports.push({ portId: null, objId: o.id, name: o.name, label: 'management', role: 'management', ip: ip, subnet: NM.topology.subnetOf(ip) });
     });
     return Object.keys(segs).map(function (k) { return segs[k]; });
