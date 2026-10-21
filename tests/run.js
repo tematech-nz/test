@@ -2192,5 +2192,36 @@ test('switch port order: reverse vertical (2 above 1) and reverse horizontal mir
   assert.strictEqual(M.migrate(JSON.parse(M.serializeProject(p))).project.objects[0].flipV, true);
 });
 
+test('overview blocks never overlap: a block dropped on another gives way (shortest push, clearance kept); old overlaps are repaired', () => {
+  const p = M.createProject('ov'), m1 = p.maps[0].id;
+  const a = B.addObjectPlaced(p, m1, { type: 'switch', name: 'A', portCount: 8 }, 40, 40);
+  const m2 = M.uid('map'); p.maps.push({ id: m2, name: 'Second', location: '', viewport: { x: 0, y: 0, zoom: 1 } });
+  const b = B.addObjectPlaced(p, m2, { type: 'switch', name: 'B', portCount: 8 }, 40, 40);
+  const m3 = M.uid('map'); p.maps.push({ id: m3, name: 'Third', location: '', viewport: { x: 0, y: 0, zoom: 1 } });
+  const c = B.addObjectPlaced(p, m3, { type: 'switch', name: 'C', portCount: 8 }, 40, 40);
+  M.syncAllMap(p); const am = M.allMap(p), gap = M.OVERVIEW_CLEAR;
+  const clear = () => { const bl = M.overviewBlocks(p); for (let i = 0; i < bl.length; i++) for (let j = i + 1; j < bl.length; j++) { const x = bl[i], y = bl[j]; if (x.x < y.x + y.w + gap - 0.5 && x.x + x.w + gap - 0.5 > y.x && x.y < y.y + y.h + gap - 0.5 && x.y + x.h + gap - 0.5 > y.y) return false; } return true; };
+  assert.ok(clear(), 'a fresh overview is laid out clear');
+  const first = JSON.stringify(p.maps.find(m => m.id === m1).allOff);
+  // drag the second map's block right on top of the first one's
+  const pa = M.placementOf(p, am.id, a.id), pb = M.placementOf(p, am.id, b.id);
+  M.moveOverviewBlock(p, b.id, pa.x - pb.x, pa.y - pb.y);
+  assert.ok(clear(), 'the dropped block was pushed clear of the other');
+  assert.strictEqual(JSON.stringify(p.maps.find(m => m.id === m1).allOff), first, 'the block that was already there stays; the one just moved gives way');
+  // and the overview items still follow their sources (x, y = source + block offset)
+  const o2 = p.maps.find(m => m.id === m2).allOff, rb = M.placementOf(p, m2, b.id), gb = M.placementOf(p, am.id, b.id);
+  assert.deepStrictEqual([gb.x, gb.y], [rb.x + o2.x, rb.y + o2.y]);
+  // dropped on the third as well: still clear
+  const pc = M.placementOf(p, am.id, c.id), pb2 = M.placementOf(p, am.id, b.id);
+  M.moveOverviewBlock(p, b.id, pc.x - pb2.x, pc.y - pb2.y);
+  assert.ok(clear());
+  // an older file whose blocks overlap (same offset for every map) is repaired by the next sync, and the repair is stable
+  p.maps.forEach(m => { if (!m.auto) m.allOff = { x: 0, y: 0 }; });
+  M.syncAllMap(p);
+  assert.ok(clear(), 'overlaps in an old file are moved apart');
+  const snap = JSON.stringify(p.maps.map(m => m.allOff)); M.syncGhosts(p); M.syncAllMap(p);
+  assert.strictEqual(JSON.stringify(p.maps.map(m => m.allOff)), snap, 'idempotent: nothing moves once the blocks are clear');
+});
+
 console.log('\n' + passed + ' passed, ' + failed + ' failed');
 process.exit(failed ? 1 : 0);

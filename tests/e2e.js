@@ -1878,9 +1878,16 @@ const ok = (m) => console.log('  ok   ' + m);
     moved.forEach((k) => assert.deepStrictEqual([after[k][0] - before[k][0], after[k][1] - before[k][1]], d0, k + ' moved by the same amount'));
     const stayed = Object.keys(before).filter((k) => !moved.includes(k));
     assert.ok(stayed.length >= 2, 'the other map\'s block stayed: ' + stayed.join(', '));
+    // drop that block right onto the other map's block: it gives way, nothing overlaps
+    const offId = await page.evaluate(() => NetMap.app.S.p.groups.find((g) => g.name === 'Office').id);
+    const hb2 = await page.locator('#vp rect[data-handle="move"]').first().boundingBox(), ob = await page.locator('#vp rect[data-kind="group"][data-id="' + offId + '"]').boundingBox();
+    await page.mouse.move(hb2.x + hb2.width / 2, hb2.y + hb2.height / 2); await page.mouse.down(); await page.mouse.move(ob.x + 20, ob.y + 20, { steps: 8 }); await page.mouse.up(); await page.waitForTimeout(150);
+    const clearNow = await page.evaluate(() => { const bl = NetMap.model.overviewBlocks(NetMap.app.S.p), g = NetMap.model.OVERVIEW_CLEAR; for (let i = 0; i < bl.length; i++) for (let j = i + 1; j < bl.length; j++) { const a = bl[i], c = bl[j]; if (a.x < c.x + c.w + g - 0.5 && a.x + a.w + g - 0.5 > c.x && a.y < c.y + c.h + g - 0.5 && a.y + a.h + g - 0.5 > c.y) return false; } return true; });
+    assert.ok(clearNow, 'blocks on the overview keep clear of each other after a drop on top of another');
     // moving a source on its own map moves its link on the overview
+    const baseY = await page.evaluate(() => { const S = NetMap.app.S, am = NetMap.model.allMap(S.p), sw = S.p.objects.find((o) => o.name === 'Switch A'); return S.p.placements.find((q) => q.refId === sw.id && q.mapId === am.id).y; });
     const src = await page.evaluate(() => { const S = NetMap.app.S, sw = S.p.objects.find((o) => o.name === 'Switch A'); NetMap.app.api.commit('nudge', (p) => { p.placements.find((q) => q.refId === sw.id && !q.ghost).y += 20; }); const am = NetMap.model.allMap(S.p); return S.p.placements.find((q) => q.refId === sw.id && q.mapId === am.id).y; });
-    assert.strictEqual(src, after['Switch A'][1] + 20, 'the overview follows the moved source');
+    assert.strictEqual(src, baseY + 20, 'the overview follows the moved source');
     await page.evaluate(() => NetMap.app.api.loadProject(NetMap.builder.buildDemoProject()));
     await page.waitForSelector('#vp [data-kind="object"]');
   });

@@ -267,8 +267,57 @@
     if (best) m.allOff = best;
     return best;
   }
-  function syncGhosts(p) {
+  /*
+   * Each ordinary map occupies a block of the overview: the bounding box of its items shifted by map.allOff. Blocks never overlap and keep
+   * OVERVIEW_CLEAR between them: a block that is too close is pushed out the shortest way (the map moved last, e.g. the one just dragged,
+   * is the one that gives way; otherwise the later map in the list yields).
+   */
+  var OVERVIEW_CLEAR = 100;
+  function overviewBlocks(p) {
+    var out = [];
+    equipmentMaps(p).forEach(function (m) {
+      if (!m.allOff) return;
+      var x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      p.placements.forEach(function (pl) {
+        if (pl.mapId !== m.id || pl.ghost) return;
+        x0 = Math.min(x0, pl.x); y0 = Math.min(y0, pl.y); x1 = Math.max(x1, pl.x + pl.w); y1 = Math.max(y1, pl.y + pl.h);
+      });
+      if (x0 === Infinity) return;
+      out.push({ map: m, x: x0 + m.allOff.x, y: y0 + m.allOff.y, w: x1 - x0, h: y1 - y0 });
+    });
+    return out;
+  }
+  function clearOverview(p, lastMapId) {
+    var blocks = overviewBlocks(p);
+    if (blocks.length < 2) return;
+    blocks = blocks.filter(function (b) { return b.map.id !== lastMapId; }).concat(blocks.filter(function (b) { return b.map.id === lastMapId; }));
+    var placed = [];
+    blocks.forEach(function (b) {
+      for (var guard = 0; guard < 80; guard++) {
+        var hit = null;
+        for (var i = 0; i < placed.length; i++) {
+          var q = placed[i];
+          if (b.x < q.x + q.w + OVERVIEW_CLEAR && b.x + b.w + OVERVIEW_CLEAR > q.x && b.y < q.y + q.h + OVERVIEW_CLEAR && b.y + b.h + OVERVIEW_CLEAR > q.y) { hit = q; break; }
+        }
+        if (!hit) break;
+        var moves = [
+          { dx: hit.x + hit.w + OVERVIEW_CLEAR - b.x, dy: 0 }, { dx: 0, dy: hit.y + hit.h + OVERVIEW_CLEAR - b.y },
+          { dx: hit.x - OVERVIEW_CLEAR - (b.x + b.w), dy: 0 }, { dx: 0, dy: hit.y - OVERVIEW_CLEAR - (b.y + b.h) }
+        ];
+        var best = moves[0];
+        moves.forEach(function (mv) { if (Math.abs(mv.dx) + Math.abs(mv.dy) < Math.abs(best.dx) + Math.abs(best.dy)) best = mv; });
+        b.x += best.dx; b.y += best.dy;
+        b.map.allOff = { x: b.map.allOff.x + best.dx, y: b.map.allOff.y + best.dy };
+      }
+      placed.push(b);
+    });
+  }
+  function syncGhosts(p, lastMapId) {
     var am = allMap(p);
+    if (am) {
+      equipmentMaps(p).forEach(function (m) { overviewOffset(p, m, am); }); // offsets of older files, rebuilt from their layout
+      clearOverview(p, lastMapId);
+    }
     p.placements.forEach(function (pl) {
       if (!pl.ghost) return;
       var r = realPlacement(p, pl.refId);
@@ -295,7 +344,7 @@
     var am = allMap(p), r = realPlacement(p, refId), sm = r && p.maps.filter(function (x) { return x.id === r.mapId; })[0];
     if (!am || !sm || !overviewOffset(p, sm, am)) return;
     sm.allOff = { x: sm.allOff.x + dx, y: sm.allOff.y + dy };
-    syncGhosts(p);
+    syncGhosts(p, sm.id); // the block just moved is the one that gives way if it landed on another
   }
   /* the placement itself plus placements of its visual contents on the same map */
   function placementGroup(p, placementId) {
@@ -1304,7 +1353,7 @@
     findContainer: findContainer, groupOf: groupOf, parentOf: parentOf, containerChildren: containerChildren, descendants: descendants,
     addPlacement: addPlacement, placementOf: placementOf, placementGroup: placementGroup, movePlacement: movePlacement,
     growToFit: growToFit, mapsFor: mapsFor, addGroup: addGroup, addObject: addObject, setContainer: setContainer,
-    setPortCount: setPortCount, findPortGroup: findPortGroup, parsePortRange: parsePortRange, addPortGroup: addPortGroup, updatePortGroup: updatePortGroup, deletePortGroup: deletePortGroup, portGroupOf: portGroupOf, prunePortGroups: prunePortGroups, hasDeviceIp: hasDeviceIp, isFloorMap: isFloorMap, equipmentMaps: equipmentMaps, floorMaps: floorMaps, addMap: addMap, moveMap: moveMap, normalizeGhosts: normalizeGhosts, overviewBlock: overviewBlock, moveOverviewBlock: moveOverviewBlock, overviewOffset: overviewOffset, setLinkLabelOffset: setLinkLabelOffset, realMaps: realMaps, allMap: allMap, syncAllMap: syncAllMap, peerGroup: peerGroup, linkPortGroups: linkPortGroups, unlinkPortGroup: unlinkPortGroup, realPlacement: realPlacement, syncGhosts: syncGhosts, pseudoOf: pseudoOf, pseudoDevices: pseudoDevices, hasPortIp: hasPortIp, setDeviceIp: setDeviceIp, setDhcp: setDhcp, effectivePortIp: effectivePortIp, ipList: ipList, setPortIp: setPortIp, IP_ERROR: IP_ERROR, setDeviceKind: setDeviceKind, isTermination: isTermination, DEVICE_KINDS: DEVICE_KINDS, deviceKindInfo: deviceKindInfo, typeLabel: typeLabel, accessPorts: accessPorts, validSectionRows: validSectionRows, setUplinkPorts: setUplinkPorts, setSwitchLayout: setSwitchLayout, setFullWidth: setFullWidth, setSectionSize: setSectionSize, validSectionSizes: validSectionSizes, defaultSectionSize: defaultSectionSize, effectiveSectionSize: effectiveSectionSize, setRouterPorts: setRouterPorts, isValidIp: isValidIp, canConnectPatch: canConnectPatch, addPatchCable: addPatchCable,
+    setPortCount: setPortCount, findPortGroup: findPortGroup, parsePortRange: parsePortRange, addPortGroup: addPortGroup, updatePortGroup: updatePortGroup, deletePortGroup: deletePortGroup, portGroupOf: portGroupOf, prunePortGroups: prunePortGroups, hasDeviceIp: hasDeviceIp, isFloorMap: isFloorMap, equipmentMaps: equipmentMaps, floorMaps: floorMaps, addMap: addMap, moveMap: moveMap, normalizeGhosts: normalizeGhosts, overviewBlock: overviewBlock, overviewBlocks: overviewBlocks, OVERVIEW_CLEAR: OVERVIEW_CLEAR, moveOverviewBlock: moveOverviewBlock, overviewOffset: overviewOffset, setLinkLabelOffset: setLinkLabelOffset, realMaps: realMaps, allMap: allMap, syncAllMap: syncAllMap, peerGroup: peerGroup, linkPortGroups: linkPortGroups, unlinkPortGroup: unlinkPortGroup, realPlacement: realPlacement, syncGhosts: syncGhosts, pseudoOf: pseudoOf, pseudoDevices: pseudoDevices, hasPortIp: hasPortIp, setDeviceIp: setDeviceIp, setDhcp: setDhcp, effectivePortIp: effectivePortIp, ipList: ipList, setPortIp: setPortIp, IP_ERROR: IP_ERROR, setDeviceKind: setDeviceKind, isTermination: isTermination, DEVICE_KINDS: DEVICE_KINDS, deviceKindInfo: deviceKindInfo, typeLabel: typeLabel, accessPorts: accessPorts, validSectionRows: validSectionRows, setUplinkPorts: setUplinkPorts, setSwitchLayout: setSwitchLayout, setFullWidth: setFullWidth, setSectionSize: setSectionSize, validSectionSizes: validSectionSizes, defaultSectionSize: defaultSectionSize, effectiveSectionSize: effectiveSectionSize, setRouterPorts: setRouterPorts, isValidIp: isValidIp, canConnectPatch: canConnectPatch, addPatchCable: addPatchCable,
     updatePatchCable: updatePatchCable, deletePatchCable: deletePatchCable, addInternalMapping: addInternalMapping,
     removeInternalMapping: removeInternalMapping, autoMapPanel: autoMapPanel, rearPorts: rearPorts,
     sequentialPorts: sequentialPorts, addFixedLink: addFixedLink, updateLinkMeta: updateLinkMeta,
