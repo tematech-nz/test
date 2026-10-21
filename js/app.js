@@ -215,10 +215,16 @@
   /* navigate: switch to a map where the target lives, select it, centre on it */
   /* leaving trace mode: the highlight goes and the right pane goes back to the details */
   function dropTrace() { if (S.trace) { S.trace = null; showTab('details'); } }
+  /* a trace stays while the map you go to shows part of its route (the overview shows everything); a floor plan or a map the route never touches ends it */
+  function traceShownOn(mapId) {
+    const m = S.p.maps.find((x) => x.id === mapId);
+    if (!S.trace || !m || M.isFloorMap(m)) return false;
+    const objs = (S.trace.base || S.trace.highlight).objects;
+    return Object.keys(objs).some((oid) => !!M.placementOf(S.p, mapId, oid));
+  }
   function goTo(kind, id, mapId, keepTab) {
     let maps = M.mapsFor(S.p, kind, id);
     if (S.view === 'graph') setView('map'); // picking anything from the lists leaves the graph
-    if (!keepTab) dropTrace(); // ...and leaves a trace, unless this is a step inside the trace panel
     if (kind === 'map') { switchMap(id, false, keepTab); return; }
     if (mapId && maps.indexOf(mapId) >= 0) maps = [mapId]; // a map was asked for (e.g. "open the original", a map link): go there even from the overview
     else if ((kind === 'object' || kind === 'group') && onAll() && M.placementOf(S.p, S.mapId, id)) maps = [S.mapId]; // already in the overview
@@ -234,7 +240,7 @@
   }
   function switchMap(id, keepSel, keepTrace) {
     if (S.view === 'graph') setView('map'); // choosing a map leaves the graph
-    if (!keepTrace) dropTrace(); // and a trace (a trace that follows its route to another map passes keepTrace)
+    if (!keepTrace && !traceShownOn(id)) dropTrace(); // a trace goes when the new map shows nothing of its route
     S.mapId = id; clearPgroup(); floorReset(); S.multi = []; if (!keepSel) { S.sel = null; }
     if (S.place) { S.place = null; $('ghostInner').innerHTML = ''; $('ghost').style.display = 'none'; }
     renderAll();

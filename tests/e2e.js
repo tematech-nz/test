@@ -1970,9 +1970,23 @@ const ok = (m) => console.log('  ok   ' + m);
     await page.evaluate((id) => NetMap.app.api.startTrace('port', id), ids.sw); await page.waitForTimeout(100);
     await page.locator('#tracePane .trace-line').nth(1).click(); await page.waitForTimeout(100);
     assert.ok(await trace(), 'clicking a step in the trace panel keeps the trace');
-    // trace: switching map
+    // trace: switching map keeps it where the route shows up (the other map it runs to, the overview) and drops it where it does not
     await page.selectOption('#mapSelect', ids.eq); await page.waitForTimeout(100);
-    assert.ok(!(await trace()), 'switching map leaves the trace');
+    assert.ok(await trace(), 'the route also runs through the Office map: the trace stays');
+    const allId = await page.evaluate(() => NetMap.model.allMap(NetMap.app.S.p).id);
+    await page.selectOption('#mapSelect', allId); await page.waitForTimeout(100);
+    assert.ok(await trace(), 'the overview shows everything: the trace stays');
+    const back = await page.evaluate(() => NetMap.app.S.p.maps[0].id);
+    await page.selectOption('#mapSelect', back); await page.waitForTimeout(100);
+    assert.ok(await trace(), 'and from the overview to a map the route is on');
+    const elsewhere = await page.evaluate(() => { let id; NetMap.app.api.commit('unrelated map', (p) => { const mm = NetMap.model.addMap(p, { name: 'Elsewhere' }); id = mm.id; NetMap.builder.addObjectPlaced(p, mm.id, { type: 'switch', name: 'Unrelated switch', portCount: 8 }, 40, 40); }); return id; });
+    assert.ok(await trace(), 'adding a map does not end the trace');
+    await page.selectOption('#mapSelect', elsewhere); await page.waitForTimeout(100);
+    assert.ok(!(await trace()), 'a map the route never touches ends the trace');
+    await page.selectOption('#mapSelect', back); await page.waitForTimeout(100);
+    await page.evaluate((id) => NetMap.app.api.startTrace('port', id), ids.sw); await page.waitForTimeout(100);
+    await page.selectOption('#mapSelect', ids.floor); await page.waitForTimeout(100);
+    assert.ok(!(await trace()), 'a floor plan shows no routes: the trace ends');
     await page.evaluate(() => NetMap.app.api.loadProject(NetMap.builder.buildDemoProject()));
     await page.waitForSelector('#vp [data-kind="object"]');
   });

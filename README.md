@@ -106,7 +106,8 @@ Try it: File -> Load demo project: two rooms with a fixed link between racks, a 
   through the ISPs that have a public IP (the others give outbound access only, and the view says so); *To* it you get how a device gets out through any ISP.
   The From / To lists are sorted A to Z.
 - **Leaving a view or a trace**: in the Graph, picking any map, floor plan or equipment entry (navigation list or the map selector) switches back to the map. A trace ends when you
-  click another element or free space, switch map, open something from the lists, or press Esc; clicking a step inside the trace panel keeps it.
+  click another element or free space, switch to a map or floor plan that shows nothing of its route, or press Esc. Going to a map the route runs
+  through (including the "All items" overview, which shows everything) keeps the trace; so does clicking a step inside the trace panel.
 - **DHCP**: on generic devices and managed switches, tick **DHCP** next to the IP address when it takes any address from the LAN it is plugged into. The device then counts as being in the subnet of the router LAN port it hangs off (reached over switches), which the Graph uses (for example behind an isolated switch). Its box shows a DHCP address chip instead of a fixed address.
 - **Show graph**: select a switch, router, Internet object, socket or device and press **Show graph** in its details: the Graph opens from that device with *To* set to all devices (its reachability tree).
 - **Graph** (header button): collapses patch cables, patch panels and fixed links into device-to-device links and shows
