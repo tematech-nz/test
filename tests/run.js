@@ -2268,5 +2268,19 @@ test('switch ports in subnets of their own (VLANs): same-network ports talk thro
   assert.strictEqual(M.migrate(JSON.parse(M.serializeProject(p))).project.objects.find(o => o.id === sw.id).portGroups[0].subnet, '192.168.1.0/24', 'survives save and load');
 });
 
+test('port group name tag: white text on dark colours (black), dark text on light ones', () => {
+  const R = NM.render;
+  assert.strictEqual(R.textOn('#111111'), '#fff'); assert.strictEqual(R.textOn('#000'), '#fff'); assert.strictEqual(R.textOn('#1f77b4'), '#fff', 'the default blue');
+  ['#ffffff', '#f2c200', '#8a8f98', '#2ca02c', '#ff7f0e'].forEach(c => assert.strictEqual(R.textOn(c), '#111', c + ' is light enough for dark text'));
+  ['#111111', '#000000', '#0b3d91', '#8b0000'].forEach(c => assert.strictEqual(R.textOn(c), '#fff', c + ' needs white text'));
+  assert.strictEqual(R.textOn(''), '#111'); assert.strictEqual(R.textOn('red'), '#111', 'unknown colour names keep the old dark text');
+  const p = M.createProject('c'), sw = M.addObject(p, { type: 'switch', name: 'S', portCount: 8 });
+  M.addPortGroup(p, sw.id, { name: 'Dark', portsText: '1-4', color: '#111111' }); M.addPortGroup(p, sw.id, { name: 'Light', portsText: '5-8', color: '#f2c200' });
+  B.placeItem(p, p.maps[0].id, 'object', sw.id, 40, 40);
+  const svg = R.renderMap(p, p.maps[0].id, { mode: 'view' }).content;
+  assert.ok(/fill="#fff"[^>]*>Dark</.test(svg), 'the tag of the black group is white text');
+  assert.ok(/fill="#111"[^>]*>Light</.test(svg), 'the tag of a light group keeps dark text');
+});
+
 console.log('\n' + passed + ' passed, ' + failed + ' failed');
 process.exit(failed ? 1 : 0);

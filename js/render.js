@@ -20,6 +20,14 @@
   function esc(s) {
     return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
+  /* readable text on a coloured background: white on dark colours (black, navy, dark red...), near-black on light ones */
+  function textOn(color) {
+    var h = String(color || '').trim().replace('#', '');
+    if (h.length === 3) h = h.replace(/(.)/g, '$1$1');
+    if (!/^[0-9a-fA-F]{6}$/.test(h)) return '#111';
+    var ch = [0, 2, 4].map(function (i) { var v = parseInt(h.substr(i, 2), 16) / 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); });
+    return 0.2126 * ch[0] + 0.7152 * ch[1] + 0.0722 * ch[2] < 0.179 ? '#fff' : '#111'; // 0.179: where white and black text have equal contrast
+  }
   function trunc(s, n) { s = String(s); return s.length > n ? s.slice(0, Math.max(1, n - 1)) + '~' : s; }
   function num(v) { return Math.round(v * 10) / 10; }
 
@@ -313,7 +321,7 @@
               var label = g.name + (g.deviceKind ? ' x' + g.portIds.length : ''), tw = String(label).length * 5.4 + 8, gx0 = Math.min.apply(null, rects.map(function (r) { return r.x; })) - 3, gx1 = Math.max.apply(null, rects.map(function (r) { return r.x + r.w; })) + 3;
               var tx = Math.max(2, Math.min((gx0 + gx1) / 2 - tw / 2, pl.w - tw - 2));
               x.push('<g data-kind="pgroup" data-id="' + esc(g.id) + '"><rect data-kind="pgroup" data-id="' + esc(g.id) + '" x="' + num(pl.x + tx) + '" y="' + num(pl.y + k - 15) + '" width="' + num(tw) + '" height="11" rx="3" fill="' + esc(g.color) + '" stroke="#37474f" stroke-width="0.6"/>' +
-                '<text x="' + num(pl.x + tx + 4) + '" y="' + num(pl.y + k - 6.5) + '" font-size="8.5" font-weight="bold" fill="#111" font-family="sans-serif" pointer-events="none">' + esc(label) + '</text></g>');
+                '<text x="' + num(pl.x + tx + 4) + '" y="' + num(pl.y + k - 6.5) + '" font-size="8.5" font-weight="bold" fill="' + textOn(g.color) + '" font-family="sans-serif" pointer-events="none">' + esc(label) + '</text></g>');
             }
           });
         });
@@ -546,6 +554,6 @@
       '<rect x="' + num(b.x) + '" y="' + num(b.y) + '" width="' + num(b.w) + '" height="' + num(b.h) + '" fill="#ffffff"/>' + r.content + '</svg>';
   }
 
-  NM.render = { renderMap: renderMap, svgDocument: svgDocument, esc: esc, STYLE: STYLE };
+  NM.render = { textOn: textOn, renderMap: renderMap, svgDocument: svgDocument, esc: esc, STYLE: STYLE };
   if (typeof module !== 'undefined' && module.exports) module.exports = NM.render;
 })(typeof window !== 'undefined' ? window : globalThis);
