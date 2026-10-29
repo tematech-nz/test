@@ -116,7 +116,7 @@ const ok = (m) => console.log('  ok   ' + m);
     assert.ok(await page.isVisible('#editBanner'));
     assert.ok(await page.locator('[data-handle="move"]').count() > 0);
     const groups = await page.evaluate(() => NetMap.app.S.p.groups.length);
-    await page.click('#toolbar button[data-add="group"]');
+    await page.selectOption('#toolbar select[data-addsel]', 'group');
     await page.fill('#dlg input[name="name"]', 'Room 3');
     await page.click('#dlg button[data-btn="ok"]');
     assert.ok(await page.isVisible('#toolHint') && /Click to place/.test(await page.innerText('#toolHint')), 'placement hint');
@@ -582,7 +582,7 @@ const ok = (m) => console.log('  ok   ' + m);
   });
 
   await step('router: create with WAN/LAN ports and IP via the toolbar', async () => {
-    await page.click('#toolbar button[data-add="router"]');
+    await page.selectOption('#toolbar select[data-addsel]', 'router');
     await page.fill('#dlg input[name="name"]', 'Edge GW');
     await page.fill('#dlg input[name="wanPorts"]', '2');
     await page.fill('#dlg input[name="lanPorts"]', '5');
@@ -980,7 +980,7 @@ const ok = (m) => console.log('  ok   ' + m);
 
 
   await step('device icons: create a PC via the toolbar, switch it to an access point, see the icon', async () => {
-    await page.click('#toolbar button[data-add="generic"]');
+    await page.selectOption('#toolbar select[data-addsel]', 'generic');
     await page.selectOption('#dlg select[name="deviceKind"]', 'pc');
     await page.click('#dlg button[data-btn="ok"]');
     await placeAt(700, 660);
@@ -1221,7 +1221,7 @@ const ok = (m) => console.log('  ok   ' + m);
 
 
   await step('IPv4 only: bad addresses are rejected in the form and in the properties', async () => {
-    await page.click('#toolbar button[data-add="router"]');
+    await page.selectOption('#toolbar select[data-addsel]', 'router');
     await page.fill('#dlg input[name="name"]', 'BadIpR');
     await page.fill('#dlg input[name="ipAddress"]', '192.168.1.1/24');
     await page.click('#dlg button[data-btn="ok"]');
@@ -1291,7 +1291,7 @@ const ok = (m) => console.log('  ok   ' + m);
 
 
   await step('addresses for generic devices and managed switches from the UI', async () => {
-    await page.click('#toolbar button[data-add="generic"]');
+    await page.selectOption('#toolbar select[data-addsel]', 'generic');
     await page.selectOption('#dlg select[name="deviceKind"]', 'pc');
     await page.fill('#dlg input[name="portCount"]', '2');
     await page.fill('#dlg input[name="ipAddress"]', '999.1.1.1');
@@ -1420,7 +1420,7 @@ const ok = (m) => console.log('  ok   ' + m);
 
   await step('new items follow the cursor and drop where you click; Ctrl+click places copies with counting names; Esc cancels', async () => {
     const before = await page.evaluate(() => NetMap.app.S.p.objects.length);
-    await page.click('#toolbar button[data-add="generic"]');
+    await page.selectOption('#toolbar select[data-addsel]', 'generic');
     await page.selectOption('#dlg select[name="deviceKind"]', 'camera');
     await page.fill('#dlg input[name="name"]', 'Cam 1');
     await page.click('#dlg button[data-btn="ok"]');
@@ -1452,7 +1452,7 @@ const ok = (m) => console.log('  ok   ' + m);
     assert.ok(made[1].x > made[0].x + 20 && made[2].x > made[1].x + 20, 'copies went where each click was');
     assert.strictEqual(await page.evaluate(() => NetMap.app.S.sel.kind), 'object', 'the last one is selected');
     // Escape cancels
-    await page.click('#toolbar button[data-add="switch"]');
+    await page.selectOption('#toolbar select[data-addsel]', 'switch');
     await page.click('#dlg button[data-btn="ok"]');
     assert.ok(await page.evaluate(() => !!NetMap.app.S.place));
     await page.keyboard.press('Escape');
@@ -1460,7 +1460,7 @@ const ok = (m) => console.log('  ok   ' + m);
     assert.strictEqual(await page.evaluate(() => NetMap.app.S.p.objects.length), before + 4);
     // placing onto a rack files it into the rack and the rack gets the green outline while hovering
     const rackPt = await page.evaluate(() => { const S = NetMap.app.S, rk = S.p.objects.find(o => o.name === 'Rack A'); NetMap.app.api.goTo('object', rk.id, S.p.maps[0].id); const q = S.p.placements.find(x => x.refId === rk.id && x.mapId === S.mapId), r = document.getElementById('canvas').getBoundingClientRect(), v = S.p.maps.find(m => m.id === S.mapId).viewport; return { x: r.left + v.x + (q.x + q.w / 2) * v.zoom, y: r.top + v.y + (q.y + q.h - 30) * v.zoom }; });
-    await page.click('#toolbar button[data-add="switch"]');
+    await page.selectOption('#toolbar select[data-addsel]', 'switch');
     await page.fill('#dlg input[name="name"]', 'DropSw');
     await page.fill('#dlg input[name="portCount"]', '8');
     await page.click('#dlg button[data-btn="ok"]');
@@ -2102,7 +2102,7 @@ const ok = (m) => console.log('  ok   ' + m);
   await step('media converter and SFP ports: add from the toolbar, port types limited to uplinks, fibre cable types', async () => {
     await page.evaluate(() => NetMap.app.api.loadProject(NetMap.builder.buildDemoProject()));
     if (!(await page.evaluate(() => NetMap.app.S.mode === 'edit'))) await page.click('#btnMode');
-    await page.click('#toolbar button[data-add="mediaconverter"]');
+    await page.selectOption('#toolbar select[data-addsel]', 'mediaconverter');
     await page.waitForSelector('#dlg[open]');
     await page.click('#dlg button[data-btn="ok"]');
     await placeAt(900, 650);

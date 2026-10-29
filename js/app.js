@@ -769,9 +769,10 @@
     if (!isEdit()) { tb.innerHTML = ''; return; }
     const pc = S.tool && S.tool.type === 'patch';
     tb.innerHTML =
-      ['group:Group', 'rack:Rack', 'patchpanel:Patch panel', 'switch:Switch', 'router:Router', 'internet:Internet / ISP', 'socket:Wall socket', 'mediaconverter:Media converter', 'generic:Generic'].map((s) => {
-        const a = s.split(':'); return '<button data-add="' + a[0] + '" title="Create a new ' + a[1].toLowerCase() + ' on this map">+ ' + a[1] + '</button>';
-      }).join('') + '<span class="sep"></span>' +
+      '<select data-addsel title="Create a new group, rack or piece of equipment on this map" aria-label="Add element"><option value="">+ Add element...</option>' +
+        [['Containers', [['group', 'Group'], ['rack', 'Rack']]], ['Cabling', [['patchpanel', 'Patch panel'], ['socket', 'Wall socket'], ['mediaconverter', 'Media converter']]],
+          ['Network equipment', [['switch', 'Switch'], ['router', 'Router'], ['internet', 'Internet / ISP']]], ['Devices', [['generic', 'Generic device']]]].map((g) =>
+          '<optgroup label="' + g[0] + '">' + g[1].map((o) => '<option value="' + o[0] + '">' + o[1] + '</option>').join('') + '</optgroup>').join('') + '</select><span class="sep"></span>' +
       '<button data-act="patchTool" title="' + esc(TIPS.patchTool) + '" class="' + (pc ? 'active' : '') + '">Patch cable tool (W)</button>' +
       (pc ? ' <span class="cable-colour">' + colorPicker('toolPreset', 'toolColor', S.cableColor, '__tool', { value: 'auto', label: 'Auto (network colour)', swatch: '#1f77b4' }) + '</span>' : '') +
       '<button data-act="newLink" title="' + esc(TIPS.newLink) + '">+ Fixed link</button>' +
@@ -2644,6 +2645,7 @@
     $('fileInput').onchange = (e) => { const f = e.target.files[0]; e.target.value = ''; if (f) importFile(f); };
     $('toolbar').addEventListener('change', (e) => {
       const f = e.target.dataset.f;
+      if (e.target.hasAttribute('data-addsel')) { const t = e.target.value; e.target.value = ''; if (t) createItem(t); return; }
       if (e.target.hasAttribute('data-floorkind')) { FS.kind = e.target.value; renderToolbar(); return; }
       if (e.target.hasAttribute('data-floorplacesize')) { const p = e.target.value.split('x'); if (FS.place) { FS.place.w = parseInt(p[0], 10); FS.place.d = parseInt(p[1], 10); } renderCanvas(); return; }
       if (e.target.hasAttribute('data-floorsnap')) { FS.snap = parseInt(e.target.value, 10) || 0; return; }
