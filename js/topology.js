@@ -8,7 +8,7 @@
   if (typeof require === 'function') { if (!NM.model) require('./model.js'); if (!NM.trace) require('./trace.js'); }
   var M = NM.model, T = NM.trace;
 
-  var PASSIVE = { rack: true, patchpanel: true };
+  var PASSIVE = { rack: true, patchpanel: true, mediaconverter: true }; // a media converter just joins its Ethernet and fibre sides: routes run through it like a panel
   /* endpoints: traffic ends here and does not pass through, unless the user allows transit */
   var TERMINAL = { socket: true, generic: true, internet: true };
 
@@ -73,7 +73,7 @@
         tr.path.forEach(function (s) {
           if (s.type === 'patch') via.push(idx.cables[s.id].name);
           else if (s.type === 'wire') { var l = idx.wireLink[s.id], w = idx.wires[s.id]; via.push(l.name + ' w' + w.number); }
-          else if (s.type === 'port' && M.isTermination(idx.portObj[s.id])) {
+          else if (s.type === 'port' && (M.isTermination(idx.portObj[s.id]) || idx.portObj[s.id].type === 'mediaconverter')) {
             var nm = idx.portObj[s.id].name;
             if (via[via.length - 1] !== nm && s.id !== pt.id && s.id !== last.id) via.push(nm);
           }

@@ -35,6 +35,7 @@
       if (pt.side === 'rear') return { code: 'open', text: 'Open: rear termination on ' + o.name + ' has no fixed wire' };
       return { code: 'open', text: 'Open: front port on ' + o.name + ' has no documented onward connection' };
     }
+    if (o.type === 'mediaconverter') return { code: 'open', text: 'Open: the other side of ' + o.name + ' has no documented onward connection' };
     return { code: 'endpoint', text: 'Terminates at ' + o.name };
   }
 

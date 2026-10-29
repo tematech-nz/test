@@ -13,6 +13,7 @@
     router: { fill: '#e3f2fd', stroke: '#1565c0', dash: '' },
     internet: { fill: '#fff3cd', stroke: '#e65100', dash: '' },
     socket: { fill: '#f3e5f5', stroke: '#7b1fa2', dash: '' },
+    mediaconverter: { fill: '#e0f7fa', stroke: '#00838f', dash: '' },
     generic: { fill: '#ffffff', stroke: '#777', dash: '' }
   };
   var SEL = '#e91e63', HI = '#ff9800';
@@ -51,7 +52,7 @@
   };
   var LINK_STYLE = {
     rack: ['#cfd8dc', '#37474f'], socket: ['#f3e5f5', '#7b1fa2'], patchpanel: ['#fdf6e3', '#b58900'], 'switch': ['#e6f4ea', '#2e7d32'], router: ['#e3f2fd', '#1565c0'],
-    internet: ['#fff3cd', '#e65100'], generic: ['#ffffff', '#555'], group: ['#bbdefb', '#1565c0']
+    internet: ['#fff3cd', '#e65100'], mediaconverter: ['#e0f7fa', '#00838f'], generic: ['#ffffff', '#555'], group: ['#bbdefb', '#1565c0']
   };
   function renderFloor(p, mapId, opts) {
     var F = NM.floor, map = p.maps.filter(function (m) { return m.id === mapId; })[0], f = F.ensure(map);
@@ -331,17 +332,17 @@
           portGeo[pt.id] = abs;
           if (r.hidden) return;
           var use = idx.portUse[pt.id], mapped = idx.mapByPort[pt.id];
-          var fill = use ? (use.kind === 'patch' ? '#bbdefb' : '#ffe0b2') : (mapped ? '#f5f5f5' : '#ffffff');
+          var fill = use ? (use.kind === 'patch' ? '#bbdefb' : '#ffe0b2') : (mapped && ref.type !== 'mediaconverter' ? '#f5f5f5' : '#ffffff');
           if (!use && pt.role === 'wan') fill = '#fff3f1';
           if (!use && pt.role === 'uplink') fill = '#ede7f6';
           var isHi = hl && hl.ports[pt.id], isSelPort = sel && sel.kind === 'port' && sel.id === pt.id, isPending = opts.pendingPortId === pt.id;
           if (isHi) fill = HI;
-          var stroke = isPending ? '#d500f9' : (isSelPort ? SEL : '#444'), sw = isPending || isSelPort ? 2.5 : 1;
+          var sfp = M.isSfpType(pt.portType), stroke = isPending ? '#d500f9' : (isSelPort ? SEL : (sfp ? '#0277bd' : '#444')), sw = isPending || isSelPort ? 2.5 : (sfp ? 1.8 : 1); // SFP ports have a blue edge
           if (selPorts[pt.id]) { fill = '#ffeb3b'; stroke = '#e65100'; sw = 2.5; }
           if (groupSet[pt.id]) { fill = '#e1bee7'; stroke = '#8e24aa'; sw = 2.5; }
           if (prevSet[pt.id]) { fill = prev.ok ? '#c8e6c9' : '#ffcdd2'; stroke = prev.ok ? '#2e7d32' : '#c62828'; sw = 2.5; }
           var netBar = pt.networkColor ? '<rect x="' + num(abs.x) + '" y="' + num(abs.y + abs.h - 4) + '" width="' + num(abs.w) + '" height="4" rx="1" fill="' + esc(pt.networkColor) + '" stroke="#333" stroke-width="0.6" pointer-events="none"/>' : '';
-          x.push('<g data-kind="port" data-id="' + esc(pt.id) + '"><title>' + esc(ref.name + ' / ' + pt.label + (pt.side === 'rear' ? ' (rear)' : '') + (pt.role ? ' (' + pt.role.toUpperCase() + ')' : '') + (pt.description ? ' - ' + pt.description : '') + (M.portGroupOf(ref, pt.id) ? ' [' + M.portGroupOf(ref, pt.id).name + ']' : '') + (M.effectivePortIp(ref, pt) ? ' ' + M.effectivePortIp(ref, pt) : '')) + '</title>' +
+          x.push('<g data-kind="port" data-id="' + esc(pt.id) + '"><title>' + esc(ref.name + ' / ' + pt.label + (pt.side === 'rear' ? ' (rear)' : '') + (pt.role ? ' (' + pt.role.toUpperCase() + ')' : '') + (pt.portType ? ' [' + pt.portType + ']' : '') + (pt.description ? ' - ' + pt.description : '') + (M.portGroupOf(ref, pt.id) ? ' [' + M.portGroupOf(ref, pt.id).name + ']' : '') + (M.effectivePortIp(ref, pt) ? ' ' + M.effectivePortIp(ref, pt) : '')) + '</title>' +
             '<rect data-kind="port" data-id="' + esc(pt.id) + '" x="' + num(abs.x) + '" y="' + num(abs.y) + '" width="' + num(abs.w) + '" height="' + num(abs.h) + '" rx="2" fill="' + fill + '" stroke="' + stroke + '" stroke-width="' + sw + '"' + (pt.side === 'rear' ? ' stroke-dasharray="3 1"' : '') + '/>' +
             '<text x="' + num(abs.x + abs.w / 2) + '" y="' + num(abs.y + abs.h / 2 + 3) + '" font-size="' + num(Math.min(9, abs.h * 0.55)) + '" text-anchor="middle" fill="#111" font-family="sans-serif" pointer-events="none">' + esc(trunc(pt.label, Math.max(1, Math.floor(abs.w / 5.5)))) + '</text>' + netBar + '</g>');
         });
@@ -422,7 +423,7 @@
       var isSel = sel && sel.id === l.id && sel.kind === 'link';
       var isHi = hl && (hl.links[l.id]);
       var dim = hl && !isHi;
-      var label = l.name + ' x' + l.wires.length;
+      var fibre = M.isFibreCable(l.cableType), label = l.name + ' x' + l.wires.length + (fibre ? ' fibre' : ''), lineCol = fibre ? '#f9a825' : '#37474f';
       var stub = !(linkAnchor(l, l.aObjectId) && linkAnchor(l, l.bObjectId)); // only one end is on this map: the wire runs to its label
       var clip = isSel || isHi || stub ? '' : hiddenBehind(l); // a wire that ends in a label is never hidden behind other elements
       var o = (clip ? '<defs>' + clip + '</defs>' : '') + '<g data-kind="link" data-id="' + esc(l.id) + '"' + (dim ? ' opacity="0.15"' : '') + (clip ? ' clip-path="url(#lc_' + esc(l.id) + ')"' : '') + '>';
@@ -469,12 +470,12 @@
         if (an.bar) {
           var bar = 'M' + num(an.bar[0]) + ' ' + num(an.bar[2]) + 'H' + num(an.bar[1]);
           an.ticks.forEach(function (t) { bar += 'M' + num(t[0]) + ' ' + num(t[1]) + 'V' + num(t[2]); });
-          o += '<path d="' + bar + '" stroke="' + (isSel ? SEL : '#37474f') + '" stroke-width="2" fill="none" stroke-linecap="round" pointer-events="none"/>';
+          o += '<path d="' + bar + '" stroke="' + (isSel ? SEL : lineCol) + '" stroke-width="2" fill="none" stroke-linecap="round" pointer-events="none"/>';
         }
       });
       o += '<path d="' + d + '" stroke="transparent" stroke-width="16" fill="none" data-kind="link" data-id="' + esc(l.id) + '"/>';
       if (isHi) o += '<path d="' + d + '" stroke="' + HI + '" stroke-width="11" fill="none" opacity="' + (hl.soft && hl.soft[l.id] ? '0.32' : '0.7') + '" pointer-events="none"/>';
-      o += '<path d="' + d + '" stroke="' + (isSel ? SEL : '#37474f') + '" stroke-width="6" fill="none" stroke-linecap="round" pointer-events="none"/>';
+      o += '<path d="' + d + '" stroke="' + (isSel ? SEL : lineCol) + '" stroke-width="6" fill="none" stroke-linecap="round" pointer-events="none"/>';
       o += '<path d="' + d + '" stroke="#ffffff" stroke-width="1.6" stroke-dasharray="7 5" fill="none" pointer-events="none"/>';
       var lab = '', tw = label.length * 5.8 + 8, lo = (l.labelAt && l.labelAt[mapId]) || [0, 0], movable = editing && !exporting;
       if (lo[0] || lo[1]) { // dragged by hand: a wire to the label (stub links, above) or a thin leader line from the default spot

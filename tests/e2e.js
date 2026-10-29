@@ -456,8 +456,10 @@ const ok = (m) => console.log('  ok   ' + m);
   await step('dragging by handle moves visuals but not connections', async () => {
     const before = await page.evaluate(() => JSON.stringify([NetMap.app.S.p.fixedLinks, NetMap.app.S.p.patchCables]));
     const pl0 = await page.evaluate(() => { const S = NetMap.app.S; return JSON.stringify(S.p.placements.filter(q => q.mapId === S.mapId).map(q => [q.x, q.y])); });
-    const h = page.locator('[data-handle="move"]').first();
-    const box = await h.boundingBox();
+    const tbBottom = (await page.locator('#toolbar').boundingBox()).y + (await page.locator('#toolbar').boundingBox()).height; // the toolbar floats over the top of the map
+    const hs = page.locator('[data-handle="move"]'); let box = null;
+    for (let i = 0; i < await hs.count() && !box; i++) { const b = await hs.nth(i).boundingBox(); if (b && b.y > tbBottom + 8) box = b; }
+    assert.ok(box, 'a move handle below the toolbar');
     await page.mouse.move(box.x + 6, box.y + 6); await page.mouse.down(); await page.mouse.move(box.x + 106, box.y + 66, { steps: 6 }); await page.mouse.up();
     const pl1 = await page.evaluate(() => { const S = NetMap.app.S; return JSON.stringify(S.p.placements.filter(q => q.mapId === S.mapId).map(q => [q.x, q.y])); });
     assert.notStrictEqual(pl0, pl1, 'placement moved');
@@ -2093,6 +2095,41 @@ const ok = (m) => console.log('  ok   ' + m);
     await page.evaluate((id) => NetMap.app.api.select({ kind: 'object', id }), pp);
     await page.waitForSelector('#pgNewName');
     assert.strictEqual(await page.locator('#pgNewSubnet').count(), 0);
+    await page.evaluate(() => NetMap.app.api.loadProject(NetMap.builder.buildDemoProject()));
+    await page.waitForSelector('#vp [data-kind="object"]');
+  });
+
+  await step('media converter and SFP ports: add from the toolbar, port types limited to uplinks, fibre cable types', async () => {
+    await page.evaluate(() => NetMap.app.api.loadProject(NetMap.builder.buildDemoProject()));
+    if (!(await page.evaluate(() => NetMap.app.S.mode === 'edit'))) await page.click('#btnMode');
+    await page.click('#toolbar button[data-add="mediaconverter"]');
+    await page.waitForSelector('#dlg[open]');
+    await page.click('#dlg button[data-btn="ok"]');
+    await placeAt(900, 650);
+    const mc = await page.evaluate(() => NetMap.app.S.p.objects.find((o) => o.type === 'mediaconverter'));
+    assert.ok(mc && mc.ports.map((x) => x.label).join() === 'ETH,SFP', 'created with one Ethernet and one SFP port');
+    assert.strictEqual(await page.evaluate(() => NetMap.app.S.p.internalMappings.some((m) => m.objectId === NetMap.app.S.p.objects.find((o) => o.type === 'mediaconverter').id)), true, 'joined inside');
+    await page.evaluate((id) => NetMap.app.api.select({ kind: 'object', id }), mc.id);
+    await page.waitForSelector('#detailsPane .sub');
+    assert.ok(/Ethernet \(RJ45\) port and one SFP port/.test(await page.innerText('#detailsPane')));
+    assert.strictEqual(await page.locator('#pcInput').count(), 0, 'no port count for a converter');
+    // a switch with an uplink: SFP can be chosen there, not on an access port
+    const ids = await page.evaluate(() => { let up; NetMap.app.api.commit('uplink', (p) => { const sw = p.objects.find((o) => o.name === 'Switch A'); NetMap.model.setUplinkPorts(p, sw.id, 1); }); const sw = NetMap.app.S.p.objects.find((o) => o.name === 'Switch A'); return { up: sw.ports.find((x) => x.role === 'uplink').id, acc: sw.ports.find((x) => x.label === '3').id }; });
+    await page.evaluate((id) => NetMap.app.api.select({ kind: 'port', id }), ids.up);
+    await page.waitForSelector('#detailsPane select[data-f="ptype"]');
+    assert.ok((await page.locator('#detailsPane select[data-f="ptype"] option').allInnerTexts()).includes('SFP'), 'SFP is offered on an uplink port');
+    await page.selectOption('#detailsPane select[data-f="ptype"]', 'SFP');
+    assert.strictEqual(await page.evaluate((id) => NetMap.model.buildIndex(NetMap.app.S.p).ports[id].portType, ids.up), 'SFP');
+    await page.evaluate((id) => NetMap.app.api.select({ kind: 'port', id }), ids.acc);
+    await page.waitForSelector('#detailsPane select[data-f="ptype"]');
+    assert.ok(!(await page.locator('#detailsPane select[data-f="ptype"] option').allInnerTexts()).some((t) => /SFP/.test(t)), 'not offered on an access port');
+    // cable types: suggestions on the cable type field
+    const cable = await page.evaluate(() => NetMap.app.S.p.patchCables[0].id);
+    await page.evaluate((id) => NetMap.app.api.select({ kind: 'cable', id }), cable);
+    await page.waitForSelector('#detailsPane input[data-f="cableType"][list="cableTypes"]');
+    assert.ok((await page.locator('#cableTypes option').evaluateAll((os) => os.map((o) => o.value))).some((v) => /Fibre OS2/.test(v)), 'fibre types are suggested');
+    await page.fill('#detailsPane input[data-f="cableType"]', 'Fibre OM4'); await page.press('#detailsPane input[data-f="cableType"]', 'Tab');
+    assert.strictEqual(await page.evaluate((id) => NetMap.app.S.p.patchCables.find((c) => c.id === id).cableType, cable), 'Fibre OM4');
     await page.evaluate(() => NetMap.app.api.loadProject(NetMap.builder.buildDemoProject()));
     await page.waitForSelector('#vp [data-kind="object"]');
   });

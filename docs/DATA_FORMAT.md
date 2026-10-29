@@ -36,7 +36,9 @@ compact files open identically (`compactProject()` / `expandProject()` in `js/mo
 }
 ```
 
-- `type` is one of `rack`, `patchpanel`, `switch`, `router`, `internet`, `socket`, `generic`.
+- `type` is one of `rack`, `patchpanel`, `switch`, `router`, `internet`, `socket`, `mediaconverter`, `generic`.
+- `mediaconverter`: always two ports on the front, `ETH` (`portType` `RJ45`) and `SFP` (`portType` `SFP`), joined by one internal mapping (the only kind of mapping between two front ports). Routes pass through it like a patch panel.
+- A port's `portType` is free text; the app offers `RJ45`, `SFP`, `SFP+` and only allows SFP / SFP+ on uplink ports (`role: uplink`) of a switch. Cable types (`cableType`) are free text; names containing fibre/fiber, OM1-5 or OS1-2 count as fibre.
 - Generic equipment may carry `deviceKind` (`pc`, `laptop`, `ap`, `camera`, `printer`, `phone`, `server`; omitted = other), which only
   selects the icon and default name.
 - `containerId` points at a group, or at a rack (racks hold patch panels, switches and generic objects).

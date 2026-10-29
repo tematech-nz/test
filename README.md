@@ -75,6 +75,11 @@ Try it: File -> Load demo project: two rooms with a fixed link between racks, a 
   from the bottom (2 above 1, as on switches that number that way) and *horizontal* counts from the right; both can be combined. "Full width" stretches equipment to the inner width of its rack
   or group and keeps following the rack when you resize it; in a narrow rack its sections wrap onto extra lines (taller), so the rack can
   shrink down to one section wide. Switches can also have **port isolation**.
+- **Fibre, media converters and SFP ports**: the *Cable type* of a patch cable or fixed link takes any text; suggestions include Cat5e, Cat6, Cat6A, Fibre OM3 / OM4 (multimode),
+  Fibre OS2 (single-mode) and DAC. A fibre fixed link is drawn amber and its label says "fibre". A **Media converter** (toolbar) is a small device with one Ethernet (RJ45) port and
+  one SFP port joined inside: patch the Ethernet side to a switch or device and the SFP side with a fibre lead to a fibre patch panel, and traces and the Graph run straight through it
+  (like a patch panel, it is not a device of its own in the Graph; the route lists it). On a switch, a port's **Type** is RJ45, SFP or SFP+; SFP / SFP+ can only be chosen on **uplink
+  ports** (the ports that take modules), and SFP ports have a blue edge on the map. Validation warns about a fibre lead on an RJ45 port and about an RJ45 port patched straight to an SFP port.
 - **Separate subnets on one switch (VLANs)**: make a port group on a switch (for example ports 1-12 and 13-22) and give it a **Subnet** (192.168.1.0/24, or
   just 192.168.1). Its ports are then a network of their own: they only talk to ports of the same network, the uplinks carry every network, and ports in
   no such group are the default network. In the Graph, devices of two networks meet only through a router above (up and back), and not at all when there

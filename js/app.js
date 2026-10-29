@@ -769,7 +769,7 @@
     if (!isEdit()) { tb.innerHTML = ''; return; }
     const pc = S.tool && S.tool.type === 'patch';
     tb.innerHTML =
-      ['group:Group', 'rack:Rack', 'patchpanel:Patch panel', 'switch:Switch', 'router:Router', 'internet:Internet / ISP', 'socket:Wall socket', 'generic:Generic'].map((s) => {
+      ['group:Group', 'rack:Rack', 'patchpanel:Patch panel', 'switch:Switch', 'router:Router', 'internet:Internet / ISP', 'socket:Wall socket', 'mediaconverter:Media converter', 'generic:Generic'].map((s) => {
         const a = s.split(':'); return '<button data-add="' + a[0] + '" title="Create a new ' + a[1].toLowerCase() + ' on this map">+ ' + a[1] + '</button>';
       }).join('') + '<span class="sep"></span>' +
       '<button data-act="patchTool" title="' + esc(TIPS.patchTool) + '" class="' + (pc ? 'active' : '') + '">Patch cable tool (W)</button>' +
@@ -1033,6 +1033,8 @@
     if (isEdit() && o.type === 'router') {
       const nw = o.ports.filter((x) => x.role === 'wan').length, nl = o.ports.length - nw;
       h += fld('Ports', 'WAN <input type="number" id="wanInput" min="0" max="96" value="' + nw + '" style="width:60px"> LAN <input type="number" id="lanInput" min="0" max="96" value="' + nl + '" style="width:60px"> ' + btn('applyRouterPorts', 'Apply'));
+    } else if (o.type === 'mediaconverter') {
+      h += '<div class="sub">One Ethernet (RJ45) port and one SFP port, joined inside: cable the Ethernet side to a switch or device with a patch cable and the SFP side with a fibre lead to a fibre patch panel. Traces and the graph run straight through it.</div>';
     } else if (isEdit() && o.type !== 'rack') {
       h += fld('Port count', '<input type="number" id="pcInput" min="0" max="96" value="' + (M.isTermination(o) ? o.ports.length / 2 : (o.type === 'switch' ? M.accessPorts(o).length : o.ports.length)) + '" style="width:70px"> ' + btn('applyPortCount', 'Apply') +
         (o.type === 'switch' ? '<div class="sub">Presets: ' + [8, 16, 24, 48].map((n) => '<a class="lnk" data-act="presetPorts" data-n="' + n + '">' + n + '</a>').join(' ') + '</div>' : ''));
@@ -1115,6 +1117,13 @@
     }
     return h;
   }
+  /* the port type: RJ45, or SFP / SFP+ where a module fits (uplink ports of a switch); fixed on a media converter */
+  function portTypeField(o, pt) {
+    if (o.type === 'mediaconverter' || !isEdit()) return fld('Type', '<div class="ro">' + esc(pt.portType || '') + '</div>');
+    const list = [['', '-']].concat(M.PORT_TYPES.filter((t) => !M.isSfpType(t) || M.sfpAllowed(o, pt)).map((t) => [t, t]));
+    if (pt.portType && !list.some((x) => x[0] === pt.portType)) list.push([pt.portType, pt.portType]); // an older free-text value stays visible
+    return fld('Type', '<select data-f="ptype" data-t="' + esc(pt.id) + '">' + opts(list, pt.portType || '') + '</select>' + (o.type === 'switch' && pt.role !== 'uplink' ? '<div class="sub">SFP modules fit uplink ports only.</div>' : ''));
+  }
   function detPort(id) {
     const idx = M.buildIndex(S.p), pt = idx.ports[id], o = idx.portObj[id];
     let h = '<h3>Port</h3>' + fld('Equipment', lnk('object', o.id, o.name)) + inp('Number', 'plabel', pt.label, pt.id) + inp('Label', 'pdesc', pt.description || '', pt.id, 'placeholder="shown on hover"');
@@ -1122,7 +1131,7 @@
     if (o.type === 'router') h += fld('Role', esc((pt.role || '').toUpperCase()));
     if (hasIp(o)) h += inp('IP address', 'pip', pt.ip || '', pt.id, 'placeholder="' + esc(M.effectivePortIp(o, pt) || '') + '"') + (!pt.ip && M.effectivePortIp(o, pt) ? '<div class="sub">Empty: uses the device address ' + esc(M.effectivePortIp(o, pt)) + '.</div>' : '');
     if (o.type === 'router') h += isEdit() ? fld('Network colour', colorPicker('netPreset', 'pnet', pt.networkColor || '', 'net:' + pt.id, { value: '', label: 'none', swatch: 'transparent', dt: pt.id }) + '<div class="sub">New patch cables extending from this port default to this colour.</div>') : (pt.networkColor ? fld('Network colour', '<span class="swatch" style="background:' + esc(pt.networkColor) + '"></span>') : '');
-    if (o.type === 'switch') h += inp('Type', 'ptype', pt.portType || '', pt.id) + inp('Speed', 'pspeed', pt.speed || '', pt.id) + inp('Media', 'pmedia', pt.media || '', pt.id);
+    if (o.type === 'switch' || o.type === 'mediaconverter') h += portTypeField(o, pt) + inp('Speed', 'pspeed', pt.speed || '', pt.id) + inp('Media', 'pmedia', pt.media || '', pt.id);
     h += fld('Connection', portState(o, pt, idx));
     h += '<div class="btn-row">' + btn('trace', 'Trace connection', 'data-kind="port" data-id="' + esc(id) + '"', 'primary');
     if (isEdit()) {
@@ -1141,7 +1150,7 @@
     const idx = M.buildIndex(S.p), c = idx.cables[id];
     let h = '<h3>Patch cable</h3>' + inp('ID', 'name', c.name) +
       fld('End A', lnk('port', c.aPortId, M.portName(S.p, c.aPortId, idx))) + fld('End B', lnk('port', c.bPortId, M.portName(S.p, c.bPortId, idx)));
-    h += inp('Cable type', 'cableType', c.cableType) + inp('Length', 'length', c.length);
+    h += inp('Cable type', 'cableType', c.cableType, '', 'list="cableTypes"') + inp('Length', 'length', c.length);
     h += isEdit() ? fld('Colour', colorPicker('colorPreset', 'color', c.color, c.id)) : fld('Colour', '<span style="display:inline-block;width:30px;height:12px;background:' + esc(c.color) + ';border:1px solid #888"></span>');
     h += isEdit() ? fld('Status', '<select data-f="status">' + opts(M.CABLE_STATUS.map((s) => [s, s]), c.status) + '</select>') : fld('Status', esc(c.status));
     h += '<div class="btn-row">' + btn('trace', 'Trace connection', 'data-kind="cable" data-id="' + esc(id) + '"', 'primary');
@@ -1153,7 +1162,7 @@
     const idx = M.buildIndex(S.p), l = idx.links[id], a = idx.objects[l.aObjectId], b = idx.objects[l.bObjectId];
     let h = '<h3>Fixed link (installed cabling)</h3>' + inp('ID', 'name', l.name) +
       fld('Panel A', a ? lnk('object', a.id, a.name) : '?') + fld('Panel B', b ? lnk('object', b.id, b.name) : '?') + fld('Wires', l.wires.length);
-    h += inp('Cable type', 'cableType', l.cableType) + inp('Length', 'length', l.length) + inp('Route', 'route', l.route);
+    h += inp('Cable type', 'cableType', l.cableType, '', 'list="cableTypes"') + inp('Length', 'length', l.length) + inp('Route', 'route', l.route);
     h += isEdit() ? fld('Status', '<select data-f="status">' + opts(M.LINK_STATUS.map((s) => [s, s]), l.status) + '</select>') : fld('Status', esc(l.status));
     h += fld('On maps', mapsLine('link', id));
     h += '<div class="btn-row">' + btn('trace', 'Trace all wires', 'data-kind="link" data-id="' + esc(id) + '"', 'primary');
@@ -1340,6 +1349,7 @@
       fields.push({ k: 'ipAddress', label: 'IP address / circuit', v: '' });
       fields.push({ k: 'publicIp', label: 'Public IP', type: 'check', v: false, hint: 'Tick when this ISP gives you a routable address, so the Internet can reach in (not CGNAT). The graph uses it for "what can be reached from the Internet".' });
     }
+    if (type === 'mediaconverter') fields[0].hint = 'One Ethernet (RJ45) and one SFP port, joined inside. Patch the Ethernet side to a switch, the SFP side with a fibre lead to a fibre panel.';
     if (type === 'switch') fields.push({ k: 'ipAddress', label: 'Management IP', v: '', hint: 'Optional: the web interface address of a managed switch (IPv4, e.g. 192.168.1.2).' });
     if (type === 'generic' || type === 'switch') fields.push({ k: 'dhcp', label: 'DHCP', type: 'check', v: false, hint: 'Tick when it takes any address from the LAN it is plugged into (no fixed address).' });
     if (type === 'generic') fields.push({ k: 'ipAddress', label: 'IP address', v: '', hint: 'Optional IPv4 address; all ports use it unless given an address of their own.' });
@@ -2063,7 +2073,7 @@
             (picked ? '<div class="pk-sum' + (st.sel.a.length && st.sel.a.length === st.sel.b.length && !pr ? ' valid' : '') + '">' + (st.sel.a.length ? 'A: ' + esc(fmt(objOf('a'), st.sel.a)) : 'A: -') + ' &harr; ' + (st.sel.b.length ? 'B: ' + esc(fmt(objOf('b'), st.sel.b)) : 'B: -') + '</div>' + (pr ? '<div class="err-text">' + esc(pr) + '</div>' : '') :
               fld('Wires', '<input type="number" data-s="n" value="' + st.n + '" min="1" max="288">') +
               fld('Mapping', '<select data-s="mapping">' + opts([['sequential', 'Sequential: next free rear port to next free rear port'], ['none', 'Leave unmapped (map each wire later)']], st.mapping) + '</select><div class="sub">Nothing picked: create this many wires without choosing ports. Mappings are never assumed; choose sequential only if the installation really is 1:1.</div>')) +
-            fld('Cable type', '<input type="text" data-s="cableType" value="' + esc(st.cableType) + '">') + fld('Length', '<input type="text" data-s="length" value="' + esc(st.length) + '">') + fld('Route', '<input type="text" data-s="route" value="' + esc(st.route) + '">'),
+            fld('Cable type', '<input type="text" data-s="cableType" list="cableTypes" value="' + esc(st.cableType) + '"><div class="sub">Pick or type: Cat6, Fibre OM3 / OM4 / OS2...</div>') + fld('Length', '<input type="text" data-s="length" value="' + esc(st.length) + '">') + fld('Route', '<input type="text" data-s="route" value="' + esc(st.route) + '">'),
           buttons: [{ key: 'no', label: 'Cancel' }, { key: 'ok', label: picked ? 'Create link (' + st.sel.a.length + ' wire' + (st.sel.a.length === 1 ? '' : 's') + ')' : 'Create link', cls: 'primary', disabled: !!pr }]
         };
       },
@@ -2362,7 +2372,7 @@
       if (f === 'plabel' || f === 'ptype' || f === 'pspeed' || f === 'pmedia' || f === 'pip') {
         const pt = idx.ports[t || sel.id]; if (!pt) return;
         if (f === 'pip') { M.setPortIp(p, pt.id, val); return; }
-        if (f === 'plabel') { pt.label = val; B.fitMinimum(p, idx.portObj[pt.id].id); } else pt[{ ptype: 'portType', pspeed: 'speed', pmedia: 'media', pip: 'ip' }[f]] = val.trim();
+        if (f === 'plabel') { pt.label = val; B.fitMinimum(p, idx.portObj[pt.id].id); } else if (f === 'ptype') M.setPortType(p, pt.id, val); else pt[{ pspeed: 'speed', pmedia: 'media', pip: 'ip' }[f]] = val.trim();
         return;
       }
       if (f === 'wstatus') { M.updateWireStatus(p, t, val); return; }
@@ -2580,6 +2590,7 @@
   }
   function bindUi() {
     bindRightGrip();
+    if (!document.getElementById('cableTypes')) document.body.insertAdjacentHTML('beforeend', '<datalist id="cableTypes">' + M.CABLE_TYPES.map((t) => '<option value="' + esc(t) + '"></option>').join('') + '</datalist>');
     $('btnMode').onclick = () => setMode(S.mode === 'edit' ? 'view' : 'edit');
     $('btnHistory').onclick = historyDlg; $('btnUndo').onclick = undo; $('btnRedo').onclick = redo;
     $('btnFile').onclick = fileMenu;

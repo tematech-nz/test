@@ -264,6 +264,18 @@
     M.addPatchCable(p, { aPortId: pc.ports[0].id, bPortId: port(ws, 'front', 2).id, color: '#8a8f98' });
     M.addPatchCable(p, { aPortId: port(swA, 'front', 14).id, bPortId: port(ppA, 'front', 14).id, color: '#f2c200' });
     M.addPatchCable(p, { aPortId: port(ppB, 'front', 14).id, bPortId: ap.ports[0].id, color: '#1f77b4' });
+    // a fibre run between the rooms: Switch A - media converter - fibre panel =fixed fibre link= fibre panel - media converter - Warehouse AP
+    var mc1 = addObjectPlaced(p, mA.id, { type: 'mediaconverter', name: 'MC-1' }, 1020, 70);
+    var odf = byName('PP-Standalone');
+    var odfB = addObjectPlaced(p, mB.id, { type: 'patchpanel', name: 'ODF-B', portCount: 4, straight: true, containerId: roomB.id });
+    var mc2 = addObjectPlaced(p, mB.id, { type: 'mediaconverter', name: 'MC-2', containerId: roomB.id });
+    var wap = addObjectPlaced(p, mB.id, { type: 'generic', name: 'Warehouse AP', deviceKind: 'ap', ipAddress: '192.168.1.61', portCount: 1, containerId: roomB.id });
+    var eth = function (o) { return o.ports.filter(function (x) { return x.label === 'ETH'; })[0].id; }, sfp = function (o) { return o.ports.filter(function (x) { return x.label === 'SFP'; })[0].id; };
+    M.addPatchCable(p, { aPortId: port(swA, 'front', 2).id, bPortId: eth(mc1), color: '#2ca02c' });
+    M.addPatchCable(p, { aPortId: sfp(mc1), bPortId: port(odf, 'front', 1).id, color: '#f9a825', cableType: 'Fibre OM3 (multimode)' });
+    M.addFixedLink(p, { aObjectId: odf.id, bObjectId: odfB.id, wireCount: 2, mapping: 'sequential', cableType: 'Fibre OS2 (single-mode)', route: 'Underground duct', length: '320 m' });
+    M.addPatchCable(p, { aPortId: port(odfB, 'front', 1).id, bPortId: sfp(mc2), color: '#f9a825', cableType: 'Fibre OM3 (multimode)' });
+    M.addPatchCable(p, { aPortId: eth(mc2), bPortId: wap.ports[0].id, color: '#2ca02c' });
     // a live copy: the Edge router also appears on the Office map (one editable original, the copy follows it)
     placeItem(p, mB.id, 'object', rtr.id, 1000, 60);
 

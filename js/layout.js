@@ -117,7 +117,7 @@
     var front = gs[0] || { rows: 0, cols: 0 }, rear = gs[1] || { rows: 0, cols: 0 };
     var cols = Math.max(front.cols, rear.cols, 4);
     var w = cols * cellFor(obj) + PADX * 2 + (SECTIONED[obj.type] ? 6 : 0);
-    if (obj.type === 'generic') w = Math.max(w, 100) + iconW(obj);
+    if (obj.type === 'generic' || obj.type === 'mediaconverter') w = Math.max(w, 100) + iconW(obj);
     if (obj.type === 'socket') w = Math.max(w, 96);
     if (usesSections(obj)) w += (Math.max(front.perRow || 1, rear.perRow || 1) - 1) * SGAP;
     if (obj.type === 'router') w = Math.max(w, 150);

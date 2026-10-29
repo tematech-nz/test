@@ -2282,5 +2282,59 @@ test('port group name tag: white text on dark colours (black), dark text on ligh
   assert.ok(/fill="#111"[^>]*>Light</.test(svg), 'the tag of a light group keeps dark text');
 });
 
+test('media converter (1 Ethernet + 1 SFP), SFP on uplink ports only, fibre cable types', () => {
+  const TP = NM.topology, T = NM.trace, R = NM.render;
+  const p = M.createProject('fibre'), mapId = p.maps[0].id;
+  // two sites: switch - converter - fibre panel =fixed fibre link= fibre panel - converter - switch
+  const swA = M.addObject(p, { type: 'switch', name: 'SwA', portCount: 8, uplinkPorts: 1 }), swB = M.addObject(p, { type: 'switch', name: 'SwB', portCount: 8, uplinkPorts: 1 });
+  const mcA = M.addObject(p, { type: 'mediaconverter', name: 'MC-A' }), mcB = M.addObject(p, { type: 'mediaconverter', name: 'MC-B' });
+  const odfA = M.addObject(p, { type: 'patchpanel', name: 'ODF-A', portCount: 4, straight: true }), odfB = M.addObject(p, { type: 'patchpanel', name: 'ODF-B', portCount: 4, straight: true });
+  assert.deepStrictEqual(mcA.ports.map(x => x.label + ':' + x.portType), ['ETH:RJ45', 'SFP:SFP']);
+  assert.strictEqual(M.TYPE_LABELS.mediaconverter, 'Media converter');
+  assert.strictEqual(p.internalMappings.filter(m => m.objectId === mcA.id).length, 1, 'the two sides are joined inside');
+  assert.throws(() => M.setPortCount(p, mcA.id, 4), /always has one Ethernet and one SFP/);
+  const port = (o, l) => o.ports.find(x => x.label === String(l)).id, sfpOf = (o) => o.ports.find(x => x.label === 'SFP').id, ethOf = (o) => o.ports.find(x => x.label === 'ETH').id;
+  const up = (o) => o.ports.find(x => x.role === 'uplink').id;
+  // SFP modules fit uplink ports only
+  M.setPortType(p, up(swA), 'SFP'); assert.strictEqual(swA.ports.find(x => x.role === 'uplink').portType, 'SFP');
+  assert.throws(() => M.setPortType(p, port(swA, 3), 'SFP'), /uplink ports only/);
+  M.setPortType(p, port(swA, 3), 'RJ45'); assert.strictEqual(M.sfpAllowed(swA, swA.ports[0]), false); assert.strictEqual(M.sfpAllowed(swA, swA.ports.find(x => x.role === 'uplink')), true);
+  assert.throws(() => M.setPortType(p, ethOf(mcA), 'SFP'), /fixed/);
+  // the cabling
+  const cat = (a, b) => M.addPatchCable(p, { aPortId: a, bPortId: b, cableType: 'Cat6' });
+  cat(port(swA, 1), ethOf(mcA)); cat(port(swB, 1), ethOf(mcB));
+  const lead = (a, b) => M.addPatchCable(p, { aPortId: a, bPortId: b, cableType: 'Fibre OM3 (multimode)' });
+  lead(sfpOf(mcA), odfA.ports.find(x => x.side === 'front' && x.label === '1').id); lead(sfpOf(mcB), odfB.ports.find(x => x.side === 'front' && x.label === '1').id);
+  const link = M.addFixedLink(p, { aObjectId: odfA.id, bObjectId: odfB.id, wireCount: 2, mapping: 'sequential', cableType: 'Fibre OS2 (single-mode)' });
+  assert.ok(M.isFibreCable(link.cableType) && M.isFibreCable('Fibre OM4') && M.isFibreCable('OS2') && !M.isFibreCable('Cat6A') && !M.isFibreCable('DAC / twinax'));
+  // tracing and the graph run straight through the converters and panels
+  const tr = T.tracePort(p, port(swA, 1));
+  assert.ok(tr.path.some(s => s.type === 'port' && s.id === port(swB, 1)), 'the trace reaches the switch at the other end');
+  const g = TP.buildGraph(p);
+  assert.ok(!g.nodes[mcA.id] && !g.nodes[odfA.id], 'converters and panels are collapsed');
+  assert.strictEqual(TP.reachTree(g, swA.id).depth[swB.id], 1, 'SwA - SwB is one link in the graph');
+  const via = g.links[0].paths[0].via.join(' > ');
+  assert.ok(/MC-A/.test(via) && /MC-B/.test(via) && /ODF-A/.test(via), 'the route names the converters and panels: ' + via);
+  // validation: a clean setup; a fibre lead on an RJ45 port and RJ45 straight to SFP are flagged
+  const issues = M.validateProject(p).filter(i => i.severity !== 'info').map(i => i.message);
+  assert.ok(issues.length === 0, issues.join(' | '));
+  const bad = M.clone(p); M.setPortType(bad, port(swA, 2), 'RJ45'); M.addPatchCable(bad, { aPortId: port(swA, 2), bPortId: port(swB, 2), cableType: 'Fibre OS2' });
+  assert.ok(M.validateProject(bad).some(i => i.code === 'FIBRE_ON_RJ45'), 'a fibre lead on an RJ45 port');
+  M.setPortType(bad, port(swA, 4), 'RJ45'); M.setPortType(bad, up(swB), 'SFP'); M.addPatchCable(bad, { aPortId: port(swA, 4), bPortId: up(swB), cableType: 'Cat6' });
+  assert.ok(M.validateProject(bad).some(i => i.code === 'RJ45_SFP'), 'RJ45 joined to an SFP port');
+  const w = M.clone(p); w.objects.find(o => o.id === swA.id).ports[2].portType = 'SFP';
+  assert.ok(M.validateProject(w).some(i => i.code === 'SFP_NOT_UPLINK'), 'a file that puts SFP on an access port is warned about');
+  // drawing: SFP ports have a blue edge, a fibre fixed link is amber and says fibre
+  B.placeItem(p, mapId, 'object', swA.id, 40, 40); B.placeItem(p, mapId, 'object', odfA.id, 40, 300); B.placeItem(p, mapId, 'object', odfB.id, 400, 300); B.placeItem(p, mapId, 'object', mcA.id, 400, 40);
+  const svg = R.renderMap(p, mapId, { mode: 'view' }).content;
+  assert.ok(/stroke="#0277bd"/.test(svg), 'SFP port edge'); assert.ok(/ fibre</.test(svg) && /stroke="#f9a825"/.test(svg), 'fibre fixed link');
+  // copy keeps the inside connection; save and load keep everything
+  const clip = B.copyClip(p, mapId, 'object', mcA.id), q = M.createProject('x'), root = B.pasteClipAt(q, q.maps[0].id, clip, 10, 10);
+  assert.strictEqual(q.internalMappings.length, 1); assert.strictEqual(q.objects[0].ports.length, 2);
+  const back = M.migrate(JSON.parse(M.serializeProject(p))).project;
+  assert.strictEqual(back.internalMappings.filter(m => m.objectId === mcA.id).length, 1);
+  assert.strictEqual(T.tracePort(back, port(swA, 1)).path.length, tr.path.length);
+});
+
 console.log('\n' + passed + ' passed, ' + failed + ' failed');
 process.exit(failed ? 1 : 0);

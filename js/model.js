@@ -7,13 +7,18 @@
   /* equipment that terminates installed (fixed) cabling on a rear side and presents front jacks */
   var TERMINATIONS = { patchpanel: true, socket: true };
   function isTermination(o) { return !!(o && TERMINATIONS[o.type]); }
+  /* cable types offered as suggestions (the field stays free text) and the port types of a port: SFP / SFP+ modules fit uplink ports only */
+  var CABLE_TYPES = ['Cat5e', 'Cat6', 'Cat6A', 'Fibre OM3 (multimode)', 'Fibre OM4 (multimode)', 'Fibre OS2 (single-mode)', 'DAC / twinax'];
+  var PORT_TYPES = ['RJ45', 'SFP', 'SFP+'];
+  function isFibreCable(t) { return /fib(?:re|er)|\bOM[1-5]\b|\bOS[12]\b|single-?mode|multi-?mode/i.test(String(t || '')); }
+  function isSfpType(t) { return /^SFP/i.test(String(t || '')); }
   /* generic equipment can be drawn with an icon */
   var DEVICE_KINDS = [['other', 'Other', 'Device'], ['pc', 'PC / workstation', 'PC'], ['laptop', 'Laptop', 'Laptop'], ['ap', 'Wi-Fi access point', 'AP'],
     ['camera', 'Camera', 'Camera'], ['printer', 'Printer', 'Printer'], ['phone', 'IP phone', 'IP phone'], ['server', 'Server', 'Server']];
   function deviceKindInfo(k) { for (var i = 0; i < DEVICE_KINDS.length; i++) if (DEVICE_KINDS[i][0] === k) return DEVICE_KINDS[i]; return DEVICE_KINDS[0]; }
   function typeLabel(o) { return o.type === 'generic' && o.deviceKind ? deviceKindInfo(o.deviceKind)[1] : TYPE_LABELS[o.type]; }
-  var OBJECT_TYPES = ['rack', 'patchpanel', 'switch', 'router', 'internet', 'socket', 'generic'];
-  var TYPE_LABELS = { rack: 'Rack', patchpanel: 'Patch panel', switch: 'Switch', router: 'Router', internet: 'Internet / ISP', socket: 'Wall socket', generic: 'Generic' };
+  var OBJECT_TYPES = ['rack', 'patchpanel', 'switch', 'router', 'internet', 'socket', 'mediaconverter', 'generic'];
+  var TYPE_LABELS = { rack: 'Rack', patchpanel: 'Patch panel', switch: 'Switch', router: 'Router', internet: 'Internet / ISP', socket: 'Wall socket', mediaconverter: 'Media converter', generic: 'Generic' };
   var CABLE_STATUS = ['planned', 'active', 'faulty', 'spare'];
   var WIRE_STATUS = ['connected', 'spare', 'unused', 'faulty'];
   var LINK_STATUS = ['planned', 'installed', 'faulty', 'decommissioned'];
@@ -679,6 +684,8 @@
       for (i = 1; i <= count; i++) ports.push({ id: uid('prt'), label: String(i), side: 'rear' });
     } else if (type === 'rack') {
       return [];
+    } else if (type === 'mediaconverter') { // one Ethernet side and one fibre (SFP) side, both patched with leads; the two are joined inside
+      ports.push({ id: uid('prt'), label: 'ETH', side: 'front', portType: 'RJ45' }, { id: uid('prt'), label: 'SFP', side: 'front', portType: 'SFP' });
     } else {
       for (i = 1; i <= count; i++) {
         var pt = { id: uid('prt'), label: String(i), side: 'front' };
@@ -688,7 +695,7 @@
     }
     return ports;
   }
-  function defaultPortCount(type) { return { patchpanel: 24, 'switch': 24, socket: 2, generic: 0, rack: 0, internet: 1 }[type] || 0; }
+  function defaultPortCount(type) { return { patchpanel: 24, 'switch': 24, socket: 2, mediaconverter: 2, generic: 0, rack: 0, internet: 1 }[type] || 0; }
 
   function addObject(p, o) {
     if (OBJECT_TYPES.indexOf(o.type) < 0) throw new Error('Unknown object type');
@@ -730,6 +737,7 @@
     }
     var straight = o.straight === undefined ? o.type === 'socket' : o.straight; // wall sockets are straight-through unless told otherwise
     if (isTermination(obj) && straight) autoMapPanel(p, obj.id);
+    if (obj.type === 'mediaconverter') p.internalMappings.push({ id: uid('map_i'), objectId: obj.id, aPortId: obj.ports[0].id, bPortId: obj.ports[1].id }); // Ethernet <-> SFP inside
     return obj;
   }
 
@@ -743,11 +751,22 @@
     } else c.item.containerId = containerId || null;
   }
 
+  /* SFP / SFP+ modules fit the uplink ports of a switch (and the SFP side of a media converter); every other port is RJ45 or untyped */
+  function sfpAllowed(o, pt) { return !!(o && pt && ((o.type === 'switch' && pt.role === 'uplink') || o.type === 'mediaconverter')); }
+  function setPortType(p, portId, type) {
+    var idx = buildIndex(p), pt = idx.ports[portId], o = idx.portObj[portId];
+    if (!pt || !o) throw new Error('Port not found');
+    type = String(type == null ? '' : type).trim();
+    if (o.type === 'mediaconverter') throw new Error('The ports of a media converter are fixed: Ethernet (RJ45) and SFP');
+    if (isSfpType(type) && !sfpAllowed(o, pt)) throw new Error('SFP modules fit uplink ports only: give the switch uplink ports first');
+    pt.portType = type;
+  }
   function setPortCount(p, objectId, n) {
     var idx = buildIndex(p), o = idx.objects[objectId];
     if (!o) throw new Error('Object not found');
     if (o.type === 'rack') throw new Error('Racks have no ports');
     if (o.type === 'router') throw new Error('Use setRouterPorts for routers');
+    if (o.type === 'mediaconverter') throw new Error('A media converter always has one Ethernet and one SFP port');
     if (n < 0 || n > 96 || n !== Math.floor(n)) throw new Error('Port count must be 0-96');
     function used(pt) { return idx.portUse[pt.id]; }
     function adjust(side) {
@@ -1161,6 +1180,7 @@
         if (g.peerId && !findPortGroup(p, g.peerId)) add('warning', 'BAD_PEER', 'Port group "' + g.name + '" on "' + o.name + '" is linked to a group that no longer exists', 'object', o.id);
         if (g.deviceKind && g.portIds.some(function (x) { return idx.portUse[x]; })) add('warning', 'PSEUDO_CABLED', 'Port group "' + g.name + '" on "' + o.name + '" stands for plugged-in devices but some of its ports also have cables', 'object', o.id);
       });
+      o.ports.forEach(function (pt) { if (o.type === 'switch' && isSfpType(pt.portType) && pt.role !== 'uplink') add('warning', 'SFP_NOT_UPLINK', 'Port ' + o.name + ' / ' + pt.label + ' is typed SFP but only uplink ports take SFP modules', 'port', pt.id); });
       var unused = o.ports.filter(function (pt) { return !idx.portUse[pt.id] && !idx.mapByPort[pt.id]; }).length;
       if (o.ports.length && unused) add('info', 'UNUSED_PORTS', unused + ' of ' + o.ports.length + ' terminations on "' + o.name + '" are unused', 'object', o.id);
     });
@@ -1189,6 +1209,9 @@
       if (c.aPortId === c.bPortId) add('error', 'SELF_LOOP', 'Patch cable ' + c.name + ' joins a port to itself', 'cable', c.id);
       if (okA.side === 'rear' || okB.side === 'rear') add('error', 'INCOMPATIBLE', 'Patch cable ' + c.name + ' is connected to a rear termination', 'cable', c.id);
       count(c.aPortId, c.name); count(c.bPortId, c.name);
+      var ta = idx.ports[c.aPortId].portType, tb = idx.ports[c.bPortId].portType;
+      if (isFibreCable(c.cableType) && (/^RJ45$/i.test(ta || '') || /^RJ45$/i.test(tb || ''))) add('warning', 'FIBRE_ON_RJ45', 'Patch cable ' + c.name + ' is fibre but one end is an RJ45 port', 'cable', c.id);
+      else if ((/^RJ45$/i.test(ta || '') && isSfpType(tb)) || (/^RJ45$/i.test(tb || '') && isSfpType(ta))) add('warning', 'RJ45_SFP', 'Patch cable ' + c.name + ' joins an RJ45 port to an SFP port: that needs a media converter or a copper SFP module', 'cable', c.id);
     });
     p.fixedLinks.forEach(function (l) {
       var a = idx.objects[l.aObjectId], b = idx.objects[l.bObjectId];
@@ -1220,7 +1243,7 @@
         add('error', 'BAD_MAPPING', 'An internal mapping refers to a nonexistent port', o ? 'object' : null, o && o.id);
         return;
       }
-      if (idx.ports[m.aPortId].side === idx.ports[m.bPortId].side) add('error', 'BAD_MAPPING', 'Internal mapping on "' + o.name + '" does not join front to rear', 'object', o.id);
+      if (o.type !== 'mediaconverter' && idx.ports[m.aPortId].side === idx.ports[m.bPortId].side) add('error', 'BAD_MAPPING', 'Internal mapping on "' + o.name + '" does not join front to rear', 'object', o.id);
       [m.aPortId, m.bPortId].forEach(function (pid) {
         if (mapped[pid]) add('error', 'BAD_MAPPING', 'Port ' + portName(p, pid, idx) + ' appears in two internal mappings', 'port', pid);
         mapped[pid] = true;
@@ -1379,7 +1402,7 @@
     findContainer: findContainer, groupOf: groupOf, parentOf: parentOf, containerChildren: containerChildren, descendants: descendants,
     addPlacement: addPlacement, placementOf: placementOf, placementGroup: placementGroup, movePlacement: movePlacement,
     growToFit: growToFit, mapsFor: mapsFor, addGroup: addGroup, addObject: addObject, setContainer: setContainer,
-    setPortCount: setPortCount, findPortGroup: findPortGroup, parsePortRange: parsePortRange, addPortGroup: addPortGroup, updatePortGroup: updatePortGroup, deletePortGroup: deletePortGroup, portGroupOf: portGroupOf, prunePortGroups: prunePortGroups, hasDeviceIp: hasDeviceIp, isFloorMap: isFloorMap, equipmentMaps: equipmentMaps, floorMaps: floorMaps, addMap: addMap, moveMap: moveMap, normalizeGhosts: normalizeGhosts, overviewBlock: overviewBlock, overviewBlocks: overviewBlocks, OVERVIEW_CLEAR: OVERVIEW_CLEAR, moveOverviewBlock: moveOverviewBlock, overviewOffset: overviewOffset, setLinkLabelOffset: setLinkLabelOffset, realMaps: realMaps, allMap: allMap, syncAllMap: syncAllMap, peerGroup: peerGroup, linkPortGroups: linkPortGroups, unlinkPortGroup: unlinkPortGroup, realPlacement: realPlacement, syncGhosts: syncGhosts, pseudoOf: pseudoOf, pseudoDevices: pseudoDevices, hasPortIp: hasPortIp, setDeviceIp: setDeviceIp, setDhcp: setDhcp, parseSubnet: parseSubnet, portSubnet: portSubnet, SUBNET_ERROR: SUBNET_ERROR, effectivePortIp: effectivePortIp, ipList: ipList, setPortIp: setPortIp, IP_ERROR: IP_ERROR, setDeviceKind: setDeviceKind, isTermination: isTermination, DEVICE_KINDS: DEVICE_KINDS, deviceKindInfo: deviceKindInfo, typeLabel: typeLabel, accessPorts: accessPorts, validSectionRows: validSectionRows, setUplinkPorts: setUplinkPorts, setSwitchLayout: setSwitchLayout, setFullWidth: setFullWidth, setSectionSize: setSectionSize, validSectionSizes: validSectionSizes, defaultSectionSize: defaultSectionSize, effectiveSectionSize: effectiveSectionSize, setRouterPorts: setRouterPorts, isValidIp: isValidIp, canConnectPatch: canConnectPatch, addPatchCable: addPatchCable,
+    setPortCount: setPortCount, findPortGroup: findPortGroup, parsePortRange: parsePortRange, addPortGroup: addPortGroup, updatePortGroup: updatePortGroup, deletePortGroup: deletePortGroup, portGroupOf: portGroupOf, prunePortGroups: prunePortGroups, hasDeviceIp: hasDeviceIp, isFloorMap: isFloorMap, equipmentMaps: equipmentMaps, floorMaps: floorMaps, addMap: addMap, moveMap: moveMap, normalizeGhosts: normalizeGhosts, overviewBlock: overviewBlock, overviewBlocks: overviewBlocks, OVERVIEW_CLEAR: OVERVIEW_CLEAR, moveOverviewBlock: moveOverviewBlock, overviewOffset: overviewOffset, setLinkLabelOffset: setLinkLabelOffset, realMaps: realMaps, allMap: allMap, syncAllMap: syncAllMap, peerGroup: peerGroup, linkPortGroups: linkPortGroups, unlinkPortGroup: unlinkPortGroup, realPlacement: realPlacement, syncGhosts: syncGhosts, pseudoOf: pseudoOf, pseudoDevices: pseudoDevices, hasPortIp: hasPortIp, setDeviceIp: setDeviceIp, setDhcp: setDhcp, CABLE_TYPES: CABLE_TYPES, PORT_TYPES: PORT_TYPES, isFibreCable: isFibreCable, isSfpType: isSfpType, sfpAllowed: sfpAllowed, setPortType: setPortType, parseSubnet: parseSubnet, portSubnet: portSubnet, SUBNET_ERROR: SUBNET_ERROR, effectivePortIp: effectivePortIp, ipList: ipList, setPortIp: setPortIp, IP_ERROR: IP_ERROR, setDeviceKind: setDeviceKind, isTermination: isTermination, DEVICE_KINDS: DEVICE_KINDS, deviceKindInfo: deviceKindInfo, typeLabel: typeLabel, accessPorts: accessPorts, validSectionRows: validSectionRows, setUplinkPorts: setUplinkPorts, setSwitchLayout: setSwitchLayout, setFullWidth: setFullWidth, setSectionSize: setSectionSize, validSectionSizes: validSectionSizes, defaultSectionSize: defaultSectionSize, effectiveSectionSize: effectiveSectionSize, setRouterPorts: setRouterPorts, isValidIp: isValidIp, canConnectPatch: canConnectPatch, addPatchCable: addPatchCable,
     updatePatchCable: updatePatchCable, deletePatchCable: deletePatchCable, addInternalMapping: addInternalMapping,
     removeInternalMapping: removeInternalMapping, autoMapPanel: autoMapPanel, rearPorts: rearPorts,
     sequentialPorts: sequentialPorts, addFixedLink: addFixedLink, updateLinkMeta: updateLinkMeta,
