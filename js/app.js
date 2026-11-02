@@ -1125,6 +1125,10 @@
     if (pt.portType && !list.some((x) => x[0] === pt.portType)) list.push([pt.portType, pt.portType]); // an older free-text value stays visible
     return fld('Type', '<select data-f="ptype" data-t="' + esc(pt.id) + '">' + opts(list, pt.portType || '') + '</select>' + (o.type === 'switch' && pt.role !== 'uplink' ? '<div class="sub">SFP modules fit uplink ports only.</div>' : ''));
   }
+  /* the cable types as links that fill the field next to them (dialog: data-ctype; details panel: data-act="setCableType") */
+  function ctypeLinks(attr, kind, id) {
+    return 'Set to: ' + M.CABLE_TYPES.map((t) => '<a class="lnk" ' + attr + '="' + esc(t) + '"' + (kind ? ' data-kind="' + kind + '" data-id="' + esc(id) + '"' : '') + '>' + esc(t) + '</a>').join(' &middot; ');
+  }
   function detPort(id) {
     const idx = M.buildIndex(S.p), pt = idx.ports[id], o = idx.portObj[id];
     let h = '<h3>Port</h3>' + fld('Equipment', lnk('object', o.id, o.name)) + inp('Number', 'plabel', pt.label, pt.id) + inp('Label', 'pdesc', pt.description || '', pt.id, 'placeholder="shown on hover"');
@@ -1151,7 +1155,7 @@
     const idx = M.buildIndex(S.p), c = idx.cables[id];
     let h = '<h3>Patch cable</h3>' + inp('ID', 'name', c.name) +
       fld('End A', lnk('port', c.aPortId, M.portName(S.p, c.aPortId, idx))) + fld('End B', lnk('port', c.bPortId, M.portName(S.p, c.bPortId, idx)));
-    h += inp('Cable type', 'cableType', c.cableType, '', 'list="cableTypes"') + inp('Length', 'length', c.length);
+    h += inp('Cable type', 'cableType', c.cableType, '', 'list="cableTypes"') + (isEdit() ? '<div class="sub">' + ctypeLinks('data-ctypeset', 'cable', c.id) + '</div>' : '') + inp('Length', 'length', c.length);
     h += isEdit() ? fld('Colour', colorPicker('colorPreset', 'color', c.color, c.id)) : fld('Colour', '<span style="display:inline-block;width:30px;height:12px;background:' + esc(c.color) + ';border:1px solid #888"></span>');
     h += isEdit() ? fld('Status', '<select data-f="status">' + opts(M.CABLE_STATUS.map((s) => [s, s]), c.status) + '</select>') : fld('Status', esc(c.status));
     h += '<div class="btn-row">' + btn('trace', 'Trace connection', 'data-kind="cable" data-id="' + esc(id) + '"', 'primary');
@@ -1163,7 +1167,7 @@
     const idx = M.buildIndex(S.p), l = idx.links[id], a = idx.objects[l.aObjectId], b = idx.objects[l.bObjectId];
     let h = '<h3>Fixed link (installed cabling)</h3>' + inp('ID', 'name', l.name) +
       fld('Panel A', a ? lnk('object', a.id, a.name) : '?') + fld('Panel B', b ? lnk('object', b.id, b.name) : '?') + fld('Wires', l.wires.length);
-    h += inp('Cable type', 'cableType', l.cableType, '', 'list="cableTypes"') + inp('Length', 'length', l.length) + inp('Route', 'route', l.route);
+    h += inp('Cable type', 'cableType', l.cableType, '', 'list="cableTypes"') + (isEdit() ? '<div class="sub">' + ctypeLinks('data-ctypeset', 'link', l.id) + '</div>' : '') + inp('Length', 'length', l.length) + inp('Route', 'route', l.route);
     h += isEdit() ? fld('Status', '<select data-f="status">' + opts(M.LINK_STATUS.map((s) => [s, s]), l.status) + '</select>') : fld('Status', esc(l.status));
     h += fld('On maps', mapsLine('link', id));
     h += '<div class="btn-row">' + btn('trace', 'Trace all wires', 'data-kind="link" data-id="' + esc(id) + '"', 'primary');
@@ -2074,7 +2078,7 @@
             (picked ? '<div class="pk-sum' + (st.sel.a.length && st.sel.a.length === st.sel.b.length && !pr ? ' valid' : '') + '">' + (st.sel.a.length ? 'A: ' + esc(fmt(objOf('a'), st.sel.a)) : 'A: -') + ' &harr; ' + (st.sel.b.length ? 'B: ' + esc(fmt(objOf('b'), st.sel.b)) : 'B: -') + '</div>' + (pr ? '<div class="err-text">' + esc(pr) + '</div>' : '') :
               fld('Wires', '<input type="number" data-s="n" value="' + st.n + '" min="1" max="288">') +
               fld('Mapping', '<select data-s="mapping">' + opts([['sequential', 'Sequential: next free rear port to next free rear port'], ['none', 'Leave unmapped (map each wire later)']], st.mapping) + '</select><div class="sub">Nothing picked: create this many wires without choosing ports. Mappings are never assumed; choose sequential only if the installation really is 1:1.</div>')) +
-            fld('Cable type', '<input type="text" data-s="cableType" list="cableTypes" value="' + esc(st.cableType) + '"><div class="sub">Pick or type: Cat6, Fibre OM3 / OM4 / OS2...</div>') + fld('Length', '<input type="text" data-s="length" value="' + esc(st.length) + '">') + fld('Route', '<input type="text" data-s="route" value="' + esc(st.route) + '">'),
+            fld('Cable type', '<input type="text" data-s="cableType" list="cableTypes" value="' + esc(st.cableType) + '"><div class="sub">' + ctypeLinks('data-ctype') + '</div>') + fld('Length', '<input type="text" data-s="length" value="' + esc(st.length) + '">') + fld('Route', '<input type="text" data-s="route" value="' + esc(st.route) + '">'),
           buttons: [{ key: 'no', label: 'Cancel' }, { key: 'ok', label: picked ? 'Create link (' + st.sel.a.length + ' wire' + (st.sel.a.length === 1 ? '' : 's') + ')' : 'Create link', cls: 'primary', disabled: !!pr }]
         };
       },
@@ -2084,6 +2088,8 @@
         else st[k] = k === 'n' ? (parseInt(t.value, 10) || 1) : t.value;
       },
       onClick: (e, c) => {
+        const ct = e.target.closest('[data-ctype]');
+        if (ct) { st.cableType = ct.dataset.ctype; c.draw(); return; } // a cable type link fills the field
         const el = e.target.closest('[data-pick],[data-pickgroup],[data-pickall],[data-pickclear],[data-placegroup]');
         if (!el) return;
         if (el.dataset.placegroup) { // "Place selected group" / cancel
@@ -2676,6 +2682,12 @@
     };
     document.addEventListener('change', (e) => { if (e.target.dataset && e.target.dataset.ff && !e.target.closest('dialog') && !e.target.closest('#toolbar')) { floorFieldChange(e.target); return; } if (e.target.dataset && e.target.dataset.f && isEdit() && !e.target.closest('dialog') && !e.target.closest('#toolbar')) onFieldChange(e.target); });
     document.addEventListener('click', (e) => {
+      const cs = e.target.closest('[data-ctypeset]'); // a cable type link in the details of a cable or fixed link
+      if (cs && !cs.closest('dialog') && isEdit()) {
+        const t = cs.dataset.ctypeset, id = cs.dataset.id;
+        commit('Cable type', (p) => { if (cs.dataset.kind === 'cable') M.updatePatchCable(p, id, { cableType: t }); else M.updateLinkMeta(p, id, { cableType: t }); });
+        return;
+      }
       const a = e.target.closest('[data-act]'); if (!a || a.closest('dialog')) return;
       const d = a.dataset;
       switch (d.act) {

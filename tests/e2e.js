@@ -2134,6 +2134,32 @@ const ok = (m) => console.log('  ok   ' + m);
     await page.waitForSelector('#vp [data-kind="object"]');
   });
 
+  await step('cable type links: fill the field in the New fixed link dialog and set it in the details of a cable and a link', async () => {
+    await page.evaluate(() => NetMap.app.api.loadProject(NetMap.builder.buildDemoProject()));
+    if (!(await page.evaluate(() => NetMap.app.S.mode === 'edit'))) await page.click('#btnMode');
+    await page.click('#toolbar button[data-act="newLink"]');
+    await page.waitForSelector('#dlg input[data-s="cableType"]');
+    assert.strictEqual(await page.inputValue('#dlg input[data-s="cableType"]'), 'Cat6');
+    await page.click('#dlg a[data-ctype="Fibre OS2 (single-mode)"]');
+    assert.strictEqual(await page.inputValue('#dlg input[data-s="cableType"]'), 'Fibre OS2 (single-mode)', 'the link filled the field');
+    await page.click('#dlg a[data-ctype="Cat6A"]');
+    assert.strictEqual(await page.inputValue('#dlg input[data-s="cableType"]'), 'Cat6A');
+    await page.click('#dlg button[data-btn="no"]');
+    // details of a patch cable and of a fixed link
+    const ids = await page.evaluate(() => ({ cable: NetMap.app.S.p.patchCables[0].id, link: NetMap.app.S.p.fixedLinks[0].id }));
+    await page.evaluate((id) => NetMap.app.api.select({ kind: 'cable', id }), ids.cable);
+    await page.click('#detailsPane a[data-ctypeset="Fibre OM4 (multimode)"]');
+    assert.strictEqual(await page.evaluate((id) => NetMap.app.S.p.patchCables.find((c) => c.id === id).cableType, ids.cable), 'Fibre OM4 (multimode)');
+    assert.strictEqual(await page.inputValue('#detailsPane input[data-f="cableType"]'), 'Fibre OM4 (multimode)', 'the field shows it');
+    await page.evaluate((id) => NetMap.app.api.select({ kind: 'link', id }), ids.link);
+    await page.click('#detailsPane a[data-ctypeset="Fibre OS2 (single-mode)"]');
+    assert.strictEqual(await page.evaluate((id) => NetMap.app.S.p.fixedLinks.find((l) => l.id === id).cableType, ids.link), 'Fibre OS2 (single-mode)');
+    await page.click('#btnUndo');
+    assert.strictEqual(await page.evaluate((id) => NetMap.app.S.p.fixedLinks.find((l) => l.id === id).cableType, ids.link), 'Cat6A', 'one undo step');
+    await page.evaluate(() => NetMap.app.api.loadProject(NetMap.builder.buildDemoProject()));
+    await page.waitForSelector('#vp [data-kind="object"]');
+  });
+
   await step('autosave survives a refresh', async () => {
     await page.click('#btnMode'); // back to view mode flushes the save
     const name = await page.evaluate(() => NetMap.app.S.p.name);
