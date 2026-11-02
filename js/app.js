@@ -1125,9 +1125,14 @@
     if (pt.portType && !list.some((x) => x[0] === pt.portType)) list.push([pt.portType, pt.portType]); // an older free-text value stays visible
     return fld('Type', '<select data-f="ptype" data-t="' + esc(pt.id) + '">' + opts(list, pt.portType || '') + '</select>' + (o.type === 'switch' && pt.role !== 'uplink' ? '<div class="sub">SFP modules fit uplink ports only.</div>' : ''));
   }
-  /* the cable types as links that fill the field next to them (dialog: data-ctype; details panel: data-act="setCableType") */
+  /* the cable type families as links: each puts the start of the type in the field and opens its list of matching types to pick from */
   function ctypeLinks(attr, kind, id) {
-    return 'Set to: ' + M.CABLE_TYPES.map((t) => '<a class="lnk" ' + attr + '="' + esc(t) + '"' + (kind ? ' data-kind="' + kind + '" data-id="' + esc(id) + '"' : '') + '>' + esc(t) + '</a>').join(' &middot; ');
+    return 'Start with: ' + M.CABLE_FAMILIES.map((t) => '<a class="lnk" ' + attr + '="' + esc(t) + '"' + (kind ? ' data-kind="' + kind + '" data-id="' + esc(id) + '"' : '') + '>' + esc(t) + '</a>').join(' &middot; ') + ' <span class="sub">then pick from the list</span>';
+  }
+  function openTypeList(input, text) {
+    if (!input) return;
+    input.value = text; input.focus(); input.setSelectionRange(text.length, text.length);
+    try { if (input.showPicker) input.showPicker(); } catch (_) { /* the browser shows the list as soon as you type or press the down arrow */ }
   }
   function detPort(id) {
     const idx = M.buildIndex(S.p), pt = idx.ports[id], o = idx.portObj[id];
@@ -2089,7 +2094,7 @@
       },
       onClick: (e, c) => {
         const ct = e.target.closest('[data-ctype]');
-        if (ct) { st.cableType = ct.dataset.ctype; c.draw(); return; } // a cable type link fills the field
+        if (ct) { st.cableType = ct.dataset.ctype; c.draw(); openTypeList(c.root.querySelector('input[data-s="cableType"]'), st.cableType); return; } // a family link starts the type; the list does the rest
         const el = e.target.closest('[data-pick],[data-pickgroup],[data-pickall],[data-pickclear],[data-placegroup]');
         if (!el) return;
         if (el.dataset.placegroup) { // "Place selected group" / cancel
@@ -2682,12 +2687,8 @@
     };
     document.addEventListener('change', (e) => { if (e.target.dataset && e.target.dataset.ff && !e.target.closest('dialog') && !e.target.closest('#toolbar')) { floorFieldChange(e.target); return; } if (e.target.dataset && e.target.dataset.f && isEdit() && !e.target.closest('dialog') && !e.target.closest('#toolbar')) onFieldChange(e.target); });
     document.addEventListener('click', (e) => {
-      const cs = e.target.closest('[data-ctypeset]'); // a cable type link in the details of a cable or fixed link
-      if (cs && !cs.closest('dialog') && isEdit()) {
-        const t = cs.dataset.ctypeset, id = cs.dataset.id;
-        commit('Cable type', (p) => { if (cs.dataset.kind === 'cable') M.updatePatchCable(p, id, { cableType: t }); else M.updateLinkMeta(p, id, { cableType: t }); });
-        return;
-      }
+      const cs = e.target.closest('[data-ctypeset]'); // a cable type family link in the details of a cable or fixed link: starts the type in the field (nothing is saved until you pick one)
+      if (cs && !cs.closest('dialog') && isEdit()) { openTypeList($('detailsPane').querySelector('input[data-f="cableType"]'), cs.dataset.ctypeset); return; }
       const a = e.target.closest('[data-act]'); if (!a || a.closest('dialog')) return;
       const d = a.dataset;
       switch (d.act) {

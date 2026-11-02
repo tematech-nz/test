@@ -2134,28 +2134,31 @@ const ok = (m) => console.log('  ok   ' + m);
     await page.waitForSelector('#vp [data-kind="object"]');
   });
 
-  await step('cable type links: fill the field in the New fixed link dialog and set it in the details of a cable and a link', async () => {
+  await step('cable type family links (Cat, Fibre, DAC) start the type; the list offers the matching ones', async () => {
     await page.evaluate(() => NetMap.app.api.loadProject(NetMap.builder.buildDemoProject()));
     if (!(await page.evaluate(() => NetMap.app.S.mode === 'edit'))) await page.click('#btnMode');
     await page.click('#toolbar button[data-act="newLink"]');
     await page.waitForSelector('#dlg input[data-s="cableType"]');
     assert.strictEqual(await page.inputValue('#dlg input[data-s="cableType"]'), 'Cat6');
-    await page.click('#dlg a[data-ctype="Fibre OS2 (single-mode)"]');
-    assert.strictEqual(await page.inputValue('#dlg input[data-s="cableType"]'), 'Fibre OS2 (single-mode)', 'the link filled the field');
-    await page.click('#dlg a[data-ctype="Cat6A"]');
-    assert.strictEqual(await page.inputValue('#dlg input[data-s="cableType"]'), 'Cat6A');
+    assert.deepStrictEqual(await page.locator('#dlg a[data-ctype]').allInnerTexts(), ['Cat', 'Fibre', 'DAC'], 'three families, not every type');
+    await page.click('#dlg a[data-ctype="Fibre"]');
+    assert.strictEqual(await page.inputValue('#dlg input[data-s="cableType"]'), 'Fibre', 'the start of the type is in the field');
+    assert.strictEqual(await page.evaluate(() => document.activeElement && document.activeElement.getAttribute('data-s')), 'cableType', 'focused, ready to pick');
+    const fibreOptions = await page.evaluate(() => Array.from(document.querySelectorAll('#cableTypes option')).map((o) => o.value).filter((v) => /fibre/i.test(v)));
+    assert.ok(fibreOptions.length >= 3, 'the list has the fibre types: ' + fibreOptions.join(' | '));
+    await page.fill('#dlg input[data-s="cableType"]', 'Fibre OS2 (single-mode)');
+    assert.strictEqual(await page.evaluate(() => document.querySelector('#dlg input[data-s="cableType"]').value), 'Fibre OS2 (single-mode)');
     await page.click('#dlg button[data-btn="no"]');
-    // details of a patch cable and of a fixed link
+    // details of a patch cable and of a fixed link: the link only starts the type; choosing one saves it
     const ids = await page.evaluate(() => ({ cable: NetMap.app.S.p.patchCables[0].id, link: NetMap.app.S.p.fixedLinks[0].id }));
     await page.evaluate((id) => NetMap.app.api.select({ kind: 'cable', id }), ids.cable);
-    await page.click('#detailsPane a[data-ctypeset="Fibre OM4 (multimode)"]');
+    await page.click('#detailsPane a[data-ctypeset="Fibre"]');
+    assert.strictEqual(await page.inputValue('#detailsPane input[data-f="cableType"]'), 'Fibre');
+    assert.notStrictEqual(await page.evaluate((id) => NetMap.app.S.p.patchCables.find((c) => c.id === id).cableType, ids.cable), 'Fibre', 'nothing is saved by the link alone');
+    await page.fill('#detailsPane input[data-f="cableType"]', 'Fibre OM4 (multimode)'); await page.press('#detailsPane input[data-f="cableType"]', 'Tab');
     assert.strictEqual(await page.evaluate((id) => NetMap.app.S.p.patchCables.find((c) => c.id === id).cableType, ids.cable), 'Fibre OM4 (multimode)');
-    assert.strictEqual(await page.inputValue('#detailsPane input[data-f="cableType"]'), 'Fibre OM4 (multimode)', 'the field shows it');
     await page.evaluate((id) => NetMap.app.api.select({ kind: 'link', id }), ids.link);
-    await page.click('#detailsPane a[data-ctypeset="Fibre OS2 (single-mode)"]');
-    assert.strictEqual(await page.evaluate((id) => NetMap.app.S.p.fixedLinks.find((l) => l.id === id).cableType, ids.link), 'Fibre OS2 (single-mode)');
-    await page.click('#btnUndo');
-    assert.strictEqual(await page.evaluate((id) => NetMap.app.S.p.fixedLinks.find((l) => l.id === id).cableType, ids.link), 'Cat6A', 'one undo step');
+    assert.deepStrictEqual(await page.locator('#detailsPane a[data-ctypeset]').allInnerTexts(), ['Cat', 'Fibre', 'DAC']);
     await page.evaluate(() => NetMap.app.api.loadProject(NetMap.builder.buildDemoProject()));
     await page.waitForSelector('#vp [data-kind="object"]');
   });
