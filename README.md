@@ -80,6 +80,12 @@ Try it: File -> Load demo project: two rooms with a fixed link between racks, a 
   one SFP port joined inside: patch the Ethernet side to a switch or device and the SFP side with a fibre lead to a fibre patch panel, and traces and the Graph run straight through it
   (like a patch panel, it is not a device of its own in the Graph; the route lists it). On a switch, a port's **Type** is RJ45, SFP or SFP+; SFP / SFP+ can only be chosen on **uplink
   ports** (the ports that take modules), and SFP ports have a blue edge on the map. Validation warns about a fibre lead on an RJ45 port and about an RJ45 port patched straight to an SFP port.
+- **Cable type on panels and sockets**: every patch panel and wall socket has a *Cable type* (Cat6 by default; Fibre OS2... for a fibre panel, which shows a FIBRE tag). Patch leads and
+  fixed links on it must be of the same medium: a fibre lead on a copper panel, or a Cat6 lead on a fibre panel, is refused with a message, and so is a fixed link between a copper and a fibre
+  panel (the New fixed link dialog takes the panel's type and says what does not fit). Cat6 / Cat6A / Cat5e all count as copper, so a Cat6A lead on a Cat6 panel is fine. A new patch lead takes its
+  type from the panel or socket it plugs into (between two SFP ports it is fibre, otherwise Cat6). Ports follow the same idea: an RJ45 port refuses fibre and DAC, the SFP side of a media
+  converter refuses copper, and SFP can also be chosen on router and device ports. A panel's own type cannot be changed while cables of the other medium are plugged in. Older files that already
+  mix media open unchanged and get a validation warning.
 - **Separate subnets on one switch (VLANs)**: make a port group on a switch (for example ports 1-12 and 13-22) and give it a **Subnet** (192.168.1.0/24, or
   just 192.168.1). Its ports are then a network of their own: they only talk to ports of the same network, the uplinks carry every network, and ports in
   no such group are the default network. In the Graph, devices of two networks meet only through a router above (up and back), and not at all when there

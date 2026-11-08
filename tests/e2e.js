@@ -2124,7 +2124,9 @@ const ok = (m) => console.log('  ok   ' + m);
     await page.waitForSelector('#detailsPane select[data-f="ptype"]');
     assert.ok(!(await page.locator('#detailsPane select[data-f="ptype"] option').allInnerTexts()).some((t) => /SFP/.test(t)), 'not offered on an access port');
     // cable types: suggestions on the cable type field
-    const cable = await page.evaluate(() => NetMap.app.S.p.patchCables[0].id);
+    const sfpCable = () => page.evaluate(() => { let id; NetMap.app.api.commit('two SFP devices', (p) => { const M = NetMap.model, a = M.addObject(p, { type: 'generic', name: 'SFP-A', portCount: 1 }), b = M.addObject(p, { type: 'generic', name: 'SFP-B', portCount: 1 }); M.setPortType(p, a.ports[0].id, 'SFP'); M.setPortType(p, b.ports[0].id, 'SFP'); id = M.addPatchCable(p, { aPortId: a.ports[0].id, bPortId: b.ports[0].id }).id; }); return id; });
+    const cable = await sfpCable();
+    assert.strictEqual(await page.evaluate((id) => NetMap.app.S.p.patchCables.find((c) => c.id === id).cableType, cable), 'Fibre OM3 (multimode)', 'SFP to SFP: a new lead is fibre');
     await page.evaluate((id) => NetMap.app.api.select({ kind: 'cable', id }), cable);
     await page.waitForSelector('#detailsPane input[data-f="cableType"][list="cableTypes"]');
     assert.ok((await page.locator('#cableTypes option').evaluateAll((os) => os.map((o) => o.value))).some((v) => /Fibre OS2/.test(v)), 'fibre types are suggested');
@@ -2150,7 +2152,8 @@ const ok = (m) => console.log('  ok   ' + m);
     assert.strictEqual(await page.evaluate(() => document.querySelector('#dlg input[data-s="cableType"]').value), 'Fibre OS2 (single-mode)');
     await page.click('#dlg button[data-btn="no"]');
     // details of a patch cable and of a fixed link: the link only starts the type; choosing one saves it
-    const ids = await page.evaluate(() => ({ cable: NetMap.app.S.p.patchCables[0].id, link: NetMap.app.S.p.fixedLinks[0].id }));
+    const sfpCable = () => page.evaluate(() => { let id; NetMap.app.api.commit('two SFP devices', (p) => { const M = NetMap.model, a = M.addObject(p, { type: 'generic', name: 'SFP-A', portCount: 1 }), b = M.addObject(p, { type: 'generic', name: 'SFP-B', portCount: 1 }); M.setPortType(p, a.ports[0].id, 'SFP'); M.setPortType(p, b.ports[0].id, 'SFP'); id = M.addPatchCable(p, { aPortId: a.ports[0].id, bPortId: b.ports[0].id }).id; }); return id; });
+    const ids = { cable: await sfpCable(), link: await page.evaluate(() => NetMap.app.S.p.fixedLinks[0].id) };
     await page.evaluate((id) => NetMap.app.api.select({ kind: 'cable', id }), ids.cable);
     await page.click('#detailsPane a[data-ctypeset="Fibre"]');
     assert.strictEqual(await page.inputValue('#detailsPane input[data-f="cableType"]'), 'Fibre');
@@ -2160,6 +2163,45 @@ const ok = (m) => console.log('  ok   ' + m);
     await page.evaluate((id) => NetMap.app.api.select({ kind: 'link', id }), ids.link);
     assert.deepStrictEqual(await page.locator('#detailsPane a[data-ctypeset]').allInnerTexts(), ['Cat', 'Fibre', 'DAC']);
     await page.evaluate(() => NetMap.app.api.loadProject(NetMap.builder.buildDemoProject()));
+    await page.waitForSelector('#vp [data-kind="object"]');
+  });
+
+  await step('panel cable type: new panels are copper, mismatching cables and links are refused, the fixed link dialog follows the panels', async () => {
+    await page.evaluate(() => NetMap.app.api.loadProject(NetMap.builder.buildShowcaseProject()));
+    if (!(await page.evaluate(() => NetMap.app.S.mode === 'edit'))) await page.click('#btnMode');
+    // the new-panel dialog has a cable type, copper by default
+    await page.selectOption('#toolbar select[data-addsel]', 'patchpanel');
+    await page.waitForSelector('#dlg input[name="cableType"]');
+    assert.strictEqual(await page.inputValue('#dlg input[name="cableType"]'), 'Cat6');
+    await page.click('#dlg button[data-btn="no"]');
+    const ids = await page.evaluate(() => { const S = NetMap.app.S, by = (n) => S.p.objects.find((o) => o.name === n); return { ppA: by('PP-A').id, ppB: by('PP-B').id, fib: by('PP-Standalone').id, sw: by('Switch A').id }; });
+    assert.strictEqual(await page.evaluate((id) => NetMap.app.S.p.objects.find((o) => o.id === id).cableType, ids.fib), 'Fibre OS2 (single-mode)');
+    // a copper cable on a copper panel: change it to fibre -> refused with a message
+    const cab = await page.evaluate(() => { const S = NetMap.app.S, idx = NetMap.model.buildIndex(S.p); const c = S.p.patchCables.find((x) => idx.portObj[x.aPortId].name === 'Switch A' && idx.portObj[x.bPortId].name === 'PP-A') || S.p.patchCables.find((x) => idx.portObj[x.bPortId].name === 'PP-A'); return c.id; });
+    await page.evaluate((id) => NetMap.app.api.select({ kind: 'cable', id }), cab);
+    await page.fill('#detailsPane input[data-f="cableType"]', 'Fibre OS2'); await page.press('#detailsPane input[data-f="cableType"]', 'Tab');
+    assert.ok(/copper panel/.test(await page.innerText('#toast')), 'a message: ' + await page.innerText('#toast'));
+    assert.notStrictEqual(await page.evaluate((id) => NetMap.app.S.p.patchCables.find((c) => c.id === id).cableType, cab), 'Fibre OS2', 'unchanged');
+    // the panel's own cable type cannot flip while copper cables are plugged in
+    await page.evaluate((id) => NetMap.app.api.select({ kind: 'object', id }), ids.ppA);
+    await page.waitForSelector('#detailsPane input[data-f="cableType"]');
+    await page.fill('#detailsPane input[data-f="cableType"]', 'Fibre OS2'); await page.press('#detailsPane input[data-f="cableType"]', 'Tab');
+    assert.ok(/change or remove it first/.test(await page.innerText('#toast')));
+    assert.strictEqual(await page.evaluate((id) => NetMap.app.S.p.objects.find((o) => o.id === id).cableType, ids.ppA), 'Cat6');
+    // the New fixed link dialog: choosing a fibre panel switches the type; a copper and a fibre panel together cannot be created
+    await page.evaluate((id) => NetMap.app.api.select({ kind: 'object', id }), ids.fib);
+    await page.click('#toolbar button[data-act="newLink"]');
+    await page.waitForSelector('#dlg input[data-s="cableType"]');
+    assert.strictEqual(await page.inputValue('#dlg input[data-s="cableType"]'), 'Fibre OS2 (single-mode)', 'starts with the selected panel\'s type');
+    await page.selectOption('#dlg select[data-s="b"]', ids.ppA);
+    assert.ok(/does not fit|different cable media/.test(await page.innerText('#dlg #ctMsg')), 'a fibre panel and a copper panel: ' + await page.innerText('#dlg #ctMsg'));
+    assert.ok(await page.isDisabled('#dlg button[data-btn="ok"]'), 'Create is disabled');
+    await page.selectOption('#dlg select[data-s="a"]', ids.ppB); await page.selectOption('#dlg select[data-s="b"]', ids.ppA);
+    assert.ok(/^Cat/.test(await page.inputValue('#dlg input[data-s="cableType"]')), 'two copper panels: the type followed them back to copper');
+    assert.strictEqual(await page.innerText('#dlg #ctMsg'), '', 'no problem between two copper panels');
+    await page.click('#dlg button[data-btn="no"]');
+    // a patch lead drawn with the cable tool takes the panel's type
+    await page.evaluate(() => NetMap.app.api.loadProject(NetMap.builder.buildShowcaseProject()));
     await page.waitForSelector('#vp [data-kind="object"]');
   });
 

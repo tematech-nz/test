@@ -13,6 +13,54 @@
   var PORT_TYPES = ['RJ45', 'SFP', 'SFP+'];
   function isFibreCable(t) { return /fib(?:re|er)|\bOM[1-5]\b|\bOS[12]\b|single-?mode|multi-?mode/i.test(String(t || '')); }
   function isSfpType(t) { return /^SFP/i.test(String(t || '')); }
+  /* the medium of a cable type text: 'fibre', 'copper' (Cat..., DAC) or '' when it cannot be told */
+  function mediumOf(t) {
+    if (isFibreCable(t)) return 'fibre';
+    return /\bcat\s?\d|utp|ftp|stp|copper|\bcu\b|rj45|dac|twinax/i.test(String(t || '')) ? 'copper' : '';
+  }
+  var isDac = function (t) { return /dac|twinax/i.test(String(t || '')); };
+  /*
+   * Does a cable of this type fit this port? Patch panels and wall sockets have a cable type of their own (their jacks are copper or
+   * fibre), ports can be typed RJ45 / SFP, and the SFP side of a media converter is fibre. Unknown (no type) never blocks.
+   */
+  function cableFitsPort(p, portId, cableType, idx) {
+    idx = idx || buildIndex(p);
+    var o = idx.portObj[portId], pt = idx.ports[portId], mc = mediumOf(cableType);
+    if (!o || !pt || !mc) return null;
+    var nm = portName(p, portId, idx);
+    if (isTermination(o)) {
+      var pm = mediumOf(o.cableType);
+      if (pm && pm !== mc) return nm + ' is on a ' + (pm === 'fibre' ? 'fibre' : 'copper') + ' panel (' + o.cableType + '): a ' + (mc === 'fibre' ? 'fibre' : 'copper') + ' cable (' + cableType + ') does not fit';
+    }
+    if (/^RJ45$/i.test(pt.portType || '')) {
+      if (mc === 'fibre') return nm + ' is an RJ45 port: a fibre cable (' + cableType + ') does not fit';
+      if (isDac(cableType)) return nm + ' is an RJ45 port: a DAC cable fits SFP ports';
+    }
+    if (o.type === 'mediaconverter' && isSfpType(pt.portType) && mc === 'copper' && !isDac(cableType)) return nm + ' is the fibre side of a media converter: a copper cable (' + cableType + ') does not fit';
+    return null;
+  }
+  /* a patch cable of this type between two ports */
+  function cableFits(p, aPortId, bPortId, cableType, idx) {
+    idx = idx || buildIndex(p);
+    return cableFitsPort(p, aPortId, cableType, idx) || cableFitsPort(p, bPortId, cableType, idx);
+  }
+  /* a fixed link of this type between two panels: both must be of that medium */
+  function linkFits(a, b, cableType) {
+    var mc = mediumOf(cableType);
+    if (!mc) return null;
+    var bad = [a, b].filter(function (o) { var pm = mediumOf(o.cableType); return pm && pm !== mc; })[0];
+    if (bad) return bad.name + ' is a ' + (mediumOf(bad.cableType) === 'fibre' ? 'fibre' : 'copper') + ' panel (' + bad.cableType + '): a ' + (mc === 'fibre' ? 'fibre' : 'copper') + ' link (' + cableType + ') does not fit';
+    return null;
+  }
+  /* what a new patch cable should be: the cable type of the panel or socket it plugs into, else fibre between two SFP ports, else Cat6 */
+  function defaultCableType(p, aPortId, bPortId, idx) {
+    idx = idx || buildIndex(p);
+    var ends = [aPortId, bPortId].map(function (id) { return idx.portObj[id]; }).filter(Boolean), t = '';
+    ends.forEach(function (o) { if (!t && isTermination(o) && o.cableType) t = o.cableType; });
+    if (t) return t;
+    var sfp = [aPortId, bPortId].filter(function (id) { return idx.ports[id] && isSfpType(idx.ports[id].portType); }).length;
+    return sfp === 2 ? 'Fibre OM3 (multimode)' : 'Cat6';
+  }
   /* generic equipment can be drawn with an icon */
   var DEVICE_KINDS = [['other', 'Other', 'Device'], ['pc', 'PC / workstation', 'PC'], ['laptop', 'Laptop', 'Laptop'], ['ap', 'Wi-Fi access point', 'AP'],
     ['camera', 'Camera', 'Camera'], ['printer', 'Printer', 'Printer'], ['phone', 'IP phone', 'IP phone'], ['server', 'Server', 'Server']];
@@ -724,6 +772,7 @@
     if (kind) obj.deviceKind = kind;
     if (o.type === 'internet' && o.publicIp) obj.publicIp = true;
     if ((o.type === 'generic' || o.type === 'switch') && o.dhcp) obj.dhcp = true;
+    if (isTermination(obj)) obj.cableType = o.cableType || 'Cat6'; // what its jacks take: copper (Cat...) or fibre; cables of the other kind are refused
     if (o.type === 'rack') obj.rackHeight = o.rackHeight || 42;
     p.objects.push(obj);
     if (o.type === 'switch') {
@@ -752,8 +801,23 @@
     } else c.item.containerId = containerId || null;
   }
 
+  /* the cable type of a patch panel or wall socket: patch leads and fixed links on it must be of the same medium */
+  function setTerminationCableType(p, objectId, type) {
+    var idx = buildIndex(p), o = idx.objects[objectId];
+    if (!o || !isTermination(o)) throw new Error('Only patch panels and wall sockets have a cable type');
+    type = String(type == null ? '' : type).trim();
+    var mt = mediumOf(type);
+    if (mt) {
+      var own = {}; o.ports.forEach(function (pt) { own[pt.id] = true; });
+      var c = p.patchCables.filter(function (x) { return (own[x.aPortId] || own[x.bPortId]) && mediumOf(x.cableType) && mediumOf(x.cableType) !== mt; })[0];
+      if (c) throw new Error(c.name + ' (' + c.cableType + ') is plugged into ' + o.name + ': change or remove it first');
+      var l = p.fixedLinks.filter(function (x) { return (x.aObjectId === o.id || x.bObjectId === o.id) && mediumOf(x.cableType) && mediumOf(x.cableType) !== mt; })[0];
+      if (l) throw new Error('Fixed link ' + l.name + ' (' + l.cableType + ') ends on ' + o.name + ': change or remove it first');
+    }
+    if (type) o.cableType = type; else delete o.cableType;
+  }
   /* SFP / SFP+ modules fit the uplink ports of a switch (and the SFP side of a media converter); every other port is RJ45 or untyped */
-  function sfpAllowed(o, pt) { return !!(o && pt && ((o.type === 'switch' && pt.role === 'uplink') || o.type === 'mediaconverter')); }
+  function sfpAllowed(o, pt) { return !!(o && pt && ((o.type === 'switch' && pt.role === 'uplink') || o.type === 'mediaconverter' || o.type === 'router' || o.type === 'generic')); }
   function setPortType(p, portId, type) {
     var idx = buildIndex(p), pt = idx.ports[portId], o = idx.portObj[portId];
     if (!pt || !o) throw new Error('Port not found');
@@ -818,7 +882,7 @@
   }
 
   /* ---------- patch cables ---------- */
-  function canConnectPatch(p, aPortId, bPortId, ignoreCableId, idx) {
+  function canConnectPatch(p, aPortId, bPortId, ignoreCableId, idx, cableType) {
     idx = idx || buildIndex(p);
     var a = idx.ports[aPortId], b = idx.ports[bPortId];
     if (!a || !b) return 'Port does not exist';
@@ -833,15 +897,17 @@
       var u = idx.portUse[ids[i]];
       if (u && !(u.kind === 'patch' && u.id === ignoreCableId)) return 'Port ' + portName(p, ids[i], idx) + ' is already occupied';
     }
+    if (cableType) return cableFits(p, aPortId, bPortId, cableType, idx);
     return null;
   }
   function addPatchCable(p, o) {
-    var err = canConnectPatch(p, o.aPortId, o.bPortId, null);
+    var ct = o.cableType && o.cableType !== 'auto' ? o.cableType : defaultCableType(p, o.aPortId, o.bPortId);
+    var err = canConnectPatch(p, o.aPortId, o.bPortId, null, null, ct);
     if (err) throw new Error(err);
     p.counters.patch++;
     var c = {
       id: uid('pc'), name: o.name || ('PC-' + pad3(p.counters.patch)), aPortId: o.aPortId, bPortId: o.bPortId,
-      cableType: o.cableType || 'Cat6', color: o.color || '#1f77b4', length: o.length || '', status: o.status || 'active'
+      cableType: ct, color: o.color || '#1f77b4', length: o.length || '', status: o.status || 'active'
     };
     p.patchCables.push(c);
     return c;
@@ -850,8 +916,9 @@
     var c = p.patchCables.filter(function (x) { return x.id === id; })[0];
     if (!c) throw new Error('Cable not found');
     var a = patch.aPortId || c.aPortId, b = patch.bPortId || c.bPortId;
-    if (a !== c.aPortId || b !== c.bPortId) {
-      var err = canConnectPatch(p, a, b, id);
+    var ct = patch.cableType !== undefined ? patch.cableType : c.cableType;
+    if (a !== c.aPortId || b !== c.bPortId || ct !== c.cableType) {
+      var err = canConnectPatch(p, a, b, id, null, ct);
       if (err) throw new Error(err);
     }
     ['name', 'cableType', 'color', 'length', 'status'].forEach(function (k) { if (patch[k] !== undefined) c[k] = patch[k]; });
@@ -915,6 +982,8 @@
     var idx = buildIndex(p), a = idx.objects[o.aObjectId], b = idx.objects[o.bObjectId];
     if (!isTermination(a) || !isTermination(b)) throw new Error('Fixed links join patch panels and wall sockets');
     if (a === b) throw new Error('A fixed link needs two different panels');
+    var linkType = o.cableType || a.cableType || b.cableType || 'Cat6', lerr = linkFits(a, b, linkType);
+    if (lerr) throw new Error(lerr);
     var pairs = null, n;
     if (o.pairs) {
       pairs = o.pairs; n = pairs.length;
@@ -935,7 +1004,7 @@
     p.counters.fixed++;
     var link = {
       id: uid('fl'), name: o.name || ('FL-' + pad3(p.counters.fixed)), aObjectId: a.id, bObjectId: b.id,
-      cableType: o.cableType || 'Cat6', length: o.length || '', route: o.route || '', status: o.status || 'installed', wires: []
+      cableType: linkType, length: o.length || '', route: o.route || '', status: o.status || 'installed', wires: []
     };
     for (var i = 0; i < n; i++) {
       link.wires.push({ id: uid('wir'), number: i + 1, aPortId: pairs ? pairs[i][0] : null, bPortId: pairs ? pairs[i][1] : null, status: pairs ? 'connected' : 'unused' });
@@ -946,6 +1015,7 @@
   function updateLinkMeta(p, id, patch) {
     var l = p.fixedLinks.filter(function (x) { return x.id === id; })[0];
     if (!l) throw new Error('Link not found');
+    if (patch.cableType !== undefined) { var le = linkFits(buildIndex(p).objects[l.aObjectId], buildIndex(p).objects[l.bObjectId], patch.cableType); if (le) throw new Error(le); }
     ['name', 'cableType', 'length', 'route', 'status'].forEach(function (k) { if (patch[k] !== undefined) l[k] = patch[k]; });
   }
   function updateWireStatus(p, wireId, status) {
@@ -1211,6 +1281,8 @@
       if (okA.side === 'rear' || okB.side === 'rear') add('error', 'INCOMPATIBLE', 'Patch cable ' + c.name + ' is connected to a rear termination', 'cable', c.id);
       count(c.aPortId, c.name); count(c.bPortId, c.name);
       var ta = idx.ports[c.aPortId].portType, tb = idx.ports[c.bPortId].portType;
+      var fit = cableFits(p, c.aPortId, c.bPortId, c.cableType, idx);
+      if (fit && !(isFibreCable(c.cableType) && (/^RJ45$/i.test(ta || '') || /^RJ45$/i.test(tb || '')))) add('warning', 'MEDIA_MISMATCH', 'Patch cable ' + c.name + ': ' + fit, 'cable', c.id);
       if (isFibreCable(c.cableType) && (/^RJ45$/i.test(ta || '') || /^RJ45$/i.test(tb || ''))) add('warning', 'FIBRE_ON_RJ45', 'Patch cable ' + c.name + ' is fibre but one end is an RJ45 port', 'cable', c.id);
       else if ((/^RJ45$/i.test(ta || '') && isSfpType(tb)) || (/^RJ45$/i.test(tb || '') && isSfpType(ta))) add('warning', 'RJ45_SFP', 'Patch cable ' + c.name + ' joins an RJ45 port to an SFP port: that needs a media converter or a copper SFP module', 'cable', c.id);
     });
@@ -1218,6 +1290,7 @@
       var a = idx.objects[l.aObjectId], b = idx.objects[l.bObjectId];
       if (!a || !b) { add('error', 'MISSING_ENDPOINT', 'Fixed link ' + l.name + ' has a missing endpoint', 'link', l.id); return; }
       if (!isTermination(a) || !isTermination(b)) add('error', 'INCOMPATIBLE', 'Fixed link ' + l.name + ' must join patch panels or wall sockets', 'link', l.id);
+      else { var lf = linkFits(a, b, l.cableType); if (lf) add('warning', 'MEDIA_MISMATCH', 'Fixed link ' + l.name + ': ' + lf, 'link', l.id); }
       var nums = {};
       l.wires.forEach(function (w) {
         if (nums[w.number]) add('error', 'DUP_WIRE', l.name + ': duplicate wire number ' + w.number, 'wire', w.id);
@@ -1403,7 +1476,7 @@
     findContainer: findContainer, groupOf: groupOf, parentOf: parentOf, containerChildren: containerChildren, descendants: descendants,
     addPlacement: addPlacement, placementOf: placementOf, placementGroup: placementGroup, movePlacement: movePlacement,
     growToFit: growToFit, mapsFor: mapsFor, addGroup: addGroup, addObject: addObject, setContainer: setContainer,
-    setPortCount: setPortCount, findPortGroup: findPortGroup, parsePortRange: parsePortRange, addPortGroup: addPortGroup, updatePortGroup: updatePortGroup, deletePortGroup: deletePortGroup, portGroupOf: portGroupOf, prunePortGroups: prunePortGroups, hasDeviceIp: hasDeviceIp, isFloorMap: isFloorMap, equipmentMaps: equipmentMaps, floorMaps: floorMaps, addMap: addMap, moveMap: moveMap, normalizeGhosts: normalizeGhosts, overviewBlock: overviewBlock, overviewBlocks: overviewBlocks, OVERVIEW_CLEAR: OVERVIEW_CLEAR, moveOverviewBlock: moveOverviewBlock, overviewOffset: overviewOffset, setLinkLabelOffset: setLinkLabelOffset, realMaps: realMaps, allMap: allMap, syncAllMap: syncAllMap, peerGroup: peerGroup, linkPortGroups: linkPortGroups, unlinkPortGroup: unlinkPortGroup, realPlacement: realPlacement, syncGhosts: syncGhosts, pseudoOf: pseudoOf, pseudoDevices: pseudoDevices, hasPortIp: hasPortIp, setDeviceIp: setDeviceIp, setDhcp: setDhcp, CABLE_TYPES: CABLE_TYPES, CABLE_FAMILIES: CABLE_FAMILIES, PORT_TYPES: PORT_TYPES, isFibreCable: isFibreCable, isSfpType: isSfpType, sfpAllowed: sfpAllowed, setPortType: setPortType, parseSubnet: parseSubnet, portSubnet: portSubnet, SUBNET_ERROR: SUBNET_ERROR, effectivePortIp: effectivePortIp, ipList: ipList, setPortIp: setPortIp, IP_ERROR: IP_ERROR, setDeviceKind: setDeviceKind, isTermination: isTermination, DEVICE_KINDS: DEVICE_KINDS, deviceKindInfo: deviceKindInfo, typeLabel: typeLabel, accessPorts: accessPorts, validSectionRows: validSectionRows, setUplinkPorts: setUplinkPorts, setSwitchLayout: setSwitchLayout, setFullWidth: setFullWidth, setSectionSize: setSectionSize, validSectionSizes: validSectionSizes, defaultSectionSize: defaultSectionSize, effectiveSectionSize: effectiveSectionSize, setRouterPorts: setRouterPorts, isValidIp: isValidIp, canConnectPatch: canConnectPatch, addPatchCable: addPatchCable,
+    setPortCount: setPortCount, findPortGroup: findPortGroup, parsePortRange: parsePortRange, addPortGroup: addPortGroup, updatePortGroup: updatePortGroup, deletePortGroup: deletePortGroup, portGroupOf: portGroupOf, prunePortGroups: prunePortGroups, hasDeviceIp: hasDeviceIp, isFloorMap: isFloorMap, equipmentMaps: equipmentMaps, floorMaps: floorMaps, addMap: addMap, moveMap: moveMap, normalizeGhosts: normalizeGhosts, overviewBlock: overviewBlock, overviewBlocks: overviewBlocks, OVERVIEW_CLEAR: OVERVIEW_CLEAR, moveOverviewBlock: moveOverviewBlock, overviewOffset: overviewOffset, setLinkLabelOffset: setLinkLabelOffset, realMaps: realMaps, allMap: allMap, syncAllMap: syncAllMap, peerGroup: peerGroup, linkPortGroups: linkPortGroups, unlinkPortGroup: unlinkPortGroup, realPlacement: realPlacement, syncGhosts: syncGhosts, pseudoOf: pseudoOf, pseudoDevices: pseudoDevices, hasPortIp: hasPortIp, setDeviceIp: setDeviceIp, setDhcp: setDhcp, CABLE_TYPES: CABLE_TYPES, CABLE_FAMILIES: CABLE_FAMILIES, mediumOf: mediumOf, cableFits: cableFits, cableFitsPort: cableFitsPort, linkFits: linkFits, defaultCableType: defaultCableType, setTerminationCableType: setTerminationCableType, PORT_TYPES: PORT_TYPES, isFibreCable: isFibreCable, isSfpType: isSfpType, sfpAllowed: sfpAllowed, setPortType: setPortType, parseSubnet: parseSubnet, portSubnet: portSubnet, SUBNET_ERROR: SUBNET_ERROR, effectivePortIp: effectivePortIp, ipList: ipList, setPortIp: setPortIp, IP_ERROR: IP_ERROR, setDeviceKind: setDeviceKind, isTermination: isTermination, DEVICE_KINDS: DEVICE_KINDS, deviceKindInfo: deviceKindInfo, typeLabel: typeLabel, accessPorts: accessPorts, validSectionRows: validSectionRows, setUplinkPorts: setUplinkPorts, setSwitchLayout: setSwitchLayout, setFullWidth: setFullWidth, setSectionSize: setSectionSize, validSectionSizes: validSectionSizes, defaultSectionSize: defaultSectionSize, effectiveSectionSize: effectiveSectionSize, setRouterPorts: setRouterPorts, isValidIp: isValidIp, canConnectPatch: canConnectPatch, addPatchCable: addPatchCable,
     updatePatchCable: updatePatchCable, deletePatchCable: deletePatchCable, addInternalMapping: addInternalMapping,
     removeInternalMapping: removeInternalMapping, autoMapPanel: autoMapPanel, rearPorts: rearPorts,
     sequentialPorts: sequentialPorts, addFixedLink: addFixedLink, updateLinkMeta: updateLinkMeta,

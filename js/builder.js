@@ -266,8 +266,8 @@
     M.addPatchCable(p, { aPortId: port(ppB, 'front', 14).id, bPortId: ap.ports[0].id, color: '#1f77b4' });
     // a fibre run between the rooms: Switch A - media converter - fibre panel =fixed fibre link= fibre panel - media converter - Warehouse AP
     var mc1 = addObjectPlaced(p, mA.id, { type: 'mediaconverter', name: 'MC-1' }, 1020, 70);
-    var odf = byName('PP-Standalone');
-    var odfB = addObjectPlaced(p, mB.id, { type: 'patchpanel', name: 'ODF-B', portCount: 4, straight: true, containerId: roomB.id });
+    var odf = byName('PP-Standalone'); M.setTerminationCableType(p, odf.id, 'Fibre OS2 (single-mode)'); // this panel carries fibre
+    var odfB = addObjectPlaced(p, mB.id, { type: 'patchpanel', name: 'ODF-B', portCount: 4, straight: true, cableType: 'Fibre OS2 (single-mode)', containerId: roomB.id });
     var mc2 = addObjectPlaced(p, mB.id, { type: 'mediaconverter', name: 'MC-2', containerId: roomB.id });
     var wap = addObjectPlaced(p, mB.id, { type: 'generic', name: 'Warehouse AP', deviceKind: 'ap', ipAddress: '192.168.1.61', portCount: 1, containerId: roomB.id });
     var eth = function (o) { return o.ports.filter(function (x) { return x.label === 'ETH'; })[0].id; }, sfp = function (o) { return o.ports.filter(function (x) { return x.label === 'SFP'; })[0].id; };

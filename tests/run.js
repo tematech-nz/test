@@ -2282,13 +2282,38 @@ test('port group name tag: white text on dark colours (black), dark text on ligh
   assert.ok(/fill="#111"[^>]*>Light</.test(svg), 'the tag of a light group keeps dark text');
 });
 
+test('cable type on patch panels and wall sockets: copper panels take copper, fibre panels take fibre; ports and converters check too', () => {
+  const p = M.createProject('media');
+  const mk = (type, name, extra) => M.addObject(p, Object.assign({ type: type, name: name, portCount: 4, straight: true }, extra || {}));
+  const cu = mk('patchpanel', 'CU-1'), cu2 = mk('patchpanel', 'CU-2'), fb = mk('patchpanel', 'FB-1', { cableType: 'Fibre OS2 (single-mode)' }), fb2 = mk('patchpanel', 'FB-2', { cableType: 'Fibre OM4 (multimode)' });
+  const sock = M.addObject(p, { type: 'socket', name: 'WS' });
+  assert.strictEqual(cu.cableType, 'Cat6', 'a new panel is copper (Cat6) unless said otherwise'); assert.strictEqual(sock.cableType, 'Cat6');
+  assert.strictEqual(M.mediumOf('Cat6A'), 'copper'); assert.strictEqual(M.mediumOf('Fibre OM3'), 'fibre'); assert.strictEqual(M.mediumOf('DAC / twinax'), 'copper'); assert.strictEqual(M.mediumOf('mystery'), '');
+  const sw = M.addObject(p, { type: 'switch', name: 'SW', portCount: 4, uplinkPorts: 1 }), rt = M.addObject(p, { type: 'router', name: 'R', wanPorts: 1, lanPorts: 2 });
+  const f = (o, n) => o.ports.find(x => x.side === 'front' && x.label === String(n)).id, sp = (o, l) => o.ports.find(x => x.label === String(l)).id, up = sw.ports.find(x => x.role === 'uplink').id;
+  // patch leads
+  assert.throws(() => M.addPatchCable(p, { aPortId: sp(sw, 1), bPortId: f(cu, 1), cableType: 'Fibre OM3 (multimode)' }), /copper panel \(Cat6\): a fibre cable/, 'a fibre lead on a copper panel');
+  assert.throws(() => M.addPatchCable(p, { aPortId: up, bPortId: f(fb, 1), cableType: 'Cat6' }), /fibre panel \(Fibre OS2.*\): a copper cable/, 'a copper lead on a fibre panel');
+  const ok1 = M.addPatchCable(p, { aPortId: sp(sw, 1), bPortId: f(cu, 1), cableType: 'Cat6A' }); assert.strictEqual(ok1.cableType, 'Cat6A', 'Cat6A on a Cat6 panel: same medium');
+  assert.strictEqual(M.addPatchCable(p, { aPortId: sp(sw, 2), bPortId: f(fb, 1) }).cableType, 'Fibre OS2 (single-mode)', 'no type given: it takes the panel\'s');
+  assert.strictEqual(M.addPatchCable(p, { aPortId: sp(sw, 3), bPortId: f(cu, 2), cableType: 'auto' }).cableType, 'Cat6');
+  assert.strictEqual(M.defaultCableType(p, sp(sw, 4), sp(rt, 'L1')), 'Cat6');
+  // changing a cable's type is checked against both ends
+  assert.throws(() => M.updatePatchCable(p, ok1.id, { cableType: 'Fibre OS2' }), /copper panel/);
+  M.updatePatchCable(p, ok1.id, { cableType: 'Cat5e' });
+  // the panel's own cable type: refused while a cable of the other kind is plugged in
+  assert.throws(() => M.setTerminationCableType(p, cu.id, 'Fibre OS2'), /change or remove it first/);
+  assert.throws(() => M.setTerminationCableType(p, sw.id, 'Cat6'), /Only patch panels and wall sockets/);
+  M.setTerminationCableType(p, cu.id, 'Cat6A'); assert.strictEqual(cu.cableType, 'Cat6A');
+});
+
 test('media converter (1 Ethernet + 1 SFP), SFP on uplink ports only, fibre cable types', () => {
   const TP = NM.topology, T = NM.trace, R = NM.render;
   const p = M.createProject('fibre'), mapId = p.maps[0].id;
   // two sites: switch - converter - fibre panel =fixed fibre link= fibre panel - converter - switch
   const swA = M.addObject(p, { type: 'switch', name: 'SwA', portCount: 8, uplinkPorts: 1 }), swB = M.addObject(p, { type: 'switch', name: 'SwB', portCount: 8, uplinkPorts: 1 });
   const mcA = M.addObject(p, { type: 'mediaconverter', name: 'MC-A' }), mcB = M.addObject(p, { type: 'mediaconverter', name: 'MC-B' });
-  const odfA = M.addObject(p, { type: 'patchpanel', name: 'ODF-A', portCount: 4, straight: true }), odfB = M.addObject(p, { type: 'patchpanel', name: 'ODF-B', portCount: 4, straight: true });
+  const odfA = M.addObject(p, { type: 'patchpanel', name: 'ODF-A', portCount: 4, straight: true, cableType: 'Fibre OS2 (single-mode)' }), odfB = M.addObject(p, { type: 'patchpanel', name: 'ODF-B', portCount: 4, straight: true, cableType: 'Fibre OS2 (single-mode)' });
   assert.deepStrictEqual(mcA.ports.map(x => x.label + ':' + x.portType), ['ETH:RJ45', 'SFP:SFP']);
   assert.strictEqual(M.TYPE_LABELS.mediaconverter, 'Media converter');
   assert.strictEqual(p.internalMappings.filter(m => m.objectId === mcA.id).length, 1, 'the two sides are joined inside');
@@ -2318,7 +2343,10 @@ test('media converter (1 Ethernet + 1 SFP), SFP on uplink ports only, fibre cabl
   // validation: a clean setup; a fibre lead on an RJ45 port and RJ45 straight to SFP are flagged
   const issues = M.validateProject(p).filter(i => i.severity !== 'info').map(i => i.message);
   assert.ok(issues.length === 0, issues.join(' | '));
-  const bad = M.clone(p); M.setPortType(bad, port(swA, 2), 'RJ45'); M.addPatchCable(bad, { aPortId: port(swA, 2), bPortId: port(swB, 2), cableType: 'Fibre OS2' });
+  const bad = M.clone(p); M.setPortType(bad, port(swA, 2), 'RJ45');
+  assert.throws(() => M.addPatchCable(bad, { aPortId: port(swA, 2), bPortId: port(swB, 2), cableType: 'Fibre OS2' }), /RJ45 port: a fibre cable/, 'a fibre lead on an RJ45 port is refused');
+  M.addPatchCable(bad, { aPortId: port(swA, 2), bPortId: port(swB, 2), cableType: 'Cat6' });
+  bad.patchCables[bad.patchCables.length - 1].cableType = 'Fibre OS2'; // an older file with that mistake in it is warned about
   assert.ok(M.validateProject(bad).some(i => i.code === 'FIBRE_ON_RJ45'), 'a fibre lead on an RJ45 port');
   M.setPortType(bad, port(swA, 4), 'RJ45'); M.setPortType(bad, up(swB), 'SFP'); M.addPatchCable(bad, { aPortId: port(swA, 4), bPortId: up(swB), cableType: 'Cat6' });
   assert.ok(M.validateProject(bad).some(i => i.code === 'RJ45_SFP'), 'RJ45 joined to an SFP port');
@@ -2334,6 +2362,42 @@ test('media converter (1 Ethernet + 1 SFP), SFP on uplink ports only, fibre cabl
   const back = M.migrate(JSON.parse(M.serializeProject(p))).project;
   assert.strictEqual(back.internalMappings.filter(m => m.objectId === mcA.id).length, 1);
   assert.strictEqual(T.tracePort(back, port(swA, 1)).path.length, tr.path.length);
+});
+
+test('cable type: fixed links need panels of their medium; port types and media converters check the lead too; old files are warned', () => {
+  const p = M.createProject('media2');
+  const pp = (n, ct) => M.addObject(p, { type: 'patchpanel', name: n, portCount: 4, straight: true, cableType: ct });
+  const cuA = pp('CU-A'), cuB = pp('CU-B'), fbA = pp('FB-A', 'Fibre OS2 (single-mode)'), fbB = pp('FB-B', 'Fibre OS2 (single-mode)');
+  // fixed links
+  assert.throws(() => M.addFixedLink(p, { aObjectId: cuA.id, bObjectId: fbA.id, wireCount: 2, cableType: 'Fibre OS2' }), /copper panel/, 'a fibre link into a copper panel');
+  assert.throws(() => M.addFixedLink(p, { aObjectId: cuA.id, bObjectId: fbA.id, wireCount: 2, cableType: 'Cat6' }), /fibre panel/, 'a copper link into a fibre panel');
+  assert.throws(() => M.addFixedLink(p, { aObjectId: cuA.id, bObjectId: fbA.id, wireCount: 2 }), /does not fit/, 'a copper panel joined to a fibre panel, whatever the type');
+  const lk = M.addFixedLink(p, { aObjectId: fbA.id, bObjectId: fbB.id, wireCount: 2, mapping: 'sequential' });
+  assert.strictEqual(lk.cableType, 'Fibre OS2 (single-mode)', 'no type given: the panels\' type');
+  const lc = M.addFixedLink(p, { aObjectId: cuA.id, bObjectId: cuB.id, wireCount: 2, mapping: 'sequential', cableType: 'Cat6A' }); assert.strictEqual(lc.cableType, 'Cat6A');
+  assert.throws(() => M.updateLinkMeta(p, lc.id, { cableType: 'Fibre OM3' }), /copper panel/, 'editing the type of a link is checked too');
+  M.updateLinkMeta(p, lc.id, { cableType: 'Cat6' });
+  assert.throws(() => M.setTerminationCableType(p, fbA.id, 'Cat6'), /Fixed link FL-001.*change or remove it first/, 'a panel cannot change medium under its link');
+  // ports: typed RJ45 refuse fibre and DAC; the SFP side of a converter refuses copper; router and generic ports can be SFP
+  const sw = M.addObject(p, { type: 'switch', name: 'SW', portCount: 4, uplinkPorts: 2 }), mc = M.addObject(p, { type: 'mediaconverter', name: 'MC' });
+  const rt = M.addObject(p, { type: 'router', name: 'R', wanPorts: 1, lanPorts: 1 }), srv = M.addObject(p, { type: 'generic', name: 'SRV', portCount: 2 });
+  const sp = (o, l) => o.ports.find(x => x.label === String(l)).id, ups = sw.ports.filter(x => x.role === 'uplink').map(x => x.id), front = (o, n) => o.ports.find(x => x.side === 'front' && x.label === String(n)).id;
+  M.setPortType(p, sp(sw, 1), 'RJ45'); M.setPortType(p, ups[0], 'SFP+'); M.setPortType(p, ups[1], 'SFP');
+  assert.throws(() => M.addPatchCable(p, { aPortId: sp(sw, 1), bPortId: front(cuA, 1), cableType: 'DAC / twinax' }), /DAC cable fits SFP/, 'DAC on RJ45');
+  M.addPatchCable(p, { aPortId: ups[0], bPortId: front(fbA, 1) }); // defaults to the fibre panel's type
+  assert.throws(() => M.addPatchCable(p, { aPortId: sp(mc, 'SFP'), bPortId: front(cuB, 1), cableType: 'Cat6' }), /fibre side of a media converter|copper panel|does not fit/);
+  assert.throws(() => M.addPatchCable(p, { aPortId: sp(mc, 'SFP'), bPortId: sp(srv, 1), cableType: 'Cat6' }), /fibre side of a media converter/);
+  M.setPortType(p, sp(srv, 1), 'SFP'); M.setPortType(p, sp(rt, 'W1'), 'SFP+'); M.setPortType(p, sp(rt, 'L1'), 'RJ45');
+  assert.strictEqual(M.addPatchCable(p, { aPortId: sp(mc, 'SFP'), bPortId: sp(srv, 1), cableType: 'Fibre OM3 (multimode)' }).cableType, 'Fibre OM3 (multimode)');
+  assert.strictEqual(M.addPatchCable(p, { aPortId: sp(rt, 'W1'), bPortId: ups[1] }).cableType, 'Fibre OM3 (multimode)', 'SFP to SFP with no type given: fibre');
+  assert.throws(() => M.addPatchCable(p, { aPortId: sp(rt, 'L1'), bPortId: sp(srv, 2), cableType: 'Fibre OM3' }), /RJ45 port: a fibre cable/);
+  assert.ok(M.sfpAllowed(rt, rt.ports[0]) && M.sfpAllowed(srv, srv.ports[0]) && !M.sfpAllowed(sw, sw.ports[0]), 'SFP on routers and devices; on switches uplinks only');
+  // an older file that already has a mismatch: validation warns (nothing is changed)
+  const old = M.clone(p); old.patchCables[0].cableType = 'Cat6'; old.fixedLinks[1].cableType = 'Fibre OS2';
+  const w = M.validateProject(old).filter(i => i.code === 'MEDIA_MISMATCH');
+  assert.ok(w.length >= 2 && w.some(i => /Fixed link/.test(i.message)) && w.some(i => /Patch cable/.test(i.message)), w.map(i => i.message).join(' | '));
+  assert.deepStrictEqual(M.validateProject(p).filter(i => i.code === 'MEDIA_MISMATCH'), [], 'nothing wrong in the clean project');
+  assert.strictEqual(M.migrate(JSON.parse(M.serializeProject(p))).project.objects.find(o => o.id === fbA.id).cableType, 'Fibre OS2 (single-mode)', 'survives save and load');
 });
 
 console.log('\n' + passed + ' passed, ' + failed + ' failed');

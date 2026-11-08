@@ -284,6 +284,7 @@
       if (!it.isGroup && ref.type === 'switch' && ref.portIsolation) {
         x.push('<text x="' + num(pl.x + pl.w - 5) + '" y="' + num(pl.y + 13) + '" font-size="8" text-anchor="end" fill="#b71c1c" font-family="sans-serif" pointer-events="none">PORT ISOLATION</text>');
       }
+      if (!it.isGroup && M.isTermination(ref) && M.mediumOf(ref.cableType) === 'fibre') x.push('<text x="' + num(pl.x + pl.w - 5) + '" y="' + num(pl.y + 13) + '" font-size="8" text-anchor="end" fill="#e65100" font-weight="bold" font-family="sans-serif" pointer-events="none">FIBRE</text>'); // a fibre panel says so
       // addresses never compete with the name for space: a small chip whose tooltip lists them all
       var ips = !it.isGroup && M.hasDeviceIp(ref) ? M.ipList(ref) : [];
       if (ips.length) {

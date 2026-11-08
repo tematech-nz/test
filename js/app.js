@@ -384,10 +384,10 @@
       if (!pt) return;
       if (pt.side === 'rear') { toast('Rear terminations take fixed links, not patch cables', true); return; }
       if (idx.portUse[pid]) { toast('That port is already occupied', true); return; }
-      S.tool = { type: 'patch', pending: pid, cableType: 'Cat6', once: true };
+      S.tool = { type: 'patch', pending: pid, cableType: 'auto', once: true };
       renderAll(); return;
     }
-    setTool({ type: 'patch', pending: null, cableType: 'Cat6' });
+    setTool({ type: 'patch', pending: null, cableType: 'auto' });
   }
   /* 'G' after Ctrl+selecting ports: name and colour them as a port group */
   async function nameSelectedPorts() {
@@ -1004,6 +1004,7 @@
     let h = '<h3>' + esc(M.typeLabel(o)) + '</h3>' + inp('Name', 'name', o.name) + inp('Location', 'location', o.location) + inp('Description', 'description', o.description);
     if (o.type === 'generic') h += isEdit() ? fld('Device type', '<select data-f="deviceKind">' + opts(M.DEVICE_KINDS.map((k) => [k[0], k[1]]), o.deviceKind || 'other') + '</select>') : fld('Device type', esc(M.typeLabel(o)));
     if (o.type === 'rack') h += inp('Height (U)', 'rackHeight', o.rackHeight || '');
+    if (M.isTermination(o)) h += inp('Cable type', 'cableType', o.cableType || '', '', 'list="cableTypes" placeholder="e.g. Cat6 or Fibre OS2"') + (isEdit() ? '<div class="sub">' + ctypeLinks('data-ctypeset', 'object', o.id) + '</div><div class="sub">What its jacks take. Patch leads and fixed links of the other medium (copper / fibre) are refused.</div>' : '');
     if (M.hasDeviceIp(o)) {
       h += inp(o.type === 'switch' ? 'Management IP' : 'IP address', 'ipAddress', o.ipAddress || '');
       if (o.type === 'generic' || o.type === 'switch') h += isEdit() ? fld('DHCP', '<label><input type="checkbox" data-f="dhcp"' + (o.dhcp ? ' checked' : '') + '> any address from the LAN it is plugged into (no fixed address)</label>') : (o.dhcp ? fld('DHCP', 'yes: any address from its LAN') : '');
@@ -1141,6 +1142,7 @@
     if (o.type === 'router') h += fld('Role', esc((pt.role || '').toUpperCase()));
     if (hasIp(o)) h += inp('IP address', 'pip', pt.ip || '', pt.id, 'placeholder="' + esc(M.effectivePortIp(o, pt) || '') + '"') + (!pt.ip && M.effectivePortIp(o, pt) ? '<div class="sub">Empty: uses the device address ' + esc(M.effectivePortIp(o, pt)) + '.</div>' : '');
     if (o.type === 'router') h += isEdit() ? fld('Network colour', colorPicker('netPreset', 'pnet', pt.networkColor || '', 'net:' + pt.id, { value: '', label: 'none', swatch: 'transparent', dt: pt.id }) + '<div class="sub">New patch cables extending from this port default to this colour.</div>') : (pt.networkColor ? fld('Network colour', '<span class="swatch" style="background:' + esc(pt.networkColor) + '"></span>') : '');
+    if (o.type === 'router' || o.type === 'generic') h += portTypeField(o, pt);
     if (o.type === 'switch' || o.type === 'mediaconverter') h += portTypeField(o, pt) + inp('Speed', 'pspeed', pt.speed || '', pt.id) + inp('Media', 'pmedia', pt.media || '', pt.id);
     h += fld('Connection', portState(o, pt, idx));
     h += '<div class="btn-row">' + btn('trace', 'Trace connection', 'data-kind="port" data-id="' + esc(id) + '"', 'primary');
@@ -1305,7 +1307,7 @@
         if (f.type === 'select') c = '<select name="' + f.k + '">' + opts(f.opts, f.v) + '</select>';
         else if (f.type === 'check') c = '<input type="checkbox" name="' + f.k + '"' + (f.v ? ' checked' : '') + '>';
         else if (f.type === 'area') c = '<textarea name="' + f.k + '" rows="3" style="width:100%">' + esc(f.v) + '</textarea>';
-        else c = '<input name="' + f.k + '" type="' + (f.type || 'text') + '" value="' + esc(f.v == null ? '' : f.v) + '"' + (f.min != null ? ' min="' + f.min + '"' : '') + (f.max != null ? ' max="' + f.max + '"' : '') + ' style="width:100%">';
+        else c = '<input name="' + f.k + '" type="' + (f.type || 'text') + (f.list ? '" list="' + f.list : '') + '" value="' + esc(f.v == null ? '' : f.v) + '"' + (f.min != null ? ' min="' + f.min + '"' : '') + (f.max != null ? ' max="' + f.max + '"' : '') + ' style="width:100%">';
         return fld(esc(f.label), c + (f.hint ? '<div class="sub">' + esc(f.hint) + '</div>' : ''));
       }).join('');
     }
@@ -1374,11 +1376,12 @@
     if (type === 'switch') fields.push({ k: 'sectionSize', label: 'Ports per section', type: 'number', v: '', min: 1, max: 96, hint: 'Optional, e.g. 8 for 3 x 8 on a 24-port switch. Leave empty for plain rows. Must divide the port count evenly.' });
     if (type === 'switch') fields.push({ k: 'sectionRows', label: 'Rows per section', type: 'number', v: '', min: 1, max: 8, hint: 'Optional: 2 makes 8-port sections 2 x 4. Needs ports per section.' });
     if (type === 'switch') fields.push({ k: 'portIsolation', label: 'Port isolation', type: 'check', v: false, hint: 'Access ports can only talk to uplinks, not to each other.' });
+    if (type === 'patchpanel' || type === 'socket') fields.push({ k: 'cableType', label: 'Cable type', v: 'Cat6', list: 'cableTypes', hint: 'What its jacks take: copper (Cat6...) or fibre (Fibre OS2...). Patch leads and fixed links of the other kind are refused.' });
     if (type === 'patchpanel' || type === 'socket') fields.push({ k: 'straight', label: 'Front N <-> rear N', type: 'check', v: true, hint: 'Documents a straight-through internal mapping. Untick if this panel is not wired that way.' });
     const v = await formDlg('New ' + (isGroup ? 'group' : M.TYPE_LABELS[type]), fields, 'Create', '', (vals) => (vals.ipAddress && !M.isValidIp(vals.ipAddress) ? M.IP_ERROR : null));
     if (!v) return;
     const portCount = v.portCount != null ? parseInt(v.portCount, 10) : undefined;
-    const spec = isGroup ? { name: v.name || undefined } : { type: type, name: v.name || undefined, portCount: portCount, rackHeight: v.rackHeight, straight: v.straight, wanPorts: v.wanPorts, lanPorts: v.lanPorts, deviceKind: v.deviceKind, sectionSize: (type === 'patchpanel' || type === 'switch') && v.sectionSize > 0 ? v.sectionSize : undefined, uplinkPorts: v.uplinkPorts > 0 ? v.uplinkPorts : undefined, sectionRows: v.sectionRows > 1 ? v.sectionRows : undefined, portIsolation: !!v.portIsolation, ipAddress: v.ipAddress, publicIp: !!v.publicIp, dhcp: !!v.dhcp };
+    const spec = isGroup ? { name: v.name || undefined } : { type: type, name: v.name || undefined, portCount: portCount, rackHeight: v.rackHeight, straight: v.straight, wanPorts: v.wanPorts, lanPorts: v.lanPorts, cableType: v.cableType || undefined, deviceKind: v.deviceKind, sectionSize: (type === 'patchpanel' || type === 'switch') && v.sectionSize > 0 ? v.sectionSize : undefined, uplinkPorts: v.uplinkPorts > 0 ? v.uplinkPorts : undefined, sectionRows: v.sectionRows > 1 ? v.sectionRows : undefined, portIsolation: !!v.portIsolation, ipAddress: v.ipAddress, publicIp: !!v.publicIp, dhcp: !!v.dhcp };
     startPlace(isGroup ? 'group' : 'object', spec, type);
   }
 
@@ -2029,7 +2032,8 @@
     // panels often share names ("1", "top"): lead with the group they are in, e.g. "L1 Server Room: top"
     const po = panels.map((o) => { const g = M.groupOf(S.p, o.id); return [o.id, (g ? g.name + ': ' : '') + o.name + (o.type === 'socket' ? ' (wall socket)' : '')]; });
     const a0 = prefA || (S.sel && S.sel.kind === 'object' && panels.some((x) => x.id === S.sel.id) ? S.sel.id : panels[0].id);
-    const st = { place: null, a: a0, b: (panels.find((x) => x.id !== a0) || panels[1]).id, sel: { a: [], b: [] }, last: { a: null, b: null }, n: 24, mapping: 'sequential', cableType: 'Cat6', length: '', route: '' };
+    const st0cable = (panels.find((x) => x.id === a0) || {}).cableType;
+    const st = { place: null, a: a0, b: (panels.find((x) => x.id !== a0) || panels[1]).id, sel: { a: [], b: [] }, last: { a: null, b: null }, n: 24, mapping: 'sequential', cableType: st0cable || 'Cat6', length: '', route: '' };
     const idx = M.buildIndex(S.p);
     const objOf = (side) => idx.objects[st[side]];
     const fmt = (o, ids) => ids.map((id) => idx.ports[id].label).join(', ');
@@ -2065,8 +2069,10 @@
         '<button class="pk-tool pk-place' + (placeOn ? ' on' : '') + '" data-placegroup="' + side + '"' + (st.place && st.place.from !== side ? '' : ' disabled') + ' title="Select a group on the other panel first (click its name), then place it here: possible spots turn green">' + (placeOn ? 'Placing group - click a spot' : 'Place selected group') + '</button></div>' +
         (gl ? '<div class="pk-groups">' + gl + '</div>' : '') + '<div class="pk-grid">' + h + '</div></div>';
     }
+    function mediaProblem() { const ma = M.mediumOf(objOf('a').cableType), mb = M.mediumOf(objOf('b').cableType); return M.linkFits(objOf('a'), objOf('b'), st.cableType) || (ma && mb && ma !== mb ? objOf('a').name + ' and ' + objOf('b').name + ' take different cable media (copper / fibre)' : null); }
     function problem() {
       if (st.a === st.b) return 'Choose two different panels';
+      const mm = mediaProblem(); if (mm) return mm;
       const na = st.sel.a.length, nb = st.sel.b.length;
       if (na !== nb) return 'Pick the same number of ports on both panels (' + na + ' on A, ' + nb + ' on B)';
       return null;
@@ -2083,14 +2089,24 @@
             (picked ? '<div class="pk-sum' + (st.sel.a.length && st.sel.a.length === st.sel.b.length && !pr ? ' valid' : '') + '">' + (st.sel.a.length ? 'A: ' + esc(fmt(objOf('a'), st.sel.a)) : 'A: -') + ' &harr; ' + (st.sel.b.length ? 'B: ' + esc(fmt(objOf('b'), st.sel.b)) : 'B: -') + '</div>' + (pr ? '<div class="err-text">' + esc(pr) + '</div>' : '') :
               fld('Wires', '<input type="number" data-s="n" value="' + st.n + '" min="1" max="288">') +
               fld('Mapping', '<select data-s="mapping">' + opts([['sequential', 'Sequential: next free rear port to next free rear port'], ['none', 'Leave unmapped (map each wire later)']], st.mapping) + '</select><div class="sub">Nothing picked: create this many wires without choosing ports. Mappings are never assumed; choose sequential only if the installation really is 1:1.</div>')) +
-            fld('Cable type', '<input type="text" data-s="cableType" list="cableTypes" value="' + esc(st.cableType) + '"><div class="sub">' + ctypeLinks('data-ctype') + '</div>') + fld('Length', '<input type="text" data-s="length" value="' + esc(st.length) + '">') + fld('Route', '<input type="text" data-s="route" value="' + esc(st.route) + '">'),
+            fld('Cable type', '<input type="text" data-s="cableType" list="cableTypes" value="' + esc(st.cableType) + '"><div class="sub">' + ctypeLinks('data-ctype') + '</div>' + '<div class="err-text" id="ctMsg">' + esc(mediaProblem() || '') + '</div>') + fld('Length', '<input type="text" data-s="length" value="' + esc(st.length) + '">') + fld('Route', '<input type="text" data-s="route" value="' + esc(st.route) + '">'),
           buttons: [{ key: 'no', label: 'Cancel' }, { key: 'ok', label: picked ? 'Create link (' + st.sel.a.length + ' wire' + (st.sel.a.length === 1 ? '' : 's') + ')' : 'Create link', cls: 'primary', disabled: !!pr }]
         };
       },
       onChange: (e, c) => {
         const t = e.target, k = t.dataset.s; if (!k) return;
-        if (k === 'a' || k === 'b') { st[k] = t.value; st.sel[k] = []; st.last[k] = null; st.place = null; c.draw(); }
-        else st[k] = k === 'n' ? (parseInt(t.value, 10) || 1) : t.value;
+        if (k === 'a' || k === 'b') {
+          st[k] = t.value; st.sel[k] = []; st.last[k] = null; st.place = null;
+          const po2 = objOf(k); if (po2 && po2.cableType && M.mediumOf(po2.cableType) !== M.mediumOf(st.cableType)) st.cableType = po2.cableType; // follow the panel's medium
+          c.draw();
+        } else {
+          st[k] = k === 'n' ? (parseInt(t.value, 10) || 1) : t.value;
+          if (k === 'cableType') { // no redraw (it would swallow the click that caused this change): update the message and the Create button in place
+            const msg = c.root.querySelector('#ctMsg'), okb = c.root.querySelector('button[data-btn="ok"]');
+            if (msg) msg.textContent = mediaProblem() || '';
+            if (okb) okb.disabled = !!problem();
+          }
+        }
       },
       onClick: (e, c) => {
         const ct = e.target.closest('[data-ctype]');
@@ -2405,7 +2421,7 @@
           M.mapsFor(p, sel.kind, sel.id).forEach((m) => { if (val) M.growToFit(p, m, val); });
         } else if (f === 'rackHeight') c.item.rackHeight = parseInt(val, 10) || null;
         else {
-          if (f === 'ipAddress') M.setDeviceIp(p, sel.id, val); else c.item[f] = val;
+          if (f === 'ipAddress') M.setDeviceIp(p, sel.id, val); else if (f === 'cableType') M.setTerminationCableType(p, sel.id, val); else c.item[f] = val;
         }
       } else if (sel.kind === 'cable') M.updatePatchCable(p, sel.id, { [f]: val });
       else if (sel.kind === 'pgroup') {
@@ -2681,7 +2697,7 @@
       const a = e.target.closest('button'); if (!a) return;
       if (a.dataset.floortool) floorSetTool(a.dataset.floortool);
       else if (a.dataset.add) createItem(a.dataset.add);
-      else if (a.dataset.act === 'patchTool') setTool(S.tool && S.tool.type === 'patch' ? null : { type: 'patch', pending: null, cableType: 'Cat6' });
+      else if (a.dataset.act === 'patchTool') setTool(S.tool && S.tool.type === 'patch' ? null : { type: 'patch', pending: null, cableType: 'auto' });
       else if (a.dataset.act === 'newLink') newLink();
       else if (a.dataset.act === 'addMapItems') addExisting();
     };
