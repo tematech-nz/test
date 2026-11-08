@@ -1952,6 +1952,7 @@ test('the showcase demo is valid, round-trips, and shows the newer features', ()
   assert.ok(p.objects.some((o) => (o.portGroups || []).some((g) => g.deviceKind === 'camera')));
   assert.ok(p.placements.some((q) => q.ghost), 'a live copy');
   assert.ok(M.allMap(p), 'overview map');
+  assert.ok(p.objects.some((o) => o.ports.some((x) => x.module && x.module.kind === 'fibre')) && p.objects.some((o) => o.ports.some((x) => x.module && x.module.kind === 'copper')), 'SFP modules');
   const q = M.migrate(JSON.parse(M.serializeProject(p))).project;
   assert.strictEqual(q.maps.length, p.maps.length);
   assert.strictEqual(M.floorMaps(q)[0].floor.links.length, M.floorMaps(p)[0].floor.links.length);

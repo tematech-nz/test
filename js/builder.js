@@ -276,6 +276,14 @@
     M.addFixedLink(p, { aObjectId: odf.id, bObjectId: odfB.id, wireCount: 2, mapping: 'sequential', cableType: 'Fibre OS2 (single-mode)', route: 'Underground duct', length: '320 m' });
     M.addPatchCable(p, { aPortId: port(odfB, 'front', 1).id, bPortId: sfp(mc2), color: '#f9a825', cableType: 'Fibre OM3 (multimode)' });
     M.addPatchCable(p, { aPortId: eth(mc2), bPortId: wap.ports[0].id, color: '#2ca02c' });
+    // a switch with SFP+ uplinks holding modules: a fibre transceiver (cabled to the fibre panel) and a copper RJ45 module
+    var swC = addObjectPlaced(p, mB.id, { type: 'switch', name: 'Switch C', portCount: 8, containerId: roomB.id });
+    M.setUplinkPorts(p, swC.id, 2);
+    var ups = swC.ports.filter(function (x) { return x.role === 'uplink'; });
+    ups.forEach(function (u) { M.setPortType(p, u.id, 'SFP+'); });
+    M.installModule(p, ups[0].id, { name: 'LX-A', kind: 'fibre', description: '10G-LR single-mode, 1310 nm, 10 km' });
+    M.installModule(p, ups[1].id, { name: 'CU-B', kind: 'copper', description: '10GBASE-T copper SFP+' });
+    M.addPatchCable(p, { aPortId: ups[0].id, bPortId: port(odfB, 'front', 2).id, color: '#f9a825' });
     // a live copy: the Edge router also appears on the Office map (one editable original, the copy follows it)
     placeItem(p, mB.id, 'object', rtr.id, 1000, 60);
 
