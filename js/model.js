@@ -33,6 +33,10 @@
       var pm = mediumOf(o.cableType);
       if (pm && pm !== mc) return nm + ' is on a ' + mediumName(pm) + ' panel (' + o.cableType + '): a ' + mediumName(mc) + ' cable (' + cableType + ') does not fit';
     }
+    if (pt.module && isSfpType(pt.portType)) { // a module in the port decides what plugs into it
+      if (pt.module.kind === 'fibre' && mc === 'copper') return nm + ' has a fibre module (' + pt.module.name + '): a copper cable (' + cableType + ') does not fit';
+      if (pt.module.kind === 'copper' && mc === 'fibre') return nm + ' has a copper module (' + pt.module.name + '): a fibre cable (' + cableType + ') does not fit';
+    }
     if (/^RJ45$/i.test(pt.portType || '')) {
       if (mc === 'fibre') return nm + ' is an RJ45 port: a fibre cable (' + cableType + ') does not fit';
       if (isDac(cableType)) return nm + ' is an RJ45 port: a DAC cable fits SFP ports';
@@ -59,6 +63,9 @@
     var ends = [aPortId, bPortId].map(function (id) { return idx.portObj[id]; }).filter(Boolean), t = '';
     ends.forEach(function (o) { if (!t && isTermination(o) && o.cableType) t = o.cableType; });
     if (t) return t;
+    var mods = [aPortId, bPortId].map(function (id) { return idx.ports[id] && idx.ports[id].module; }).filter(Boolean);
+    if (mods.some(function (m) { return m.kind === 'copper'; })) return 'Cat6';
+    if (mods.some(function (m) { return m.kind === 'fibre'; })) return 'Fibre OM3 (multimode)';
     var sfp = [aPortId, bPortId].filter(function (id) { return idx.ports[id] && isSfpType(idx.ports[id].portType); }).length;
     return sfp === 2 ? 'Fibre OM3 (multimode)' : 'Cat6';
   }
@@ -827,7 +834,43 @@
     type = String(type == null ? '' : type).trim();
     if (o.type === 'mediaconverter') throw new Error('The ports of a media converter are fixed: Ethernet (RJ45) and SFP');
     if (isSfpType(type) && !sfpAllowed(o, pt)) throw new Error('SFP modules fit uplink ports only: give the switch uplink ports first');
+    if (pt.module && !isSfpType(type)) throw new Error('Remove the module (' + pt.module.name + ') before changing this port away from SFP');
     pt.portType = type;
+  }
+  /*
+   * Modules: a transceiver that sits in an SFP / SFP+ port (never placed freely). It has its own name and description, a kind
+   * ('fibre' transceiver or 'copper' RJ45 module) that decides which leads the port takes, and it can be copied to other SFP ports.
+   */
+  var MODULE_KINDS = [['fibre', 'Fibre transceiver'], ['copper', 'Copper (RJ45) module']];
+  function moduleKindLabel(k) { return (MODULE_KINDS.filter(function (x) { return x[0] === k; })[0] || ['', k || ''])[1]; }
+  function portCables(p, portId) { return p.patchCables.filter(function (c) { return c.aPortId === portId || c.bPortId === portId; }); }
+  function installModule(p, portId, spec) {
+    var idx = buildIndex(p), pt = idx.ports[portId], o = idx.portObj[portId];
+    if (!pt || !o) throw new Error('Port not found');
+    if (!isSfpType(pt.portType)) throw new Error('Modules fit SFP / SFP+ ports only: set the port type to SFP first');
+    spec = spec || {};
+    var kind = spec.kind === 'copper' ? 'copper' : 'fibre';
+    var bad = portCables(p, portId).filter(function (c) { var m = mediumOf(c.cableType); return m && m !== (kind === 'fibre' ? 'fibre' : 'copper'); })[0];
+    if (bad) throw new Error(bad.name + ' (' + bad.cableType + ') is plugged into ' + portName(p, portId, idx) + ': a ' + kind + ' module does not fit it');
+    if (!spec.name) { p.counters.module = (p.counters.module || 0) + 1; }
+    pt.module = { name: String(spec.name || ('SFP-' + pad3(p.counters.module))).trim(), kind: kind, description: String(spec.description || '') };
+    return pt.module;
+  }
+  function updateModule(p, portId, patch) {
+    var pt = buildIndex(p).ports[portId];
+    if (!pt || !pt.module) throw new Error('No module in this port');
+    if (patch.kind !== undefined && patch.kind !== pt.module.kind) {
+      var k = patch.kind === 'copper' ? 'copper' : 'fibre', bad = portCables(p, portId).filter(function (c) { var m = mediumOf(c.cableType); return m && m !== (k === 'fibre' ? 'fibre' : 'copper'); })[0];
+      if (bad) throw new Error(bad.name + ' (' + bad.cableType + ') is plugged in: a ' + k + ' module does not fit it');
+      pt.module.kind = k;
+    }
+    if (patch.name !== undefined) { var nm = String(patch.name).trim(); if (!nm) throw new Error('A module needs a name'); pt.module.name = nm; }
+    if (patch.description !== undefined) pt.module.description = String(patch.description);
+  }
+  function removeModule(p, portId) {
+    var pt = buildIndex(p).ports[portId];
+    if (!pt) throw new Error('Port not found');
+    delete pt.module;
   }
   function setPortCount(p, objectId, n) {
     var idx = buildIndex(p), o = idx.objects[objectId];
@@ -1294,6 +1337,7 @@
       if (isFibreCable(c.cableType) && (/^RJ45$/i.test(ta || '') || /^RJ45$/i.test(tb || ''))) add('warning', 'FIBRE_ON_RJ45', 'Patch cable ' + c.name + ' is fibre but one end is an RJ45 port', 'cable', c.id);
       else if ((/^RJ45$/i.test(ta || '') && isSfpType(tb)) || (/^RJ45$/i.test(tb || '') && isSfpType(ta))) add('warning', 'RJ45_SFP', 'Patch cable ' + c.name + ' joins an RJ45 port to an SFP port: that needs a media converter or a copper SFP module', 'cable', c.id);
     });
+    p.objects.forEach(function (o) { (o.ports || []).forEach(function (pt) { if (pt.module && !isSfpType(pt.portType)) add('warning', 'MODULE_NO_SFP', 'Module ' + pt.module.name + ' sits in ' + o.name + ' / ' + pt.label + ', which is not an SFP port', 'port', pt.id); }); });
     p.fixedLinks.forEach(function (l) {
       var a = idx.objects[l.aObjectId], b = idx.objects[l.bObjectId];
       if (!a || !b) { add('error', 'MISSING_ENDPOINT', 'Fixed link ' + l.name + ' has a missing endpoint', 'link', l.id); return; }
@@ -1484,7 +1528,7 @@
     findContainer: findContainer, groupOf: groupOf, parentOf: parentOf, containerChildren: containerChildren, descendants: descendants,
     addPlacement: addPlacement, placementOf: placementOf, placementGroup: placementGroup, movePlacement: movePlacement,
     growToFit: growToFit, mapsFor: mapsFor, addGroup: addGroup, addObject: addObject, setContainer: setContainer,
-    setPortCount: setPortCount, findPortGroup: findPortGroup, parsePortRange: parsePortRange, addPortGroup: addPortGroup, updatePortGroup: updatePortGroup, deletePortGroup: deletePortGroup, portGroupOf: portGroupOf, prunePortGroups: prunePortGroups, hasDeviceIp: hasDeviceIp, isFloorMap: isFloorMap, equipmentMaps: equipmentMaps, floorMaps: floorMaps, addMap: addMap, moveMap: moveMap, normalizeGhosts: normalizeGhosts, overviewBlock: overviewBlock, overviewBlocks: overviewBlocks, OVERVIEW_CLEAR: OVERVIEW_CLEAR, moveOverviewBlock: moveOverviewBlock, overviewOffset: overviewOffset, setLinkLabelOffset: setLinkLabelOffset, realMaps: realMaps, allMap: allMap, syncAllMap: syncAllMap, peerGroup: peerGroup, linkPortGroups: linkPortGroups, unlinkPortGroup: unlinkPortGroup, realPlacement: realPlacement, syncGhosts: syncGhosts, pseudoOf: pseudoOf, pseudoDevices: pseudoDevices, hasPortIp: hasPortIp, setDeviceIp: setDeviceIp, setDhcp: setDhcp, CABLE_TYPES: CABLE_TYPES, CABLE_FAMILIES: CABLE_FAMILIES, mediumOf: mediumOf, cableFits: cableFits, cableFitsPort: cableFitsPort, linkFits: linkFits, defaultCableType: defaultCableType, setTerminationCableType: setTerminationCableType, PORT_TYPES: PORT_TYPES, isFibreCable: isFibreCable, isSfpType: isSfpType, sfpAllowed: sfpAllowed, setPortType: setPortType, parseSubnet: parseSubnet, portSubnet: portSubnet, SUBNET_ERROR: SUBNET_ERROR, effectivePortIp: effectivePortIp, ipList: ipList, setPortIp: setPortIp, IP_ERROR: IP_ERROR, setDeviceKind: setDeviceKind, isTermination: isTermination, DEVICE_KINDS: DEVICE_KINDS, deviceKindInfo: deviceKindInfo, typeLabel: typeLabel, accessPorts: accessPorts, validSectionRows: validSectionRows, setUplinkPorts: setUplinkPorts, setSwitchLayout: setSwitchLayout, setFullWidth: setFullWidth, setSectionSize: setSectionSize, validSectionSizes: validSectionSizes, defaultSectionSize: defaultSectionSize, effectiveSectionSize: effectiveSectionSize, setRouterPorts: setRouterPorts, isValidIp: isValidIp, canConnectPatch: canConnectPatch, addPatchCable: addPatchCable,
+    setPortCount: setPortCount, findPortGroup: findPortGroup, parsePortRange: parsePortRange, addPortGroup: addPortGroup, updatePortGroup: updatePortGroup, deletePortGroup: deletePortGroup, portGroupOf: portGroupOf, prunePortGroups: prunePortGroups, hasDeviceIp: hasDeviceIp, isFloorMap: isFloorMap, equipmentMaps: equipmentMaps, floorMaps: floorMaps, addMap: addMap, moveMap: moveMap, normalizeGhosts: normalizeGhosts, overviewBlock: overviewBlock, overviewBlocks: overviewBlocks, OVERVIEW_CLEAR: OVERVIEW_CLEAR, moveOverviewBlock: moveOverviewBlock, overviewOffset: overviewOffset, setLinkLabelOffset: setLinkLabelOffset, realMaps: realMaps, allMap: allMap, syncAllMap: syncAllMap, peerGroup: peerGroup, linkPortGroups: linkPortGroups, unlinkPortGroup: unlinkPortGroup, realPlacement: realPlacement, syncGhosts: syncGhosts, pseudoOf: pseudoOf, pseudoDevices: pseudoDevices, hasPortIp: hasPortIp, setDeviceIp: setDeviceIp, setDhcp: setDhcp, CABLE_TYPES: CABLE_TYPES, CABLE_FAMILIES: CABLE_FAMILIES, mediumOf: mediumOf, MODULE_KINDS: MODULE_KINDS, moduleKindLabel: moduleKindLabel, installModule: installModule, updateModule: updateModule, removeModule: removeModule, cableFits: cableFits, cableFitsPort: cableFitsPort, linkFits: linkFits, defaultCableType: defaultCableType, setTerminationCableType: setTerminationCableType, PORT_TYPES: PORT_TYPES, isFibreCable: isFibreCable, isSfpType: isSfpType, sfpAllowed: sfpAllowed, setPortType: setPortType, parseSubnet: parseSubnet, portSubnet: portSubnet, SUBNET_ERROR: SUBNET_ERROR, effectivePortIp: effectivePortIp, ipList: ipList, setPortIp: setPortIp, IP_ERROR: IP_ERROR, setDeviceKind: setDeviceKind, isTermination: isTermination, DEVICE_KINDS: DEVICE_KINDS, deviceKindInfo: deviceKindInfo, typeLabel: typeLabel, accessPorts: accessPorts, validSectionRows: validSectionRows, setUplinkPorts: setUplinkPorts, setSwitchLayout: setSwitchLayout, setFullWidth: setFullWidth, setSectionSize: setSectionSize, validSectionSizes: validSectionSizes, defaultSectionSize: defaultSectionSize, effectiveSectionSize: effectiveSectionSize, setRouterPorts: setRouterPorts, isValidIp: isValidIp, canConnectPatch: canConnectPatch, addPatchCable: addPatchCable,
     updatePatchCable: updatePatchCable, deletePatchCable: deletePatchCable, addInternalMapping: addInternalMapping,
     removeInternalMapping: removeInternalMapping, autoMapPanel: autoMapPanel, rearPorts: rearPorts,
     sequentialPorts: sequentialPorts, addFixedLink: addFixedLink, updateLinkMeta: updateLinkMeta,

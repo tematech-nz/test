@@ -2326,6 +2326,30 @@ const ok = (m) => console.log('  ok   ' + m);
   await m.goto(URL);
   await m.evaluate((txt) => { localStorage.setItem('netmap.autosave.v1', txt); }, await page.evaluate(() => JSON.stringify(NetMap.app.S.p)));
   await m.reload();
+  await step('modules: fit a module to an SFP port, name and describe it, copy it to another SFP port with Ctrl+C / Ctrl+V', async () => {
+    await page.evaluate(() => NetMap.app.api.loadProject(NetMap.builder.buildDemoProject()));
+    if (!(await page.evaluate(() => NetMap.app.S.mode === 'edit'))) await page.click('#btnMode');
+    const ids = await page.evaluate(() => { let r; NetMap.app.api.commit('module test device', (p) => { const M = NetMap.model, a = M.addObject(p, { type: 'generic', name: 'MOD-DEV', portCount: 2 }); M.setPortType(p, a.ports[0].id, 'SFP+'); M.setPortType(p, a.ports[1].id, 'SFP+'); M.addPlacement(p, NetMap.app.S.mapId, 'object', a.id, 40, 40, 160, 80); r = [a.ports[0].id, a.ports[1].id]; }); return r; });
+    await page.evaluate((id) => NetMap.app.api.select({ kind: 'port', id }), ids[0]);
+    await page.click('#detailsPane button[data-act="fitModule"]');
+    await page.waitForSelector('#detailsPane input[data-f="modname"]');
+    await page.fill('#detailsPane input[data-f="modname"]', 'LX-A'); await page.press('#detailsPane input[data-f="modname"]', 'Tab');
+    await page.fill('#detailsPane textarea[data-f="moddesc"]', '10G-LR single-mode'); await page.press('#detailsPane textarea[data-f="moddesc"]', 'Tab');
+    let m = await page.evaluate((id) => NetMap.model.buildIndex(NetMap.app.S.p).ports[id].module, ids[0]);
+    assert.deepStrictEqual([m.name, m.kind, m.description], ['LX-A', 'fibre', '10G-LR single-mode']);
+    assert.ok((await page.locator('#vp [data-module="' + ids[0] + '"]').count()) === 1, 'the module is drawn on the port');
+    await page.keyboard.press('Control+c');
+    await page.evaluate((id) => NetMap.app.api.select({ kind: 'port', id }), ids[1]);
+    await page.keyboard.press('Control+v');
+    m = await page.evaluate((id) => NetMap.model.buildIndex(NetMap.app.S.p).ports[id].module, ids[1]);
+    assert.ok(m && /^LX-A \(Copy 1\)$/.test(m.name) && m.description === '10G-LR single-mode', 'Ctrl+V fits a copy in the selected SFP port');
+    assert.strictEqual(await page.evaluate(() => NetMap.app.S.sel.kind), 'module');
+    await page.keyboard.press('Delete');
+    assert.ok(!(await page.evaluate((id) => NetMap.model.buildIndex(NetMap.app.S.p).ports[id].module, ids[1])), 'Delete removes the selected module');
+    assert.ok(await page.evaluate((id) => !!NetMap.model.buildIndex(NetMap.app.S.p).ports[id].module, ids[0]), 'the original stays');
+    await page.evaluate(() => NetMap.app.api.loadProject(NetMap.builder.buildDemoProject()));
+  });
+
   await step('mobile view mode layout', async () => {
     await m.waitForSelector('#vp [data-kind="object"]');
     assert.ok(!(await m.isVisible('#toolbar')));

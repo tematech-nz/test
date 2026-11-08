@@ -88,7 +88,7 @@
     return trace.path.map(function (s) {
       var line = { type: s.type, id: s.id };
       if (s.type === 'port') {
-        line.text = M.portName(p, s.id, idx); line.objectId = idx.portObj[s.id] && idx.portObj[s.id].id;
+        line.text = M.portName(p, s.id, idx) + (idx.ports[s.id] && idx.ports[s.id].module ? ' [module ' + idx.ports[s.id].module.name + ']' : ''); line.objectId = idx.portObj[s.id] && idx.portObj[s.id].id;
         line.maps = line.objectId ? M.mapsFor(p, 'object', line.objectId) : [];
       } else if (s.type === 'patch') {
         line.text = 'Patch cable ' + idx.cables[s.id].name + ' (' + idx.cables[s.id].cableType + ')'; line.cableId = s.id;

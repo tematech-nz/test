@@ -343,9 +343,16 @@
           if (groupSet[pt.id]) { fill = '#e1bee7'; stroke = '#8e24aa'; sw = 2.5; }
           if (prevSet[pt.id]) { fill = prev.ok ? '#c8e6c9' : '#ffcdd2'; stroke = prev.ok ? '#2e7d32' : '#c62828'; sw = 2.5; }
           var netBar = pt.networkColor ? '<rect x="' + num(abs.x) + '" y="' + num(abs.y + abs.h - 4) + '" width="' + num(abs.w) + '" height="4" rx="1" fill="' + esc(pt.networkColor) + '" stroke="#333" stroke-width="0.6" pointer-events="none"/>' : '';
-          x.push('<g data-kind="port" data-id="' + esc(pt.id) + '"><title>' + esc(ref.name + ' / ' + pt.label + (pt.side === 'rear' ? ' (rear)' : '') + (pt.role ? ' (' + pt.role.toUpperCase() + ')' : '') + (pt.portType ? ' [' + pt.portType + ']' : '') + (pt.description ? ' - ' + pt.description : '') + (M.portGroupOf(ref, pt.id) ? ' [' + M.portGroupOf(ref, pt.id).name + ']' : '') + (M.effectivePortIp(ref, pt) ? ' ' + M.effectivePortIp(ref, pt) : '')) + '</title>' +
+          // a module in an SFP port: a dark box over the upper part of the port with its name (amber edge fibre, cyan edge copper)
+          var modBox = '', mod = pt.module && M.isSfpType(pt.portType) ? pt.module : null, modSel = mod && sel && sel.kind === 'module' && sel.id === pt.id;
+          if (mod) {
+            var mh = Math.max(8, abs.h * 0.48), mw = abs.w - 2;
+            modBox = '<g data-module="' + esc(pt.id) + '"><rect x="' + num(abs.x + 1) + '" y="' + num(abs.y + 1) + '" width="' + num(mw) + '" height="' + num(mh) + '" rx="1.5" fill="#263238" stroke="' + (modSel ? SEL : (mod.kind === 'copper' ? '#00acc1' : '#ef6c00')) + '" stroke-width="' + (modSel ? 2.2 : 1.3) + '"/>' +
+              '<text x="' + num(abs.x + abs.w / 2) + '" y="' + num(abs.y + 1 + mh / 2 + 2.5) + '" font-size="' + num(Math.min(7, mh * 0.8)) + '" text-anchor="middle" fill="' + (mod.kind === 'copper' ? '#80deea' : '#ffcc80') + '" font-weight="bold" font-family="sans-serif" pointer-events="none">' + esc(trunc(mod.name, Math.max(1, Math.floor(mw / 4.2)))) + '</text></g>';
+          }
+          x.push('<g data-kind="port" data-id="' + esc(pt.id) + '"><title>' + esc(ref.name + ' / ' + pt.label + (pt.side === 'rear' ? ' (rear)' : '') + (pt.role ? ' (' + pt.role.toUpperCase() + ')' : '') + (pt.portType ? ' [' + pt.portType + ']' : '') + (pt.module ? ' - module ' + pt.module.name + (pt.module.description ? ': ' + pt.module.description : '') : '') + (pt.description ? ' - ' + pt.description : '') + (M.portGroupOf(ref, pt.id) ? ' [' + M.portGroupOf(ref, pt.id).name + ']' : '') + (M.effectivePortIp(ref, pt) ? ' ' + M.effectivePortIp(ref, pt) : '')) + '</title>' +
             '<rect data-kind="port" data-id="' + esc(pt.id) + '" x="' + num(abs.x) + '" y="' + num(abs.y) + '" width="' + num(abs.w) + '" height="' + num(abs.h) + '" rx="2" fill="' + fill + '" stroke="' + stroke + '" stroke-width="' + sw + '"' + (pt.side === 'rear' ? ' stroke-dasharray="3 1"' : '') + '/>' +
-            '<text x="' + num(abs.x + abs.w / 2) + '" y="' + num(abs.y + abs.h / 2 + 3) + '" font-size="' + num(Math.min(9, abs.h * 0.55)) + '" text-anchor="middle" fill="#111" font-family="sans-serif" pointer-events="none">' + esc(trunc(pt.label, Math.max(1, Math.floor(abs.w / 5.5)))) + '</text>' + netBar + '</g>');
+            '<text x="' + num(abs.x + abs.w / 2) + '" y="' + num(mod ? abs.y + abs.h - 3 : abs.y + abs.h / 2 + 3) + '" font-size="' + num(mod ? Math.min(7, abs.h * 0.3) : Math.min(9, abs.h * 0.55)) + '" text-anchor="middle" fill="#111" font-family="sans-serif" pointer-events="none">' + esc(trunc(pt.label, Math.max(1, Math.floor(abs.w / 5.5)))) + '</text>' + netBar + modBox + '</g>');
         });
       }
       if (ghost) {

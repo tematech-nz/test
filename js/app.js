@@ -144,6 +144,7 @@
     if (!S.sel) return true;
     const idx = M.buildIndex(S.p), k = S.sel.kind, id = S.sel.id;
     if (k === 'pgroup') return !!M.findPortGroup(S.p, id);
+    if (k === 'module') return !!(idx.ports[id] && idx.ports[id].module);
     if (k === 'fline' || k === 'fpoint' || k === 'flink' || k === 'flabel') { const f = isFloor() ? floorOf() : null; return !!f && !!({ fline: FL.lineById(f, id), fpoint: FL.pt(f, id), flink: FL.linkById(f, id), flabel: FL.labelById(f, id) }[k]); }
     const t = { group: idx.groups, object: idx.objects, port: idx.ports, cable: idx.cables, link: idx.links, wire: idx.wires }[k];
     return !!(t && t[id]);
@@ -201,7 +202,7 @@
     let rects = [];
     const add = (r) => { if (r) rects.push(r); };
     if (kind === 'group' || kind === 'object') add(pls(id));
-    else if (kind === 'port') add(S.geo && S.geo.portGeo[id]);
+    else if (kind === 'port' || kind === 'module') add(S.geo && S.geo.portGeo[id]);
     else if (kind === 'pgroup') { const f = M.findPortGroup(S.p, id); if (f) f.group.portIds.forEach((pid) => add(S.geo && S.geo.portGeo[pid])); }
     else if (kind === 'cable') { const c = idx.cables[id]; if (c) [c.aPortId, c.bPortId].forEach((pid) => add(S.geo && S.geo.portGeo[pid])); }
     else if (kind === 'link') { const l = idx.links[id]; if (l) { add(pls(l.aObjectId)); add(pls(l.bObjectId)); } }
@@ -490,6 +491,8 @@
         return;
       }
     }
+    const mb = target.closest ? target.closest('[data-module]') : null; // the dark box of a module selects the module (tools and Ctrl+click still act on the port under it)
+    if (mb && el && !S.tool && !S.pgroup && !(ev && (ev.ctrlKey || ev.metaKey))) { select({ kind: 'module', id: mb.dataset.module }); return; }
     if (isEdit() && !S.tool && ev && (ev.ctrlKey || ev.metaKey) && el && el.dataset.kind === 'port') { pickGroupPort(el.dataset.id, ev.shiftKey); return; }
     if (S.pgroup) {
       if (el && el.dataset.kind === 'port' && el.dataset.id !== undefined) {
@@ -922,7 +925,7 @@
       pane.innerHTML = '<h3>Nothing selected</h3><div class="sub">Tap an object, port, cable or fixed link on the map to see details. Use the search box to find a port, cable or wire by label or ID.</div>' +
         '<div class="btn-row">' + btn('help', 'Help') + '</div>';
     } else {
-      const d = { group: detGroup, object: detObject, port: detPort, cable: detCable, link: detLink, wire: detWire, pgroup: detPGroup, fline: detFloorLine, fpoint: detFloorPoint, flink: detFloorLink, flabel: detFloorLabel }[S.sel.kind];
+      const d = { group: detGroup, object: detObject, port: detPort, cable: detCable, link: detLink, wire: detWire, pgroup: detPGroup, module: detModule, fline: detFloorLine, fpoint: detFloorPoint, flink: detFloorLink, flabel: detFloorLabel }[S.sel.kind];
       forceView = !!S.selGhost;
       pane.innerHTML = (S.selGhost && (S.sel.kind === 'object' || S.sel.kind === 'group') ? '<div class="msg-box">Live copy of an item on another map: shown read-only. <a class="lnk" data-act="openOriginal" data-kind="' + S.sel.kind + '" data-id="' + esc(S.sel.id) + '">Open the original to edit it</a> (or double-click the copy).</div>' : '') + (!S.selGhost && onAll() && (S.sel.kind === 'object' || S.sel.kind === 'group') ? '<div class="msg-box">Overview copy: shown read-only here. Edit it on its own map: ' + mapsLine(S.sel.kind, S.sel.id) + '</div>' : '') + d(S.sel.id);
     }
@@ -1135,6 +1138,27 @@
     input.value = text; input.focus(); input.setSelectionRange(text.length, text.length);
     try { if (input.showPicker) input.showPicker(); } catch (_) { /* the browser shows the list as soon as you type or press the down arrow */ }
   }
+  /* the module in an SFP port: its own name and description, a kind that decides the leads the port takes; Ctrl+C / Ctrl+V copies it to other SFP ports */
+  function modulePortSection(pt) {
+    if (!M.isSfpType(pt.portType)) return '';
+    if (pt.module) return fld('Module', lnk('module', pt.id, pt.module.name) + ' <span class="sub">' + esc(M.moduleKindLabel(pt.module.kind)) + '</span>');
+    if (!isEdit()) return '';
+    return fld('Module', btn('fitModule', 'Fit module', 'data-id="' + esc(pt.id) + '"') + (S.clipMod ? ' ' + btn('pasteModule', 'Paste ' + S.clipMod.name, 'data-id="' + esc(pt.id) + '"') : ''));
+  }
+  function detModule(id) {
+    const idx = M.buildIndex(S.p), pt = idx.ports[id], o = idx.portObj[id];
+    if (!pt || !pt.module) return '<h3>Module</h3><div class="sub">This module is no longer fitted.</div>';
+    const m = pt.module;
+    let h = '<h3>Module</h3>' + fld('Fitted in', lnk('port', pt.id, o.name + ' / ' + pt.label));
+    if (isEdit()) {
+      h += fld('Name', '<input type="text" data-f="modname" data-t="' + esc(id) + '" value="' + esc(m.name) + '">') +
+        fld('Kind', '<select data-f="modkind" data-t="' + esc(id) + '">' + opts(M.MODULE_KINDS, m.kind) + '</select>') +
+        fld('Description', '<textarea data-f="moddesc" data-t="' + esc(id) + '" rows="3" style="width:100%" placeholder="e.g. 10G-LR single-mode, 1310 nm, 10 km">' + esc(m.description || '') + '</textarea>');
+    } else h += fld('Name', '<div class="ro">' + esc(m.name) + '</div>') + fld('Kind', '<div class="ro">' + esc(M.moduleKindLabel(m.kind)) + '</div>') + fld('Description', '<div class="ro">' + esc(m.description || '') + '</div>');
+    h += '<div class="sub">' + (m.kind === 'fibre' ? 'A fibre module takes fibre leads only.' : 'A copper module takes Cat leads and DAC.') + (isEdit() ? ' Ctrl+C copies it; select another SFP port and press Ctrl+V to fit a copy.' : '') + '</div>';
+    if (isEdit()) h += '<div class="btn-row">' + btn('copyModule', 'Copy module', 'data-id="' + esc(id) + '"') + btn('removeModule', 'Remove module', 'data-id="' + esc(id) + '"', 'danger') + '</div>';
+    return h;
+  }
   function detPort(id) {
     const idx = M.buildIndex(S.p), pt = idx.ports[id], o = idx.portObj[id];
     let h = '<h3>Port</h3>' + fld('Equipment', lnk('object', o.id, o.name)) + inp('Number', 'plabel', pt.label, pt.id) + inp('Label', 'pdesc', pt.description || '', pt.id, 'placeholder="shown on hover"');
@@ -1144,6 +1168,7 @@
     if (o.type === 'router') h += isEdit() ? fld('Network colour', colorPicker('netPreset', 'pnet', pt.networkColor || '', 'net:' + pt.id, { value: '', label: 'none', swatch: 'transparent', dt: pt.id }) + '<div class="sub">New patch cables extending from this port default to this colour.</div>') : (pt.networkColor ? fld('Network colour', '<span class="swatch" style="background:' + esc(pt.networkColor) + '"></span>') : '');
     if (o.type === 'router' || o.type === 'generic') h += portTypeField(o, pt);
     if (o.type === 'switch' || o.type === 'mediaconverter') h += portTypeField(o, pt) + inp('Speed', 'pspeed', pt.speed || '', pt.id) + inp('Media', 'pmedia', pt.media || '', pt.id);
+    h += modulePortSection(pt);
     h += fld('Connection', portState(o, pt, idx));
     h += '<div class="btn-row">' + btn('trace', 'Trace connection', 'data-kind="port" data-id="' + esc(id) + '"', 'primary');
     if (isEdit()) {
@@ -1419,6 +1444,25 @@
     S.clip = clip;
     if (!quiet) toast('Copied ' + M.findContainer(S.p, sel.id).item.name + ' - Ctrl+V to paste (connections and IP addresses are not copied)');
     return true;
+  }
+  /* modules are not placed freely: Ctrl+C remembers one, Ctrl+V fits a copy into the selected (empty or other) SFP port */
+  function moduleOf(portId) { const pt = M.buildIndex(S.p).ports[portId]; return pt && pt.module ? pt : null; }
+  function copyModule(portId, quiet) {
+    const pt = moduleOf(portId); if (!pt) return false;
+    S.clipMod = JSON.parse(JSON.stringify(pt.module));
+    if (!quiet) toast('Copied module ' + S.clipMod.name + ' - select an SFP port and press Ctrl+V');
+    return true;
+  }
+  function modulePortOfSel() { return S.sel && (S.sel.kind === 'module' || S.sel.kind === 'port') ? S.sel.id : null; }
+  function pasteModule(portId) {
+    if (!S.clipMod) { toast('Nothing copied yet: select a module and press Ctrl+C', true); return false; }
+    const base = S.clipMod.name.replace(/ \(Copy \d+\)$/, ''), names = {};
+    S.p.objects.forEach((o) => o.ports.forEach((q) => { if (q.module) names[q.module.name] = true; }));
+    let n = 1; while (names[base + ' (Copy ' + n + ')']) n++;
+    const spec = { name: base + ' (Copy ' + n + ')', kind: S.clipMod.kind, description: S.clipMod.description || '' };
+    const ok = commit('Paste module', (p) => M.installModule(p, portId, spec));
+    if (ok) { S.sel = { kind: 'module', id: portId }; showTab('details'); renderAll(); toast('Fitted ' + spec.name); }
+    return !!ok;
   }
   function pasteStart() {
     if (!S.clip) { toast('Nothing copied yet: select an item and press Ctrl+C', true); return; }
@@ -1977,6 +2021,7 @@
       if (await confirmDlg('Delete fixed link', 'Delete installed link <b>' + esc(l.name) + '</b> and all <b>' + l.wires.length + '</b> wire records? The panels stay.', 'Delete link', true)) commit('Delete fixed link', (p) => M.deleteFixedLink(p, sel.id));
       return;
     }
+    if (sel.kind === 'module') { commit('Remove module', (p) => M.removeModule(p, sel.id)); S.sel = { kind: 'port', id: sel.id }; renderAll(); return; }
     if (sel.kind !== 'group' && sel.kind !== 'object') return;
     if (S.selGhost) { S.sel = null; S.selGhost = false; removeFromThisMap(sel.id); return; } // a live copy: only the copy goes
     const c = M.findContainer(S.p, sel.id), kids = M.containerChildren(S.p, sel.id);
@@ -2396,6 +2441,7 @@
     const ok = commit('Edit ' + f, (p) => {
       const idx = M.buildIndex(p);
       if (f === 'pnet') { const pt = idx.ports[t || sel.id]; if (pt) { if (val) pt.networkColor = val; else delete pt.networkColor; } return; }
+      if (f === 'modname' || f === 'modkind' || f === 'moddesc') { M.updateModule(p, t, { [{ modname: 'name', modkind: 'kind', moddesc: 'description' }[f]]: val }); return; }
       if (f === 'pdesc') { const pt = idx.ports[t || sel.id]; if (pt) { if (val.trim()) pt.description = val.trim(); else delete pt.description; } return; }
       if (f === 'plabel' || f === 'ptype' || f === 'pspeed' || f === 'pmedia' || f === 'pip') {
         const pt = idx.ports[t || sel.id]; if (!pt) return;
@@ -2710,6 +2756,10 @@
       switch (d.act) {
         case 'select': select({ kind: d.kind, id: d.id }, !!a.closest('#tracePane')); break;
         case 'goto': goTo(d.kind, d.id, d.map, !!a.closest('#tracePane')); break;
+        case 'fitModule': commit('Fit module', (p) => M.installModule(p, d.id, {})); S.sel = { kind: 'module', id: d.id }; showTab('details'); renderAll(); break;
+        case 'removeModule': commit('Remove module', (p) => M.removeModule(p, d.id)); S.sel = { kind: 'port', id: d.id }; renderAll(); break;
+        case 'copyModule': copyModule(d.id); renderRight(); break;
+        case 'pasteModule': pasteModule(d.id); break;
         case 'trace': startTrace(d.kind, d.id); break;
         case 'clearTrace': clearTrace(); break;
         case 'fitTrace': fitTrace(); break;
@@ -2814,8 +2864,8 @@
       if (e.key === 'Escape') { if (S.place) cancelPlace(); else if (S.pgroup) { clearPgroup(); renderAll(); } else if (S.tool) cancelTool(); else if (S.trace) clearTrace(); else if (S.sel || S.multi.length) { S.sel = null; S.multi = []; renderAll(); } }
       else if (isEdit() && !typing && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); }
       else if (isEdit() && !typing && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') { e.preventDefault(); redo(); }
-      else if (isEdit() && !typing && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c') { if (S.sel && (S.sel.kind === 'object' || S.sel.kind === 'group')) { e.preventDefault(); copySelection(); } }
-      else if (isEdit() && !typing && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v') { if (S.clip) { e.preventDefault(); pasteStart(); } }
+      else if (isEdit() && !typing && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c') { if (S.sel && (S.sel.kind === 'object' || S.sel.kind === 'group')) { e.preventDefault(); copySelection(); } else if (modulePortOfSel() && moduleOf(modulePortOfSel())) { e.preventDefault(); copyModule(modulePortOfSel()); } }
+      else if (isEdit() && !typing && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v') { if (S.clipMod && modulePortOfSel()) { e.preventDefault(); pasteModule(modulePortOfSel()); } else if (S.clip) { e.preventDefault(); pasteStart(); } else if (S.clipMod) { e.preventDefault(); toast('Select an SFP port first, then press Ctrl+V', true); } }
       else if (isEdit() && !typing && (e.key === 'Delete')) deleteSelection();
       else if (isEdit() && !typing && !e.ctrlKey && !e.metaKey && !e.altKey && S.pgroup && (e.key === 'g' || e.key === 'G')) { e.preventDefault(); nameSelectedPorts(); }
       else if (!typing && !e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'w' || e.key === 'W')) { e.preventDefault(); startWire(); }

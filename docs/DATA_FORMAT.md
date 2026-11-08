@@ -39,6 +39,7 @@ compact files open identically (`compactProject()` / `expandProject()` in `js/mo
 - `type` is one of `rack`, `patchpanel`, `switch`, `router`, `internet`, `socket`, `mediaconverter`, `generic`.
 - `mediaconverter`: always two ports on the front, `ETH` (`portType` `RJ45`) and `SFP` (`portType` `SFP`), joined by one internal mapping (the only kind of mapping between two front ports). Routes pass through it like a patch panel.
 - `patchpanel` and `socket` objects carry `cableType` (free text, `Cat6` when created in the app): the medium of their jacks. Patch cables and fixed links whose `cableType` is of the other medium (copper vs fibre) are refused by the app and flagged `MEDIA_MISMATCH` by validation when a file already has them; an object without `cableType` accepts anything.
+- A port typed `SFP` / `SFP+` may carry `module: { name, kind: "fibre" | "copper", description }`. A fibre module refuses copper leads and a copper module refuses fibre leads (`MEDIA_MISMATCH` when a file already has such a lead); a module on a port that is not SFP is flagged `MODULE_NO_SFP`. `counters.module` numbers default module names (`SFP-001`).
 - A port's `portType` is free text; the app offers `RJ45`, `SFP`, `SFP+` and only allows SFP / SFP+ on uplink ports (`role: uplink`) of a switch. Cable types (`cableType`) are free text; names containing fibre/fiber, OM1-5 or OS1-2 count as fibre.
 - Generic equipment may carry `deviceKind` (`pc`, `laptop`, `ap`, `camera`, `printer`, `phone`, `server`; omitted = other), which only
   selects the icon and default name.

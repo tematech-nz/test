@@ -2364,6 +2364,45 @@ test('media converter (1 Ethernet + 1 SFP), SFP on uplink ports only, fibre cabl
   assert.strictEqual(T.tracePort(back, port(swA, 1)).path.length, tr.path.length);
 });
 
+test('modules: sit in SFP ports only, have name and description, decide which leads fit, copy to other ports, show in render and trace', () => {
+  const p = M.createProject('mod');
+  const sw = M.addObject(p, { type: 'switch', name: 'SW', portCount: 8 });
+  M.setUplinkPorts(p, sw.id, 3);
+  const up = sw.ports.filter(x => x.role === 'uplink'), front = sw.ports.filter(x => x.role !== 'uplink')[0];
+  assert.throws(() => M.installModule(p, up[0].id, {}), /SFP/);          // not an SFP port yet
+  up.forEach(u => M.setPortType(p, u.id, 'SFP+'));
+  const m = M.installModule(p, up[0].id, { name: 'LX-A', kind: 'fibre', description: '10G-LR' });
+  assert.strictEqual(up[0].module.name, 'LX-A'); assert.strictEqual(m.description, '10G-LR');
+  assert.throws(() => M.installModule(p, front.id, {}), /SFP/);          // never on a normal port
+  assert.throws(() => M.setPortType(p, up[0].id, 'RJ45'), /Remove the module/);
+  const pp = M.addObject(p, { type: 'patchpanel', name: 'PP', portCount: 4, cableType: 'Cat6' });
+  const pf = M.addObject(p, { type: 'patchpanel', name: 'PF', portCount: 4, cableType: 'Fibre OM3 (multimode)' });
+  const f1 = pf.ports.filter(x => x.side === 'front')[0], c1 = pp.ports.filter(x => x.side === 'front')[0];
+  assert.throws(() => M.addPatchCable(p, { aPortId: up[0].id, bPortId: c1.id }), /fibre module|copper/);   // fibre module refuses copper
+  const cab = M.addPatchCable(p, { aPortId: up[0].id, bPortId: f1.id });
+  assert.ok(M.isFibreCable(cab.cableType));
+  assert.throws(() => M.updateModule(p, up[0].id, { kind: 'copper' }), /plugged in/);   // a fibre lead is on it
+  M.installModule(p, up[1].id, { name: 'CU-B', kind: 'copper' });
+  assert.throws(() => M.addPatchCable(p, { aPortId: up[1].id, bPortId: pf.ports.filter(x => x.side === 'front')[1].id, cableType: 'Fibre OM3 (multimode)' }), /copper module/);
+  const c2 = M.addPatchCable(p, { aPortId: up[1].id, bPortId: pp.ports.filter(x => x.side === 'front')[1].id });
+  assert.strictEqual(c2.cableType, 'Cat6');
+  M.updateModule(p, up[1].id, { name: 'CU-C', description: 'copper SFP' });
+  assert.strictEqual(up[1].module.name, 'CU-C');
+  assert.throws(() => M.updateModule(p, up[1].id, { name: ' ' }), /name/);
+  // a copy goes on a copy of the data, not shared
+  const copy = JSON.parse(JSON.stringify(up[0].module)); M.installModule(p, up[2].id, copy);
+  up[2].module.name = 'other'; assert.strictEqual(up[0].module.name, 'LX-A');
+  // trace text and tooltip name the module; render draws the dark box
+  const tr = T.tracePort(p, up[0].id), txt = T.describe(p, tr).map(l => l.text).join('\n');
+  assert.ok(/\[module LX-A\]/.test(txt), txt);
+  M.removeModule(p, up[2].id); assert.ok(!up[2].module);
+  // legacy file: module on a non-SFP port is warned
+  front.module = { name: 'X', kind: 'fibre', description: '' };
+  assert.ok(M.validateProject(p).some(i => i.code === 'MODULE_NO_SFP'));
+  // round trip
+  const back = M.importProject(M.serializeProject(p)).project;
+  assert.strictEqual(M.buildIndex(back).ports[up[0].id].module.name, 'LX-A');
+});
 test('cable type: fixed links need panels of their medium; port types and media converters check the lead too; old files are warned', () => {
   const p = M.createProject('media2');
   const pp = (n, ct) => M.addObject(p, { type: 'patchpanel', name: n, portCount: 4, straight: true, cableType: ct });
