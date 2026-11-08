@@ -37,7 +37,8 @@
   function setStatus() {
     const el = $('saveStatus');
     let cls = '', txt;
-    if (S.saveErr) { cls = 'err'; txt = 'SAVE ERROR - export a JSON backup now'; }
+    if (S.demo) { cls = 'dirty'; txt = 'DEMO - not saved, refresh the page to return to your project'; }
+    else if (S.saveErr) { cls = 'err'; txt = 'SAVE ERROR - export a JSON backup now'; }
     else if (S.unsaved) { cls = 'dirty'; txt = 'Unsaved changes...'; }
     else {
       txt = 'Autosaved ' + (S.savedAt ? time(S.savedAt) : '') + ' (browser only)';
@@ -52,9 +53,10 @@
     S.fileDirty = on;
     try { localStorage.setItem(KEY_DIRTY, on ? '1' : '0'); } catch (_) { /* ignore */ }
   }
-  function scheduleSave(quiet) { if (!quiet) { S.unsaved = true; markDirty(true); setStatus(); } clearTimeout(saveT); saveT = setTimeout(saveNow, 600); }
+  function scheduleSave(quiet) { if (S.demo) { setStatus(); return; } if (!quiet) { S.unsaved = true; markDirty(true); setStatus(); } clearTimeout(saveT); saveT = setTimeout(saveNow, 600); }
   function saveNow() {
     clearTimeout(saveT);
+    if (S.demo) { setStatus(); return; } // the demo is only for looking: the browser keeps the real project
     try { localStorage.setItem(KEY, M.serializeProject(S.p)); S.unsaved = false; S.saveErr = null; S.savedAt = new Date(); }
     catch (e) { S.saveErr = e.message || 'storage error'; }
     setStatus();
@@ -2545,14 +2547,16 @@
     loadProject(res.project);
     toast('Imported ' + res.project.name);
   }
-  function loadProject(p) {
+  function loadProject(p, opts) {
+    if (!S.demo && opts && opts.demo) saveNow(); // keep the real project's latest changes before the demo takes over the screen
+    S.demo = !!(opts && opts.demo);
     M.syncAllMap(p);
     const fixed = B.normalizeSizes(p), aligned = B.alignToGrid(p);
     M.syncGhosts(p); // sizes and grid alignment moved real items: the overview links follow
     if (fixed) setTimeout(() => toast('Adjusted ' + fixed + ' item(s) (too small to read, or not lined up with their rack)', false), 100);
     else if (aligned) setTimeout(() => toast('Aligned ' + aligned + ' item(s) to the grid (older project)', false), 100);
     Object.keys(BG).forEach((k) => { URL.revokeObjectURL(BG[k].href); delete BG[k]; }); // tracing images belong to the page session, not to a project
-    S.rev++; markDirty(false); S.p = p; S.mapId = firstMap().id; S.sel = null; S.multi = []; S.trace = null; S.tool = null; S.undo = []; S.redo = []; S.issues = []; S.showIssues = false;
+    S.rev++; if (S.demo) S.fileDirty = false; else markDirty(false); S.p = p; S.mapId = firstMap().id; S.sel = null; S.multi = []; S.trace = null; S.tool = null; S.undo = []; S.redo = []; S.issues = []; S.showIssues = false;
     saveNow(); renderAll();
     if (p.placements.some((q) => q.mapId === S.mapId)) fitMap();
   }
@@ -2587,7 +2591,7 @@
     else if (choice === 'svg' || choice === 'png' || choice === 'pdf') exportImages(choice);
     else if (choice === 'table') showTable();
     else if (choice === 'validate') runValidate();
-    else if (choice === 'demo') { if (await confirmDlg('Load demo project', 'Replace the current project with the demo? Export a backup first if you need the current one.', 'Load demo', true)) { loadProject(B.buildShowcaseProject()); } }
+    else if (choice === 'demo') { if (await confirmDlg('Load demo project', 'Show the demo project? It is not saved: refresh the page to return to your project (changes you made so far are kept).', 'Load demo', true)) { loadProject(B.buildShowcaseProject(), { demo: true }); } }
     else if (choice === 'new') { if (await confirmDlg('New project', 'Replace the current project with an empty one? Export a backup first if you need it.', 'Start empty', true)) loadProject(M.createProject('Untitled project')); }
     else if (choice === 'help') showHelp();
   }
@@ -2630,7 +2634,7 @@
         body: body,
         buttons: [{ key: 'demo', label: 'Load demo project' }, { key: 'x', label: 'Got it', cls: 'primary' }]
       }), onButton: (k, c) => c.close(k)
-    }).then(async (k) => { if (k === 'demo' && (!S.p.objects.length || await confirmDlg('Load demo project', 'Replace the current project with the demo? Export a backup first if you need the current one.', 'Load demo', true))) loadProject(B.buildShowcaseProject()); });
+    }).then(async (k) => { if (k === 'demo' && (!S.p.objects.length || await confirmDlg('Load demo project', 'Show the demo project? It is not saved: refresh the page to return to your project (changes you made so far are kept).', 'Load demo', true))) loadProject(B.buildShowcaseProject(), { demo: true }); });
   }
 
   /* ---------------------------------------------------------------- wiring up */
@@ -2838,7 +2842,7 @@
         case 'newMap': mapForm(null); break;
         case 'editMap': e.stopPropagation(); mapForm(S.p.maps.find((m) => m.id === d.id)); break;
         case 'validate': runValidate(); break;
-        case 'demo': loadProject(B.buildShowcaseProject()); break;
+        case 'demo': loadProject(B.buildShowcaseProject(), { demo: true }); break;
         case 'help': showHelp(); break;
         default: break;
       }

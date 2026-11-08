@@ -2350,6 +2350,20 @@ const ok = (m) => console.log('  ok   ' + m);
     await page.evaluate(() => NetMap.app.api.loadProject(NetMap.builder.buildDemoProject()));
   });
 
+  await step('the demo project is never saved: a refresh returns to the real project', async () => {
+    await page.evaluate(() => { NetMap.app.api.loadProject(NetMap.model.createProject('Mine')); NetMap.app.api.commit('real', (p) => { NetMap.model.addObject(p, { type: 'generic', name: 'REAL-ONE', portCount: 1 }); }); });
+    await page.waitForTimeout(900); // autosave
+    await page.evaluate(() => NetMap.app.api.loadProject(NetMap.builder.buildShowcaseProject(), { demo: true }));
+    await page.evaluate(() => NetMap.app.api.commit('edit in demo', (p) => { NetMap.model.addObject(p, { type: 'generic', name: 'DEMO-EDIT', portCount: 1 }); }));
+    await page.waitForTimeout(900);
+    assert.ok(/DEMO/.test(await page.textContent('#saveStatus')), 'the status says it is a demo');
+    const stored = await page.evaluate(() => Object.keys(localStorage).map((k) => localStorage.getItem(k)).join('\n'));
+    assert.ok(stored.indexOf('REAL-ONE') >= 0 && stored.indexOf('DEMO-EDIT') < 0, 'storage still holds the real project');
+    await page.reload(); await page.waitForFunction(() => window.NetMap && NetMap.app && NetMap.app.S && NetMap.app.S.p);
+    assert.ok(await page.evaluate(() => NetMap.app.S.p.objects.some((o) => o.name === 'REAL-ONE') && !NetMap.app.S.p.objects.some((o) => o.name === 'DEMO-EDIT')), 'refresh brings the real project back');
+    await page.evaluate(() => NetMap.app.api.loadProject(NetMap.builder.buildDemoProject()));
+  });
+
   await step('mobile view mode layout', async () => {
     await m.waitForSelector('#vp [data-kind="object"]');
     assert.ok(!(await m.isVisible('#toolbar')));
