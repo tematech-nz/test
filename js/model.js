@@ -16,9 +16,10 @@
   /* the medium of a cable type text: 'fibre', 'copper' (Cat..., DAC) or '' when it cannot be told */
   function mediumOf(t) {
     if (isFibreCable(t)) return 'fibre';
-    return /\bcat\s?\d|utp|ftp|stp|copper|\bcu\b|rj45|dac|twinax/i.test(String(t || '')) ? 'copper' : '';
+    return /\bcat\s?\d|\b(?:utp|ftp|stp|sftp|copper|cu|rj45|dac|twinax)\b/i.test(String(t || '')) ? 'copper' : '';
   }
-  var isDac = function (t) { return /dac|twinax/i.test(String(t || '')); };
+  var isDac = function (t) { return /\b(?:dac|twinax)\b/i.test(String(t || '')); };
+  function mediumName(m) { return m === 'fibre' ? 'fibre' : 'copper'; }
   /*
    * Does a cable of this type fit this port? Patch panels and wall sockets have a cable type of their own (their jacks are copper or
    * fibre), ports can be typed RJ45 / SFP, and the SFP side of a media converter is fibre. Unknown (no type) never blocks.
@@ -30,7 +31,7 @@
     var nm = portName(p, portId, idx);
     if (isTermination(o)) {
       var pm = mediumOf(o.cableType);
-      if (pm && pm !== mc) return nm + ' is on a ' + (pm === 'fibre' ? 'fibre' : 'copper') + ' panel (' + o.cableType + '): a ' + (mc === 'fibre' ? 'fibre' : 'copper') + ' cable (' + cableType + ') does not fit';
+      if (pm && pm !== mc) return nm + ' is on a ' + mediumName(pm) + ' panel (' + o.cableType + '): a ' + mediumName(mc) + ' cable (' + cableType + ') does not fit';
     }
     if (/^RJ45$/i.test(pt.portType || '')) {
       if (mc === 'fibre') return nm + ' is an RJ45 port: a fibre cable (' + cableType + ') does not fit';
@@ -49,7 +50,7 @@
     var mc = mediumOf(cableType);
     if (!mc) return null;
     var bad = [a, b].filter(function (o) { var pm = mediumOf(o.cableType); return pm && pm !== mc; })[0];
-    if (bad) return bad.name + ' is a ' + (mediumOf(bad.cableType) === 'fibre' ? 'fibre' : 'copper') + ' panel (' + bad.cableType + '): a ' + (mc === 'fibre' ? 'fibre' : 'copper') + ' link (' + cableType + ') does not fit';
+    if (bad) return bad.name + ' is a ' + mediumName(mediumOf(bad.cableType)) + ' panel (' + bad.cableType + '): a ' + mediumName(mc) + ' link (' + cableType + ') does not fit';
     return null;
   }
   /* what a new patch cable should be: the cable type of the panel or socket it plugs into, else fibre between two SFP ports, else Cat6 */
@@ -809,6 +810,8 @@
     var mt = mediumOf(type);
     if (mt) {
       var own = {}; o.ports.forEach(function (pt) { own[pt.id] = true; });
+      var badPort = o.ports.filter(function (pt) { return mt === 'fibre' ? /^RJ45$/i.test(pt.portType || '') : isSfpType(pt.portType); })[0];
+      if (badPort) throw new Error(o.name + ' has ' + badPort.portType + ' ports: a ' + mediumName(mt) + ' panel does not fit them');
       var c = p.patchCables.filter(function (x) { return (own[x.aPortId] || own[x.bPortId]) && mediumOf(x.cableType) && mediumOf(x.cableType) !== mt; })[0];
       if (c) throw new Error(c.name + ' (' + c.cableType + ') is plugged into ' + o.name + ': change or remove it first');
       var l = p.fixedLinks.filter(function (x) { return (x.aObjectId === o.id || x.bObjectId === o.id) && mediumOf(x.cableType) && mediumOf(x.cableType) !== mt; })[0];
@@ -1015,7 +1018,10 @@
   function updateLinkMeta(p, id, patch) {
     var l = p.fixedLinks.filter(function (x) { return x.id === id; })[0];
     if (!l) throw new Error('Link not found');
-    if (patch.cableType !== undefined) { var le = linkFits(buildIndex(p).objects[l.aObjectId], buildIndex(p).objects[l.bObjectId], patch.cableType); if (le) throw new Error(le); }
+    if (patch.cableType !== undefined) {
+      var ix = buildIndex(p), la = ix.objects[l.aObjectId], lb = ix.objects[l.bObjectId], le = la && lb ? linkFits(la, lb, patch.cableType) : null;
+      if (le) throw new Error(le);
+    }
     ['name', 'cableType', 'length', 'route', 'status'].forEach(function (k) { if (patch[k] !== undefined) l[k] = patch[k]; });
   }
   function updateWireStatus(p, wireId, status) {
@@ -1281,8 +1287,10 @@
       if (okA.side === 'rear' || okB.side === 'rear') add('error', 'INCOMPATIBLE', 'Patch cable ' + c.name + ' is connected to a rear termination', 'cable', c.id);
       count(c.aPortId, c.name); count(c.bPortId, c.name);
       var ta = idx.ports[c.aPortId].portType, tb = idx.ports[c.bPortId].portType;
-      var fit = cableFits(p, c.aPortId, c.bPortId, c.cableType, idx);
-      if (fit && !(isFibreCable(c.cableType) && (/^RJ45$/i.test(ta || '') || /^RJ45$/i.test(tb || '')))) add('warning', 'MEDIA_MISMATCH', 'Patch cable ' + c.name + ': ' + fit, 'cable', c.id);
+      [c.aPortId, c.bPortId].forEach(function (pid) { // the RJ45 + fibre case has its own warning below
+        var fit = cableFitsPort(p, pid, c.cableType, idx);
+        if (fit && !/RJ45 port: a fibre/.test(fit)) add('warning', 'MEDIA_MISMATCH', 'Patch cable ' + c.name + ': ' + fit, 'cable', c.id);
+      });
       if (isFibreCable(c.cableType) && (/^RJ45$/i.test(ta || '') || /^RJ45$/i.test(tb || ''))) add('warning', 'FIBRE_ON_RJ45', 'Patch cable ' + c.name + ' is fibre but one end is an RJ45 port', 'cable', c.id);
       else if ((/^RJ45$/i.test(ta || '') && isSfpType(tb)) || (/^RJ45$/i.test(tb || '') && isSfpType(ta))) add('warning', 'RJ45_SFP', 'Patch cable ' + c.name + ' joins an RJ45 port to an SFP port: that needs a media converter or a copper SFP module', 'cable', c.id);
     });
