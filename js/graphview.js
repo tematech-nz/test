@@ -6,10 +6,7 @@
   var M = NM.model, TP = NM.topology;
   var esc = function (s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); };
 
-  var COLORS = {
-    router: ['#e3f2fd', '#1565c0'], 'switch': ['#e6f4ea', '#2e7d32'], internet: ['#fff3cd', '#e65100'],
-    socket: ['#f3e5f5', '#7b1fa2'], generic: ['#ffffff', '#777']
-  };
+  var COLORS = NM.model.TYPE_COLORS;
   var NW = 168, NH = 50, XG = 70, YG = 16;
 
   function defaultRoot(graph) {

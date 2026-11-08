@@ -146,6 +146,7 @@
     var ks = sidesOf(obj), cols = 4, extra = 0;
     ks.forEach(function (k) { var g = gridOf(obj, k, avail); cols = Math.max(cols, g.cols); extra = Math.max(extra, (g.perRow || 1) - 1); });
     var w = cols * cellFor(obj) + PADX * 2 + (SECTIONED[obj.type] ? 6 : 0) + extra * SGAP;
+    if (obj.type === 'generic' || obj.type === 'mediaconverter') w = Math.max(w, 100) + iconW(obj);
     if (obj.type === 'socket') w = Math.max(w, 96);
     if (obj.type === 'router') w = Math.max(w, 150);
     return { w: w, h: panelHeight(obj, {}, avail) };

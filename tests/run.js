@@ -2404,6 +2404,12 @@ test('modules: sit in SFP ports only, have name and description, decide which le
   const back = M.importProject(M.serializeProject(p)).project;
   assert.strictEqual(M.buildIndex(back).ports[up[0].id].module.name, 'LX-A');
 });
+test('media converter: its internal join cannot be removed; graph and map share one colour table', () => {
+  const p = M.createProject('mc'), mc = M.addObject(p, { type: 'mediaconverter', name: 'MC' });
+  assert.throws(() => M.removeInternalMapping(p, p.internalMappings[0].id), /fixed/);
+  assert.strictEqual(p.internalMappings.length, 1);
+  assert.ok(M.TYPE_COLORS.mediaconverter && M.TYPE_COLORS.generic);
+});
 test('cable type: fixed links need panels of their medium; port types and media converters check the lead too; old files are warned', () => {
   const p = M.createProject('media2');
   const pp = (n, ct) => M.addObject(p, { type: 'patchpanel', name: n, portCount: 4, straight: true, cableType: ct });

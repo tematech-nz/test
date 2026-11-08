@@ -2612,7 +2612,7 @@
       li('Click a port, cable or device to see its details. <b>Trace</b> follows the complete path across patch panels, fixed links and even <b>across maps</b>.') +
       li('<b>Graph</b> shows how devices interconnect and what can reach what (through switches, routers, port isolation).') + '</ul>' +
       '<h3>2. Build it (press Edit)</h3><ul>' +
-      li('Use the toolbar to add a <b>Group</b> (room, building), <b>Rack</b>, <b>Patch panel</b>, <b>Switch</b>, <b>Router</b>, <b>Wall socket</b>, <b>Generic device</b> (PC, camera, AP...) or <b>Internet</b>. The new item sticks to the pointer: click to drop it, <b>Ctrl+click</b> for several. Drop equipment into a rack or group to put it inside.') +
+      li('In edit mode use the <b>+ Add element</b> list to add a <b>Group</b> (room, building), <b>Rack</b>, <b>Patch panel</b>, <b>Switch</b>, <b>Router</b>, <b>Wall socket</b>, <b>Media converter</b> (Ethernet to fibre), <b>Generic device</b> (PC, camera, AP...) or <b>Internet</b>. The new item sticks to the pointer: click to drop it, <b>Ctrl+click</b> for several. Drop equipment into a rack or group to put it inside.') +
       li('<b>Ctrl+C / Ctrl+V</b> (or "Copy / duplicate") copies an item with its settings, named "... (Copy N)"; cables and IPs are not copied.') +
       li('Panels, switches and routers have sections, uplinks, rows, "full width", folding (click the <b>^</b> on a strip). Change them in the details panel.') + '</ul>' +
       '<h3>3. Connect it</h3><ul>' +

@@ -50,10 +50,7 @@
   var LINE_STYLE = {
     wall: { color: '#37474f', width: 10 }, door: { color: '#8d6e63', width: 6 }, window: { color: '#039be5', width: 6 }, furniture: { color: '#78909c', width: 2 }
   };
-  var LINK_STYLE = {
-    rack: ['#cfd8dc', '#37474f'], socket: ['#f3e5f5', '#7b1fa2'], patchpanel: ['#fdf6e3', '#b58900'], 'switch': ['#e6f4ea', '#2e7d32'], router: ['#e3f2fd', '#1565c0'],
-    internet: ['#fff3cd', '#e65100'], mediaconverter: ['#e0f7fa', '#00838f'], generic: ['#ffffff', '#555'], group: ['#bbdefb', '#1565c0']
-  };
+  var LINK_STYLE = NM.model.TYPE_COLORS;
   function renderFloor(p, mapId, opts) {
     var F = NM.floor, map = p.maps.filter(function (m) { return m.id === mapId; })[0], f = F.ensure(map);
     var mode = opts.mode || 'view', editing = mode === 'edit', exporting = mode === 'export', sel = opts.selection || null;
